@@ -22,14 +22,6 @@ pub enum ContractError {
     NotAdmin = 1,
     InsufficientQuorum = 2,
     InsufficientBalance = 3,
-    /// `initialize` was called after the contract was already set up.
-    AlreadyInitialized = 4,
-    /// The admins vector passed to `initialize` was empty.
-    EmptyAdmins = 5,
-    /// `quorum` was zero or exceeded the number of admins.
-    InvalidQuorum = 6,
-    /// The admins vector contained duplicate addresses.
-    DuplicateAdmin = 7,
 }
 
 #[contract]
@@ -38,33 +30,14 @@ pub struct Treasury;
 #[contractimpl]
 impl Treasury {
     /// Initialize the treasury with a list of admin addresses and a quorum threshold.
-    ///
-    /// # Errors
-    /// - [`ContractError::AlreadyInitialized`] — called more than once.
-    /// - [`ContractError::EmptyAdmins`] — `admins` is empty.
-    /// - [`ContractError::InvalidQuorum`] — `quorum` is 0 or greater than `admins.len()`.
-    /// - [`ContractError::DuplicateAdmin`] — `admins` contains duplicate addresses.
     pub fn initialize(env: Env, admins: Vec<Address>, quorum: u32) {
+        // Store admins and quorum only once
         if env.storage().instance().has(&DataKey::Admins) {
-            panic_with_error!(&env, ContractError::AlreadyInitialized);
-        }
-        if admins.is_empty() {
-            panic_with_error!(&env, ContractError::EmptyAdmins);
-        }
-        let n = admins.len();
-        if quorum == 0 || quorum > n {
-            panic_with_error!(&env, ContractError::InvalidQuorum);
-        }
-        // O(n²) duplicate check — admin lists are expected to be small
-        for i in 0..n {
-            for j in (i + 1)..n {
-                if admins.get(i).unwrap() == admins.get(j).unwrap() {
-                    panic_with_error!(&env, ContractError::DuplicateAdmin);
-                }
-            }
+            panic!("already initialized");
         }
         env.storage().instance().set(&DataKey::Admins, &admins);
         env.storage().instance().set(&DataKey::Quorum, &quorum);
+        // Initialize empty balances map
         let balances: Map<(Address, Address), i128> = Map::new(&env);
         env.storage().instance().set(&DataKey::Balances, &balances);
         env.events()

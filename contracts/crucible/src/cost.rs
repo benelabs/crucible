@@ -86,24 +86,88 @@ fn format_with_commas(n: u64) -> String {
 
     result
 }
+#[cfg(feature = "snapshots")]
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "snapshots")]
+#[derive(Serialize, Deserialize)]
+struct CostSnapshot {
+    name: String,
+    instructions: u64,
+    memory_bytes: u64,
+    fee_stroops: i64,
+}
 
 #[cfg(feature = "snapshots")]
 impl CostReport {
-    /// Assert that the cost report matches a snapshot.
-    ///
-    /// This is a placeholder for snapshot testing integration.
-    /// When the `snapshots` feature is enabled, cost reports can be compared
-    /// against saved snapshots to catch performance regressions.
-    ///
-    /// # Panics
-    /// Panics if the snapshot does not exist or does not match.
+    /// Assert that this cost report matches a stored snapshot within a default 5% tolerance.
     pub fn assert_snapshot(&self, name: &str) {
-        // TODO: Integrate with insta or similar snapshot testing library
-        // For now, this is a placeholder that could be extended with:
-        // - insta integration for automated snapshot tests
-        // - Custom snapshot storage and comparison
-        // - Reporting when regressions are detected
-        eprintln!("Snapshot assertion for '{}': {:?}", name, self);
+        self.assert_snapshot_with_tolerance(name, 0.05);
+    }
+
+    /// Assert that this cost report matches a stored snapshot within a custom tolerance.
+    pub fn assert_snapshot_with_tolerance(&self, name: &str, tolerance: f64) {
+        use std::fs;
+        use std::path::PathBuf;
+
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| ".".to_string());
+        let snap_dir = PathBuf::from(&manifest_dir)
+            .join("test_snapshots")
+            .join("cost");
+        let snap_path = snap_dir.join(format!("{}.json", name));
+
+        let update = std::env::var("CRUCIBLE_UPDATE_SNAPSHOTS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        if !snap_path.exists() || update {
+            fs::create_dir_all(&snap_dir)
+                .unwrap_or_else(|e| panic!("failed to create snapshot dir: {}", e));
+
+            let snapshot = CostSnapshot {
+                name: name.to_string(),
+                instructions: self.instructions,
+                memory_bytes: self.memory,
+                fee_stroops: self.fee_stroops(),
+            };
+
+            let json = serde_json::to_string_pretty(&snapshot)
+                .unwrap_or_else(|e| panic!("failed to serialize snapshot '{}': {}", name, e));
+
+            fs::write(&snap_path, json)
+                .unwrap_or_else(|e| panic!("failed to write snapshot '{}': {}", name, e));
+
+            if update {
+                eprintln!("[crucible] updated snapshot '{}'", name);
+            } else {
+                eprintln!("[crucible] wrote new snapshot '{}'", name);
+            }
+            return;
+        }
+
+        let contents = fs::read_to_string(&snap_path)
+            .unwrap_or_else(|e| panic!("failed to read snapshot '{}': {}", name, e));
+
+        let saved: CostSnapshot = serde_json::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse snapshot '{}': {}", name, e));
+
+        check_within_tolerance("instructions", saved.instructions, self.instructions, tolerance, name);
+        check_within_tolerance("memory_bytes", saved.memory_bytes, self.memory, tolerance, name);
+    }
+}
+
+#[cfg(feature = "snapshots")]
+fn check_within_tolerance(metric: &str, saved: u64, current: u64, tolerance: f64, name: &str) {
+    if saved == 0 {
+        return;
+    }
+    let ratio = current as f64 / saved as f64;
+    if ratio > 1.0 + tolerance {
+        panic!(
+            "cost regression in snapshot '{}': {} increased from {} to {} ({:.1}% > {:.1}% tolerance)",
+            name, metric, saved, current, (ratio - 1.0) * 100.0, tolerance * 100.0,
+        );
     }
 }
 
@@ -156,5 +220,21 @@ mod tests {
         assert!(report_str.contains("├"));
         assert!(report_str.contains("┤"));
         assert!(report_str.contains("┼"));
+    }
+        #[test]
+    fn test_snapshot_serialization_roundtrip() {
+        #[cfg(feature = "snapshots")]
+        {
+            let snap = super::CostSnapshot {
+                name: "test".to_string(),
+                instructions: 1000,
+                memory_bytes: 2000,
+                fee_stroops: 10,
+            };
+            let json = serde_json::to_string(&snap).unwrap();
+            let parsed: super::CostSnapshot = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed.instructions, 1000);
+            assert_eq!(parsed.memory_bytes, 2000);
+        }
     }
 }

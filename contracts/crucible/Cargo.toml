@@ -7,10 +7,12 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+snapshots = ["serde", "serde_json"]
 default = ["derive"]
 derive = ["dep:crucible-macros"]
-snapshots = []
 
 [dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 crucible-macros = { workspace = true, optional = true }

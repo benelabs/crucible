@@ -6,7 +6,6 @@ pub mod env;
 pub mod fixture;
 pub mod macros;
 pub mod prelude;
-pub mod reputation;
 pub mod sim;
 pub mod token;
 

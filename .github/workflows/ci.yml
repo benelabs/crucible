@@ -7,12 +7,25 @@ on:
 
 jobs:
   check:
-    name: Minimal Workspace Check
+    name: cargo check (stable)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --workspace --exclude backend
 
-      - name: Verify repository
-        run: |
-          echo "Repository is checked out and minimal workspace check passed successfully!"
+  msrv:
+    name: cargo check (MSRV)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - run: cargo check --workspace --exclude backend
+
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --exclude backend

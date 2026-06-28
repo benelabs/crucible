@@ -347,6 +347,8 @@ impl ContractExecutor for SorobanContractExecutor {
 
         let args = decode_args(&env, &execution.args_xdr)?;
         let wasm = Bytes::from_slice(&env, &execution.wasm);
+        // Using register_contract_wasm is currently the only straightforward way
+        // to dynamically register an arbitrary WASM blob in the sandbox execution environment.
         #[allow(deprecated)]
         let contract_id = env.register_contract_wasm(None, wasm);
         let symbol = Symbol::new(&env, &execution.function);
@@ -524,6 +526,146 @@ mod tests {
             Err(SandboxError::Rejected("bad invocation".to_string()))
         }
     }
+
+    // New tests to add inside `mod tests` in backend/src/services/sandbox.rs,
+    // alongside the existing StaticExecutor / SleepingExecutor / RejectingExecutor
+    // fakes. These close the gap noted in docs/sandbox-threat-model.md: existing
+    // tests only prove that an out-of-range *budget request* is rejected before
+    // execution starts. They do not prove that a contract which actually exceeds
+    // its CPU/memory budget *during* execution is reported as such, or make
+    // explicit what happens to a thread after a timeout is hit.
+
+    // --- Fake executor: simulates the Soroban budget being exceeded mid-execution.
+    // In production this is what SorobanContractExecutor would surface if the VM's
+    // own metering trips. This test exists because nothing previously exercised
+    // that path — only the pre-execution validation that rejects an
+    // out-of-range *requested* budget.
+    struct BudgetExceededExecutor;
+
+    impl ContractExecutor for BudgetExceededExecutor {
+        fn execute(&self, execution: PreparedExecution) -> Result<RawExecution, SandboxError> {
+            // Simulate the VM reporting that it hit its configured ceiling.
+            Ok(RawExecution {
+                status: ExecutionStatus::Reverted,
+                contract_id: None,
+                result_xdr: None,
+                diagnostics: vec![format!(
+                    "execution exceeded configured cpu instruction budget of {}",
+                    execution.limits.max_cpu_instructions
+                )],
+                cpu_instructions: execution.limits.max_cpu_instructions,
+                memory_bytes: execution.limits.max_memory_bytes,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_reports_cpu_budget_exhaustion_distinctly() {
+        let service = ContractSandboxService::with_executor(
+            SandboxLimits::default(),
+            Arc::new(BudgetExceededExecutor),
+        );
+
+        let response = service.execute(request()).await.unwrap();
+
+        // The response must make budget exhaustion legible to the caller: status
+        // is Reverted (not Succeeded), the reported cpu_instructions matches the
+        // configured ceiling (not zero, not silently dropped), and the
+        // diagnostics explain why. A regression that swallowed this distinction
+        // (e.g. reporting Succeeded with truncated output) would pass every
+        // other existing test but fail this one.
+        assert_eq!(response.status, ExecutionStatus::Reverted);
+        assert_eq!(
+            response.cpu_instructions,
+            SandboxLimits::default().max_cpu_instructions
+        );
+        assert!(response
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("cpu instruction budget")));
+    }
+
+    #[tokio::test]
+    async fn execute_respects_caller_supplied_budget_in_executor_input() {
+        // Confirms the *clamped* per-request budget (not just the service
+        // default) is what actually reaches the executor. Without this, a caller
+        // requesting a tighter budget than the service default could silently
+        // execute under the looser default instead.
+        let requested_cpu = 1_000;
+        let service = ContractSandboxService::with_executor(
+            SandboxLimits::default(),
+            Arc::new(BudgetExceededExecutor),
+        );
+        let mut req = request();
+        req.budget.max_cpu_instructions = Some(requested_cpu);
+
+        let response = service.execute(req).await.unwrap();
+
+        assert_eq!(response.cpu_instructions, requested_cpu);
+    }
+
+    // --- Fake executor: never returns within the test's lifetime. Used to make
+    // explicit (not just implicit in production behavior) that hitting a timeout
+    // stops the *caller* from waiting but does not stop the underlying thread.
+    // This is a known, documented limitation (see docs/sandbox-threat-model.md)
+    // rather than a bug this test is trying to catch — it exists so the behavior
+    // is pinned and visible in CI rather than only discoverable by reading code.
+    struct ForeverExecutor {
+        started: Arc<std::sync::atomic::AtomicBool>,
+        finished: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl ContractExecutor for ForeverExecutor {
+        fn execute(&self, _execution: PreparedExecution) -> Result<RawExecution, SandboxError> {
+            self.started.store(true, std::sync::atomic::Ordering::SeqCst);
+            thread::sleep(StdDuration::from_millis(200));
+            self.finished.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(RawExecution {
+                status: ExecutionStatus::Succeeded,
+                contract_id: None,
+                result_xdr: None,
+                diagnostics: Vec::new(),
+                cpu_instructions: 1,
+                memory_bytes: 1,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_abandons_the_wait_but_thread_keeps_running() {
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let limits = SandboxLimits {
+            timeout_ms: 5,
+            ..SandboxLimits::default()
+        };
+        let service = ContractSandboxService::with_executor(
+            limits,
+            Arc::new(ForeverExecutor {
+                started: Arc::clone(&started),
+                finished: Arc::clone(&finished),
+            }),
+        );
+
+        let response = service.execute(request()).await.unwrap();
+        assert_eq!(response.status, ExecutionStatus::TimedOut);
+
+        // At the moment the caller gets TimedOut back, the work has started but
+        // is documented to still be running in the background — this is the
+        // "abandons the wait, not the work" behavior called out in the threat
+        // model doc. We wait past the executor's total runtime to confirm it
+        // does eventually finish on its own thread, unobserved by the caller.
+        assert!(started.load(std::sync::atomic::Ordering::SeqCst));
+        thread::sleep(StdDuration::from_millis(250));
+        assert!(
+            finished.load(std::sync::atomic::Ordering::SeqCst),
+            "expected the abandoned thread to keep running to completion after timeout \
+            was returned to the caller — this pins the documented limitation; if this \
+            assertion starts failing because the thread is now actually being cancelled, \
+            update docs/sandbox-threat-model.md to remove the corresponding caveat"
+        );
+    }
+
 
     fn request() -> ContractExecutionRequest {
         ContractExecutionRequest {

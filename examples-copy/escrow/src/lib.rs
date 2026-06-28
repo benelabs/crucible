@@ -64,7 +64,7 @@ impl Escrow {
         depositor.require_auth();
 
         // Pull tokens from depositor into this contract.
-        token::Client::new(&env, &token).transfer(
+        token::TokenClient::new(&env, &token).transfer(
             &depositor,
             &env.current_contract_address(),
             &amount,
@@ -116,7 +116,7 @@ impl Escrow {
         state.status = EscrowStatus::Claimed;
         env.storage().instance().set(&DataKey::State, &state);
 
-        token::Client::new(&env, &state.token).transfer(
+        token::TokenClient::new(&env, &state.token).transfer(
             &env.current_contract_address(),
             &state.recipient,
             &state.amount,
@@ -139,7 +139,7 @@ impl Escrow {
         state.status = EscrowStatus::Refunded;
         env.storage().instance().set(&DataKey::State, &state);
 
-        token::Client::new(&env, &state.token).transfer(
+        token::TokenClient::new(&env, &state.token).transfer(
             &env.current_contract_address(),
             &state.depositor,
             &state.amount,

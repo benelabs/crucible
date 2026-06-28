@@ -54,7 +54,7 @@ impl Vesting {
         duration: u64,
     ) {
         admin.require_auth();
-        token::Client::new(&env, &token).transfer(&admin, &env.current_contract_address(), &total);
+        token::TokenClient::new(&env, &token).transfer(&admin, &env.current_contract_address(), &total);
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(
             &DataKey::Schedule,
@@ -103,7 +103,7 @@ impl Vesting {
         }
         s.claimed += claimable;
         env.storage().instance().set(&DataKey::Schedule, &s);
-        token::Client::new(&env, &s.token).transfer(
+        token::TokenClient::new(&env, &s.token).transfer(
             &env.current_contract_address(),
             &s.beneficiary,
             &claimable,
@@ -125,7 +125,7 @@ impl Vesting {
         s.revoked = true;
         env.storage().instance().set(&DataKey::Schedule, &s);
         if unvested > 0 {
-            token::Client::new(&env, &s.token).transfer(
+            token::TokenClient::new(&env, &s.token).transfer(
                 &env.current_contract_address(),
                 &admin,
                 &unvested,

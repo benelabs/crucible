@@ -41,3 +41,6 @@
 //! ```
 //!
 //! [`MockEnv`]: crate::env::MockEnv
+//!
+//! **Host-only:** Fixtures depend on [`MockEnv`] and `std` and are intended
+//! exclusively for use in `#[cfg(test)]` contexts on the host.

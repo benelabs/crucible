@@ -3,15 +3,15 @@
 //! Provides two endpoints:
 //!
 //! - `GET /health/live`  — liveness probe: returns 200 if the process is running.
-//! - `GET /health/ready` — readiness probe: returns 200 only when PostgreSQL and
-//!   Redis are reachable; returns 503 otherwise.
+//! - `GET /health/ready` — readiness probe: returns 200 only when PostgreSQL,
+//!   Redis, and the worker queue are reachable; returns 503 otherwise.
 //!
 //! Both endpoints return a JSON body with per-component status details so that
-//! operators can quickly identify which dependency is unhealthy.
+//! operators can quickly identify which dependency is unhealthy. Connection
+//! strings, hostnames, and credentials are never included in responses.
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use redis::aio::ConnectionManager;
-use redis::AsyncCommands;
 use serde::Serialize;
 use sqlx::PgPool;
 use tracing::{debug, instrument, warn};
@@ -20,30 +20,38 @@ use tracing::{debug, instrument, warn};
 #[derive(Clone)]
 pub struct HealthState {
     pub db: PgPool,
-    pub redis: ConnectionManager,
+    pub cache: ConnectionManager,
+    pub queue: ConnectionManager,
 }
 
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
 
-/// Status of a single dependency.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+/// Single dependency check result.
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ComponentStatus {
-    Healthy,
-    Unhealthy,
+pub struct CheckResult {
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Container for all dependency checks.
+#[derive(Debug, Serialize)]
+pub struct HealthChecks {
+    pub database: CheckResult,
+    pub redis: CheckResult,
+    pub queue: CheckResult,
 }
 
 /// Response body for the readiness probe.
 #[derive(Debug, Serialize)]
-pub struct ReadinessResponse {
+pub struct HealthReport {
     /// Overall status: `"healthy"` or `"degraded"`.
     pub status: String,
-    /// PostgreSQL connectivity.
-    pub database: ComponentStatus,
-    /// Redis connectivity.
-    pub cache: ComponentStatus,
+    /// Per-dependency health details.
+    pub checks: HealthChecks,
     /// Application version from `CARGO_PKG_VERSION`.
     pub version: String,
 }
@@ -62,7 +70,8 @@ pub struct LivenessResponse {
 /// `GET /health/live` — liveness probe.
 ///
 /// Always returns `200 OK` as long as the process is running. Kubernetes uses
-/// this to decide whether to restart the container.
+/// this to decide whether to restart the container. Never fails due to
+/// PostgreSQL, Redis, or worker queue unavailability.
 #[instrument(skip_all)]
 pub async fn liveness() -> impl IntoResponse {
     debug!("Liveness probe");
@@ -77,16 +86,17 @@ pub async fn liveness() -> impl IntoResponse {
 
 /// `GET /health/ready` — readiness probe.
 ///
-/// Checks PostgreSQL and Redis connectivity. Returns `200 OK` when all
-/// dependencies are healthy, or `503 Service Unavailable` when any are not.
-/// Kubernetes uses this to decide whether to route traffic to the pod.
+/// Checks PostgreSQL, Redis, and worker queue connectivity. Returns `200 OK`
+/// when all dependencies are healthy, or `503 Service Unavailable` when any
+/// are not. Kubernetes uses this to decide whether to route traffic to the pod.
 #[instrument(skip_all)]
 pub async fn readiness(State(state): State<HealthState>) -> impl IntoResponse {
-    let db_status = check_database(&state).await;
-    let cache_status = check_cache(&state).await;
+    let database = check_database(&state.db).await;
+    let redis = check_cache(&state.cache).await;
+    let queue = check_queue(&state.queue).await;
 
     let all_healthy =
-        db_status == ComponentStatus::Healthy && cache_status == ComponentStatus::Healthy;
+        database.status == "up" && redis.status == "up" && queue.status == "up";
 
     let status_code = if all_healthy {
         StatusCode::OK
@@ -96,10 +106,17 @@ pub async fn readiness(State(state): State<HealthState>) -> impl IntoResponse {
 
     (
         status_code,
-        Json(ReadinessResponse {
-            status: if all_healthy { "healthy".into() } else { "degraded".into() },
-            database: db_status,
-            cache: cache_status,
+        Json(HealthReport {
+            status: if all_healthy {
+                "healthy".into()
+            } else {
+                "degraded".into()
+            },
+            checks: HealthChecks {
+                database,
+                redis,
+                queue,
+            },
             version: env!("CARGO_PKG_VERSION").to_string(),
         }),
     )
@@ -109,33 +126,118 @@ pub async fn readiness(State(state): State<HealthState>) -> impl IntoResponse {
 // Dependency checks
 // ---------------------------------------------------------------------------
 
-async fn check_database(state: &HealthState) -> ComponentStatus {
+async fn check_database(pool: &PgPool) -> CheckResult {
     match sqlx::query_scalar::<_, i32>("SELECT 1")
-        .fetch_one(&state.db)
+        .fetch_one(pool)
         .await
     {
         Ok(_) => {
             debug!("Database health check passed");
-            ComponentStatus::Healthy
+            CheckResult {
+                status: "up",
+                message: None,
+            }
         }
         Err(e) => {
             warn!("Database health check failed: {e}");
-            ComponentStatus::Unhealthy
+            CheckResult {
+                status: "down",
+                message: Some("connection unavailable".into()),
+            }
         }
     }
 }
 
-async fn check_cache(state: &HealthState) -> ComponentStatus {
-    let mut conn = state.redis.clone();
+async fn check_cache(conn: &ConnectionManager) -> CheckResult {
+    let mut conn = conn.clone();
     match redis::cmd("PING").query_async::<String>(&mut conn).await {
         Ok(_) => {
-            debug!("Cache health check passed");
-            ComponentStatus::Healthy
+            debug!("Redis health check passed");
+            CheckResult {
+                status: "up",
+                message: None,
+            }
         }
         Err(e) => {
-            warn!("Cache health check failed: {e}");
-            ComponentStatus::Unhealthy
+            warn!("Redis health check failed: {e}");
+            CheckResult {
+                status: "down",
+                message: Some("connection unavailable".into()),
+            }
         }
+    }
+}
+
+async fn check_queue(conn: &ConnectionManager) -> CheckResult {
+    let mut conn = conn.clone();
+
+    // Step 1: Verify queue backend (Redis) connectivity
+    let ping = redis::cmd("PING")
+        .query_async::<String>(&mut conn)
+        .await;
+    match ping {
+        Ok(_) => debug!("Queue backend connection is healthy"),
+        Err(e) => {
+            warn!("Queue backend connection failed: {e}");
+            return CheckResult {
+                status: "down",
+                message: Some("connection unavailable".into()),
+            };
+        }
+    }
+
+    // Step 2: Check whether workers are actually registered.
+    // Apalis workers register in a `{namespace}:consumers` Redis SET via their
+    // keep-alive heartbeat.  Also checks the project's `worker:*:health` pattern
+    // used by WorkerHealthMonitor.
+    if has_registered_workers(&mut conn).await {
+        debug!("Queue health check passed — active workers found");
+        CheckResult {
+            status: "up",
+            message: None,
+        }
+    } else {
+        warn!("Queue health check failed — no active workers");
+        CheckResult {
+            status: "down",
+            message: Some("workers unavailable".into()),
+        }
+    }
+}
+
+/// Returns `true` when at least one worker consumer or health heartbeat is
+/// present in Redis.
+async fn has_registered_workers(conn: &mut ConnectionManager) -> bool {
+    // Check for Apalis consumer sets (workers registered via keep_alive)
+    match redis::cmd("KEYS")
+        .arg("*:consumers")
+        .query_async::<Vec<String>>(conn)
+        .await
+    {
+        Ok(keys) if !keys.is_empty() => {
+            for key in &keys {
+                if let Ok(count) = redis::cmd("SCARD")
+                    .arg(key)
+                    .query_async::<i32>(conn)
+                    .await
+                {
+                    if count > 0 {
+                        return true;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Also check for project-specific worker heartbeat keys
+    match redis::cmd("KEYS")
+        .arg("worker:*:health")
+        .query_async::<Vec<String>>(conn)
+        .await
+    {
+        Ok(keys) if !keys.is_empty() => true,
+        _ => false,
     }
 }
 
@@ -203,36 +305,67 @@ mod tests {
     }
 
     #[test]
-    fn readiness_response_serializes_healthy() {
-        let resp = ReadinessResponse {
+    fn health_report_serializes_healthy() {
+        let report = HealthReport {
             status: "healthy".into(),
-            database: ComponentStatus::Healthy,
-            cache: ComponentStatus::Healthy,
+            checks: HealthChecks {
+                database: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+                redis: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+                queue: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+            },
             version: "0.1.0".into(),
         };
-        let json = serde_json::to_value(&resp).unwrap();
+        let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["status"], "healthy");
-        assert_eq!(json["database"], "healthy");
-        assert_eq!(json["cache"], "healthy");
+        assert_eq!(json["checks"]["database"]["status"], "up");
+        assert_eq!(json["checks"]["redis"]["status"], "up");
+        assert_eq!(json["checks"]["queue"]["status"], "up");
+        assert!(json["checks"]["database"].get("message").is_none());
+        assert_eq!(json["version"], "0.1.0");
     }
 
     #[test]
-    fn readiness_response_serializes_degraded() {
-        let resp = ReadinessResponse {
+    fn health_report_serializes_degraded() {
+        let report = HealthReport {
             status: "degraded".into(),
-            database: ComponentStatus::Unhealthy,
-            cache: ComponentStatus::Healthy,
+            checks: HealthChecks {
+                database: CheckResult {
+                    status: "down",
+                    message: Some("connection unavailable".into()),
+                },
+                redis: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+                queue: CheckResult {
+                    status: "down",
+                    message: Some("workers unavailable".into()),
+                },
+            },
             version: "0.1.0".into(),
         };
-        let json = serde_json::to_value(&resp).unwrap();
+        let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["status"], "degraded");
-        assert_eq!(json["database"], "unhealthy");
-        assert_eq!(json["cache"], "healthy");
-    }
-
-    #[test]
-    fn component_status_eq() {
-        assert_eq!(ComponentStatus::Healthy, ComponentStatus::Healthy);
-        assert_ne!(ComponentStatus::Healthy, ComponentStatus::Unhealthy);
+        assert_eq!(json["checks"]["database"]["status"], "down");
+        assert_eq!(
+            json["checks"]["database"]["message"],
+            "connection unavailable"
+        );
+        assert_eq!(json["checks"]["redis"]["status"], "up");
+        assert_eq!(json["checks"]["redis"].get("message"), None);
+        assert_eq!(json["checks"]["queue"]["status"], "down");
+        assert_eq!(
+            json["checks"]["queue"]["message"],
+            "workers unavailable"
+        );
     }
 }

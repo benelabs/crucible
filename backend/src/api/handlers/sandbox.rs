@@ -33,6 +33,48 @@ pub async fn execute_contract(
     State(service): State<Arc<ContractSandboxService>>,
     ValidatedJson(request): ValidatedJson<ContractExecutionRequest>,
 ) -> Result<ApiResponse<ContractExecutionResponse>, ApiError> {
+    // Validate WASM size (base64 encoded wasm should be reasonable)
+    let wasm_size = request.wasm_base64.len();
+    const MAX_WASM_BASE64_SIZE: usize = 5 * 1024 * 1024; // 5MB base64
+    
+    if wasm_size > MAX_WASM_BASE64_SIZE {
+        return Err(ApiError::Validation(
+            format!(
+                "WASM payload exceeds maximum size of {} bytes (got {} bytes)",
+                MAX_WASM_BASE64_SIZE, wasm_size
+            ),
+        ));
+    }
+    
+    // Validate function name
+    if request.function.trim().is_empty() {
+        return Err(ApiError::Validation(
+            "function name cannot be empty".to_string(),
+        ));
+    }
+    
+    // Validate function name length
+    if request.function.len() > 256 {
+        return Err(ApiError::Validation(
+            "function name exceeds maximum length of 256 characters".to_string(),
+        ));
+    }
+    
+    // Validate args size if present
+    if let Some(ref args) = request.args_xdr_base64 {
+        let args_size = args.len();
+        const MAX_ARGS_SIZE: usize = 1 * 1024 * 1024; // 1MB
+        
+        if args_size > MAX_ARGS_SIZE {
+            return Err(ApiError::Validation(
+                format!(
+                    "Arguments payload exceeds maximum size of {} bytes (got {} bytes)",
+                    MAX_ARGS_SIZE, args_size
+                ),
+            ));
+        }
+    }
+    
     service
         .execute(request)
         .await

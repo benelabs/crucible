@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(deprecated)]
 
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
@@ -121,7 +120,7 @@ impl Lending {
         position.supplied_scaled = Self::checked_add(position.supplied_scaled, scaled);
         state.total_supplied = Self::checked_add(state.total_supplied, amount);
 
-        token::Client::new(&env, &config.asset).transfer(
+        token::TokenClient::new(&env, &config.asset).transfer(
             &lender,
             &env.current_contract_address(),
             &amount,
@@ -153,7 +152,7 @@ impl Lending {
 
         Self::save_position(&env, lender.clone(), &position);
         Self::save_state(&env, &state);
-        token::Client::new(&env, &config.asset).transfer(
+        token::TokenClient::new(&env, &config.asset).transfer(
             &env.current_contract_address(),
             &lender,
             &amount,
@@ -173,7 +172,7 @@ impl Lending {
         position.collateral = Self::checked_add(position.collateral, amount);
         state.total_collateral = Self::checked_add(state.total_collateral, amount);
 
-        token::Client::new(&env, &config.collateral_asset).transfer(
+        token::TokenClient::new(&env, &config.collateral_asset).transfer(
             &borrower,
             &env.current_contract_address(),
             &amount,
@@ -201,7 +200,7 @@ impl Lending {
 
         Self::save_position(&env, borrower.clone(), &position);
         Self::save_state(&env, &state);
-        token::Client::new(&env, &config.collateral_asset).transfer(
+        token::TokenClient::new(&env, &config.collateral_asset).transfer(
             &env.current_contract_address(),
             &borrower,
             &amount,
@@ -230,7 +229,7 @@ impl Lending {
 
         Self::save_position(&env, borrower.clone(), &position);
         Self::save_state(&env, &state);
-        token::Client::new(&env, &config.asset).transfer(
+        token::TokenClient::new(&env, &config.asset).transfer(
             &env.current_contract_address(),
             &borrower,
             &amount,
@@ -259,7 +258,7 @@ impl Lending {
         position.borrowed_scaled = Self::scale_down(remaining, state.borrow_index);
         state.total_borrowed = Self::checked_sub(state.total_borrowed, paid);
 
-        token::Client::new(&env, &config.asset).transfer(
+        token::TokenClient::new(&env, &config.asset).transfer(
             &borrower,
             &env.current_contract_address(),
             &paid,

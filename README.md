@@ -92,7 +92,7 @@ soroban-sdk = { version = "21", features = ["testutils"] }
 
 Enable the `testutils` feature on `soroban-sdk`. crucible depends on it at compile time and will emit a clear error if it is missing.
 
-> **MSRV:** Rust 1.76 or later. crucible tracks the same minimum supported Rust version as `soroban-sdk`.
+> **MSRV:** Rust 1.91.0 or later. crucible tracks the same minimum supported Rust version as `soroban-sdk`.
 
 ---
 
@@ -228,8 +228,8 @@ let bob   = env.account("bob");
 // Use the address wherever Soroban expects one
 client.transfer(&alice.address(), &bob.address(), &100_i128);
 
-// Sign authorization for a call
-env.set_auths(&[alice.auth()]);
+// Authorize protected calls in tests
+env.mock_all_auths();
 client.some_protected_call(&alice.address());
 ```
 
@@ -238,10 +238,14 @@ The `AccountHandle` type gives you:
 | Method | Returns | Description |
 |---|---|---|
 | `.address()` | `Address` | The Soroban address for this account |
-| `.auth()` | `InvokerContractAuthEntry` | Authorization entry for use with `set_auths` |
 | `.xlm_balance()` | `i128` | Current XLM balance in stroops |
 | `.token_balance(&token)` | `i128` | Balance in a given `MockToken` |
 | `.sign(payload)` | `Vec<u8>` | Sign an arbitrary payload with the account keypair |
+
+Authorization in tests is driven through the environment, not the account handle.
+Call `env.mock_all_auths()` to let every `require_auth()` succeed (the common
+happy-path style used throughout these examples), or `env.mock_auths(&[])` to
+clear authorizations so a protected call is expected to fail.
 
 ---
 
@@ -297,6 +301,26 @@ if sim.would_succeed() {
 ```
 
 This is particularly valuable in CI when you want to catch unexpectedly expensive code paths or missing authorization requirements, without writing a separate integration test for each scenario.
+
+#### Inspect-Only Simulations
+
+When you only need to inspect the results without committing, use `simulate_inspect`. This method does not require the closure to be `'static`, allowing you to borrow local clients, accounts, or fixture references:
+
+```rust
+// Borrow a local client - no 'static requirement
+let client = MyContractClient::new(&env, &contract_id);
+let alice = env.account("alice");
+
+let inspected = env.simulate_inspect(|| {
+    client.transfer(&alice.address(), &amount)
+});
+
+// Inspect the results
+println!("Fee: {} stroops", inspected.fee());
+println!("Would succeed: {}", inspected.would_succeed());
+```
+
+This is particularly useful in test fixtures where you want to simulate calls using borrowed references without cloning or `'static` workarounds.
 
 ---
 
@@ -438,7 +462,7 @@ impl AmmFixture {
         let pool_client = AmmPoolClient::new(&env.inner(), &env.contract_id::<AmmPool>());
         xlm.mint(&alice.address(), 10_000_000);
         usdc.mint(&alice.address(), 10_000_000);
-        env.set_auths(&[alice.auth()]);
+        env.mock_all_auths();
         pool_client.add_liquidity(&xlm.address(), &usdc.address(), &10_000_000_i128, &10_000_000_i128);
 
         Self { env, pool: env.contract_id::<AmmPool>(), xlm, usdc, alice, bob }
@@ -633,7 +657,7 @@ mod token_tests {
             let bob    = env.account("bob");
             let client = MyTokenContractClient::new(&env.inner(), &env.contract_id::<MyTokenContract>());
 
-            env.set_auths(&[admin.auth()]);
+            env.mock_all_auths();
             client.initialize(&admin.address(), &7_u32, &"My Token".into(), &"MTK".into());
 
             Self { env, client, admin, alice, bob }
@@ -644,7 +668,6 @@ mod token_tests {
     fn test_mint_emits_event_and_updates_balance() {
         let f = TokenFixture::setup();
 
-        f.env.set_auths(&[f.admin.auth()]);
         f.client.mint(&f.alice.address(), &1_000_i128);
 
         assert_eq!(f.client.balance(&f.alice.address()), 1_000_i128);
@@ -660,10 +683,7 @@ mod token_tests {
     fn test_transfer_moves_balance_between_accounts() {
         let f = TokenFixture::setup();
 
-        f.env.set_auths(&[f.admin.auth()]);
         f.client.mint(&f.alice.address(), &500_i128);
-
-        f.env.set_auths(&[f.alice.auth()]);
         f.client.transfer(&f.alice.address(), &f.bob.address(), &200_i128);
 
         assert_eq!(f.client.balance(&f.alice.address()), 300_i128);
@@ -684,10 +704,10 @@ mod token_tests {
     fn test_transfer_without_auth_reverts() {
         let f = TokenFixture::setup();
 
-        f.env.set_auths(&[f.admin.auth()]);
         f.client.mint(&f.alice.address(), &500_i128);
 
-        // No auth set — should revert
+        // Clear mocked auth so require_auth() is enforced — should revert
+        f.env.mock_auths(&[]);
         assert_reverts!(
             f.client.transfer(&f.alice.address(), &f.bob.address(), &200_i128)
         );
@@ -723,7 +743,7 @@ fn test_escrow_full_lifecycle() {
 
     // 1. Buyer creates escrow
     xlm.mint(&buyer.address(), 10_000_i128);
-    env.set_auths(&[buyer.auth()]);
+    env.mock_all_auths();
     let escrow_id = client.create(
         &buyer.address(),
         &seller.address(),
@@ -738,10 +758,7 @@ fn test_escrow_full_lifecycle() {
     env.advance_time(Duration::days(3));
 
     // 3. Seller claims — arbiter approves
-    env.set_auths(&[arbiter.auth()]);
     client.approve(&escrow_id);
-
-    env.set_auths(&[seller.auth()]);
     client.claim(&escrow_id, &seller.address());
 
     assert_eq!(xlm.balance(&seller.address()), 10_000_i128);
@@ -773,8 +790,9 @@ fn test_vesting_cliff_is_enforced() {
     xlm.mint(&env.contract_id::<VestingContract>(), 100_000_i128);
     client.initialize(&beneficiary.address(), &cliff_seconds, &100_000_i128);
 
+    env.mock_all_auths();
+
     // Attempt to claim before cliff — must fail
-    env.set_auths(&[beneficiary.auth()]);
     assert_reverts!(client.claim());
 
     // Advance to just before cliff
@@ -819,7 +837,7 @@ fn test_aggregator_calls_multiple_pools() {
 
     let agg_client = AggregatorClient::new(&env.inner(), &env.contract_id::<Aggregator>());
 
-    env.set_auths(&[trader.auth()]);
+    env.mock_all_auths();
     let out_amount = agg_client.best_swap(
         &xlm.address(),
         &usdc.address(),

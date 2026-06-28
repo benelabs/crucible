@@ -1,0 +1,72 @@
+# cargo-deny configuration for the Crucible workspace.
+#
+# This enforces the project's supply-chain policy across every workspace
+# member (backend, contracts, macros, examples). It is checked in CI by the
+# "Supply Chain Security" workflow and can be run locally with:
+#
+#     cargo install cargo-deny --locked
+#     cargo deny check
+#
+# See https://embarkstudios.github.io/cargo-deny/ for the full schema.
+
+[graph]
+# Evaluate every feature so feature-gated dependencies are also vetted.
+all-features = true
+
+# ----------------------------------------------------------------------------
+# Security advisories (RUSTSEC database).
+# ----------------------------------------------------------------------------
+[advisories]
+version = 2
+# Fail the build on any known vulnerability. Yanked crates are also flagged.
+yanked = "deny"
+# Advisories that have been reviewed and consciously accepted go here, each
+# with a tracking note. Keep this list empty unless an exception is justified.
+ignore = []
+
+# ----------------------------------------------------------------------------
+# License policy. Only permissive, OSI-approved licenses are allowed so the
+# distributed binaries stay license-compatible with the project's MIT license.
+# ----------------------------------------------------------------------------
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+# Per-crate license clarifications can be added here if a crate ships an
+# ambiguous or missing license expression.
+exceptions = []
+
+# ----------------------------------------------------------------------------
+# Dependency bans. Surfaces duplicate versions and lets us forbid specific
+# crates outright (e.g. known-bad or unwanted transitive dependencies).
+# ----------------------------------------------------------------------------
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+# Crates that must never be linked. Add an entry to block an unsafe or
+# unwanted dependency from entering the tree.
+deny = []
+# Crates that are explicitly permitted even if they would otherwise trip a rule.
+allow = []
+
+# ----------------------------------------------------------------------------
+# Source policy. Dependencies may only come from crates.io; unknown registries
+# and arbitrary git sources are rejected to limit supply-chain surface.
+# ----------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

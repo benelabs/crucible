@@ -1,5 +1,5 @@
 use soroban_sdk::testutils::ContractFunctionSet;
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, TryFromVal, TryIntoVal, Val};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, TryFromVal, TryIntoVal, Val};
 
 #[contracttype]
 #[derive(Clone)]

@@ -69,6 +69,29 @@ pub async fn compile_contract(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CompileRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    // Validate payload size
+    validate_payload_size(&payload, state.config.server.compile_max_size, "compile")?;
+    
+    // Validate source code
+    if payload.source_code.trim().is_empty() {
+        return Err(AppError::ValidationError(
+            "source_code cannot be empty".to_string(),
+        ));
+    }
+    
+    if payload.source_code.len() > 1_000_000 {
+        return Err(AppError::ValidationError(
+            "source_code exceeds maximum size of 1MB".to_string(),
+        ));
+    }
+    
+    // Validate project name
+    if payload.project_name.trim().is_empty() {
+        return Err(AppError::ValidationError(
+            "project_name cannot be empty".to_string(),
+        ));
+    }
+
     let db = require_db(&state)?;
 
     let service = CompilationService::new(db);
@@ -78,6 +101,27 @@ pub async fn compile_contract(
         .map_err(AppError::Database)?;
 
     Ok(Json(ApiResponse::new(result)))
+}
+
+fn validate_payload_size<T>(
+    payload: &T,
+    max_size: usize,
+    endpoint: &str,
+) -> Result<(), AppError> {
+    let size = serde_json::to_string(payload)
+        .map(|s| s.len())
+        .unwrap_or(0);
+    
+    if size > max_size {
+        return Err(AppError::ValidationError(
+            format!(
+                "Request payload for {} exceeds maximum size of {} bytes (got {} bytes)",
+                endpoint, max_size, size
+            ),
+        ));
+    }
+    
+    Ok(())
 }
 
 /// POST /api/v1/contracts/analyze-dependencies

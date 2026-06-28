@@ -44,6 +44,22 @@ cargo doc --workspace --no-deps --all-features --open
 
 text
 
+## Cost Snapshots
+
+Cost snapshots capture instruction and memory metrics for contract invocations and live in `test_snapshots/cost/` next to the crate under test.
+
+**Normal test runs** — if a snapshot file is missing, the test fails immediately with a message pointing to the missing path. No files are written. This keeps CI and contributor working trees clean.
+
+**Creating or updating snapshots** — set `CRUCIBLE_UPDATE_SNAPSHOTS=1` before running tests:
+
+```sh
+CRUCIBLE_UPDATE_SNAPSHOTS=1 cargo test -p crucible --features snapshots
+```
+
+This writes (or overwrites) every snapshot that is exercised during the run. Review the diff with `git diff` and commit the updated files alongside your code change.
+
+**Accepting a regression** — if an intentional cost increase exceeds the 5 % default tolerance, re-run with `CRUCIBLE_UPDATE_SNAPSHOTS=1` to record the new baseline, then commit both the code and the updated snapshot.
+
 ## Pull Request Process
 
 1. Fork and create a feature branch

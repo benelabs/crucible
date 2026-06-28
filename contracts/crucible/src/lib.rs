@@ -1,8 +1,10 @@
-#![allow(deprecated)]
 pub use soroban_sdk;
 pub mod account;
 pub mod cost;
 pub mod env;
+#[cfg(test)]
+mod env_event_filter_tests;
+mod event_topic_match;
 pub mod fixture;
 pub mod macros;
 pub mod prelude;

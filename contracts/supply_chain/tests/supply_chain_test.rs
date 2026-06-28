@@ -15,7 +15,8 @@ mod tests {
 
     #[test]
     fn test_item_creation_and_query() {
-        let mut env = setup_env();
+        let env = setup_env();
+        env.mock_all_auths();
         // metadata: simple key/value
         let mut meta = Map::<Symbol, RawVal>::new(&env);
         meta.set(&symbol_short!("sku"), &RawVal::from_val(&env, &"ABC123"));
@@ -29,7 +30,8 @@ mod tests {
 
     #[test]
     fn test_status_update_authorized() {
-        let mut env = setup_env();
+        let env = setup_env();
+        env.mock_all_auths();
         let id = SupplyChain::create_item(&env, Map::new(&env));
         // alice is current holder
         SupplyChain::update_status(&env, id, Status::InTransit);
@@ -39,16 +41,18 @@ mod tests {
 
     #[test]
     fn test_status_update_unauthorized() {
-        let mut env = setup_env();
+        let env = setup_env();
+        env.mock_all_auths();
         let id = SupplyChain::create_item(&env, Map::new(&env));
-        // switch auth to bob
-        env.set_auths(&[env.account("bob").auth()]);
+        // clear auth so the holder's require_auth() is enforced and fails
+        env.mock_auths(&[]);
         assert_reverts!(SupplyChain::update_status(&env, id, Status::InTransit));
     }
 
     #[test]
     fn test_transfer_holder() {
-        let mut env = setup_env();
+        let env = setup_env();
+        env.mock_all_auths();
         let id = SupplyChain::create_item(&env, Map::new(&env));
         let bob_addr = env.account("bob").address();
         SupplyChain::transfer_holder(&env, id, bob_addr.clone());
@@ -58,10 +62,11 @@ mod tests {
 
     #[test]
     fn test_transfer_unauthorized() {
-        let mut env = setup_env();
+        let env = setup_env();
+        env.mock_all_auths();
         let id = SupplyChain::create_item(&env, Map::new(&env));
-        // bob tries to transfer
-        env.set_auths(&[env.account("bob").auth()]);
+        // clear auth so the holder's require_auth() is enforced and fails
+        env.mock_auths(&[]);
         let bob_addr = env.account("bob").address();
         assert_reverts!(SupplyChain::transfer_holder(&env, id, bob_addr));
     }

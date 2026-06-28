@@ -70,13 +70,12 @@ fn test_mint_without_auth_reverts() {
         .build();
     let id = env.contract_id::<Token>();
     let admin = env.account("alice"); // wrong admin address
-    env.mock_all_auths();
+    // Do not mock auths; this should trigger auth failure
+    // env.mock_all_auths(); // removed to test real auth behavior
     TokenClient::new(env.inner(), &id).initialize(&admin);
-    // drop mock_all_auths by using a fresh env snapshot — simulate by checking
-    // that a zero-amount mint panics on the amount check instead
     assert_reverts!(
         TokenClient::new(env.inner(), &id).mint(&env.account("alice"), &0_i128),
-        "positive amount"
+        "admin requires auth"
     );
 }
 

@@ -17,9 +17,6 @@ use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
 
-#[tokio::test]
-async fn test_system_status_contract() {
-    let state = Arc::new(AppState {
 fn test_state() -> Arc<AppState> {
     let (log_aggregator, _receiver) = LogAggregator::new();
 
@@ -28,12 +25,9 @@ fn test_state() -> Arc<AppState> {
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
         config_manager: Arc::new(ConfigManager::new(AppConfig::default())),
-        log_aggregator: Arc::new(backend::services::log_aggregator::LogAggregator::new().0),
-        redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
-    });
         log_aggregator: Arc::new(log_aggregator),
         contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
-        redis: RedisClient::open("redis://127.0.0.1:1/").unwrap(),
+        redis: RedisClient::open("redis://127.0.0.1:6379/").unwrap(),
     })
 }
 

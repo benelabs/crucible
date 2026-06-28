@@ -1,0 +1,90 @@
+# Area labels — map to distinct code surfaces
+- name: area:core-api
+  color: "0366d6"
+  description: Crucible testing library public API — MockEnv, assertion macros, env mechanics
+- name: area:backend
+  color: "0052cc"
+  description: Axum backend server — API handlers, services, DB, config, workers
+- name: area:build
+  color: "5319e7"
+  description: Build system — Cargo workspace, Makefile, toolchain, feature flags
+- name: area:examples
+  color: "1d76db"
+  description: Example Soroban contracts and their tests
+- name: area:docs
+  color: "0e8a16"
+  description: Documentation — READMEs, doc comments, architecture docs, tutorials
+- name: area:testing
+  color: "e4e669"
+  description: Test infrastructure — runners, patterns, backend test utils
+- name: area:security
+  color: "b60205"
+  description: Security — vulnerability scanning, RBAC, audit logging, rate limiting
+- name: area:ci
+  color: "fbca04"
+  description: CI/CD — GitHub Actions, Dependabot, pipeline scripts
+- name: area:fixtures
+  color: "006b75"
+  description: Fixture system — #[fixture] derive, crucible-macros crate
+- name: area:tokens
+  color: "bfdadc"
+  description: Mock token system — MockToken, SAC/SEP-41 interface
+- name: area:performance
+  color: "d93f0b"
+  description: Performance — cost tracking, gas estimation, benchmarks
+
+# Priority labels — severity and ordering ladder
+- name: priority:P0
+  color: "e11d21"
+  description: Blocker — blocks release or makes project unusable
+- name: priority:P1
+  color: "eb6420"
+  description: High — important feature or bug for current milestone
+- name: priority:P2
+  color: "fbca04"
+  description: Medium — nice-to-have, can slip to next milestone
+- name: priority:P3
+  color: "cccccc"
+  description: Low — icebox, no immediate timeline
+
+# Type labels — kind of work (exactly one per issue)
+- name: type:bug
+  color: "d73a4a"
+  description: Something is broken or behaves unexpectedly
+- name: type:feature
+  color: "a2eeef"
+  description: Net-new capability or public API addition
+- name: type:enhancement
+  color: "7057ff"
+  description: Improvement to existing functionality or DX
+- name: type:refactor
+  color: "006b75"
+  description: Code restructuring with no external behavior change
+- name: type:chore
+  color: "bfdadc"
+  description: Maintenance — dependency bumps, CI config, version bumps
+- name: type:docs
+  color: "0e8a16"
+  description: Documentation additions or improvements
+
+# Status labels — workflow state (exactly one per issue)
+- name: blocked
+  color: "b60205"
+  description: Cannot proceed — depends on another issue, PR, dependency, or external decision
+- name: needs-discussion
+  color: "fef2c0"
+  description: Requires design input or team consensus before implementation
+- name: ready
+  color: "0e8a16"
+  description: Triaged, accepted, and actionable — clear scope, no blockers
+- name: in-progress
+  color: "0052cc"
+  description: Actively being worked on — owner assigned, PR should exist or be imminent
+
+# Contributor labels — onboarding and outreach
+- name: good-first-issue
+  color: "0e8a16"
+  description: Beginner-friendly with guided instructions — must also carry help-wanted
+- name: help-wanted
+  color: "008672"
+  description: Contributor sought — more open-ended than good-first-issue

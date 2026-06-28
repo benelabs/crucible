@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(deprecated)]
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
 /// A meta-transaction (gasless) request signed by the user.
@@ -95,7 +94,7 @@ impl Gasless {
             .set(&DataKey::Nonce(meta_tx.from.clone()), &(expected_nonce + 1));
 
         // Execute the transfer.
-        token::Client::new(&env, &meta_tx.token).transfer(
+        token::TokenClient::new(&env, &meta_tx.token).transfer(
             &meta_tx.from,
             &meta_tx.to,
             &meta_tx.amount,

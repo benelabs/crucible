@@ -1,6 +1,6 @@
 use super::audit::*;
-use axum::{body::Body, http::Request, http::StatusCode};
 use axum::Json;
+use axum::{body::Body, http::Request, http::StatusCode};
 use redis::AsyncCommands;
 use serde_json::json;
 use sqlx::{Executor, PgPool};
@@ -22,7 +22,10 @@ async fn setup() -> (AuditService, PgPool, Arc<redis::Client>) {
 }
 
 async fn cleanup_audit_logs(db: &PgPool) {
-    sqlx::query!("DELETE FROM audit_logs").execute(db).await.ok();
+    sqlx::query!("DELETE FROM audit_logs")
+        .execute(db)
+        .await
+        .ok();
 }
 
 #[tokio::test]
@@ -45,10 +48,13 @@ async fn test_log_event_success() {
     .await
     .unwrap();
 
-    let row = sqlx::query!("SELECT * FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT 1", event.event_type)
-        .fetch_one(&db)
-        .await
-        .unwrap();
+    let row = sqlx::query!(
+        "SELECT * FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT 1",
+        event.event_type
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
     assert_eq!(row.user_id, Some("user123".to_string()));
 
     let mut conn = redis.get_async_connection().await.unwrap();
@@ -92,15 +98,23 @@ async fn test_list_audit_reports() {
     let service = Arc::new(service);
     let app = axum::Router::new().merge(routes(service.clone()));
 
-    service.log_event(AuditEvent {
-        event_type: "login_attempt".to_string(),
-        user_id: Some("user123".to_string()),
-        details: json!({"ip": "127.0.0.1"}),
-        timestamp: chrono::Utc::now(),
-    }).await.unwrap();
+    service
+        .log_event(AuditEvent {
+            event_type: "login_attempt".to_string(),
+            user_id: Some("user123".to_string()),
+            details: json!({"ip": "127.0.0.1"}),
+            timestamp: chrono::Utc::now(),
+        })
+        .await
+        .unwrap();
 
     let response = app
-        .oneshot(Request::builder().uri("/reports").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/reports")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -112,12 +126,14 @@ async fn test_list_audit_reports() {
 }
 
 async fn test_get_audit_report() {
-
-
     let row = sqlx::query!("SELECT id FROM audit_logs ORDER BY timestamp DESC LIMIT 1")
         .fetch_one(&db)
-
-        .oneshot(Request::builder().uri(format!("/reports/{}", row.id)).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri(format!("/reports/{}", row.id))
+                .body(Body::empty())
+                .unwrap(),
+        );
 
     let event: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(event["id"], row.id);

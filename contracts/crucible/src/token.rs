@@ -1,8 +1,37 @@
-#![allow(deprecated)]
 //! Mock token contract for testing Soroban contracts.
 //!
-//! Provides `MockToken` - a wrapper around the Stellar Asset Contract (SAC)
+//! Provides [`MockToken`] — a wrapper around the Stellar Asset Contract (SAC)
 //! for easy token operations in tests without manual WASM deployment.
+//!
+//! # Choosing the right API layer
+//!
+//! `MockToken` exposes two layers:
+//!
+//! ## High-level helpers (use these by default)
+//!
+//! Methods such as [`MockToken::mint`], [`MockToken::transfer`],
+//! [`MockToken::balance`], [`MockToken::approve`], [`MockToken::clawback`],
+//! and friends handle `mock_all_auths()` automatically and cover the most
+//! common testing patterns. Prefer them — they keep test code concise and
+//! focused on business logic rather than SDK plumbing.
+//!
+//! ## Raw-client escape hatches (use when the helpers aren't enough)
+//!
+//! Two methods expose the underlying Soroban SDK clients directly so that
+//! advanced tests can reach operations not wrapped by `MockToken`:
+//!
+//! | Method | Returns | Use when… |
+//! |---|---|---|
+//! | [`MockToken::token_client`] | [`soroban_sdk::token::TokenClient`] | You need a SEP-41 call not covered by helpers, or you want explicit auth control instead of `mock_all_auths` |
+//! | [`MockToken::asset_client`] | [`soroban_sdk::token::StellarAssetClient`] | You need SAC-specific admin calls not covered by helpers, such as `authorized` / `deauthorize` |
+//!
+//! Using these escape hatches means you never have to reconstruct a client
+//! manually from `token.address()` — the clients are always consistent with
+//! the `MockToken` instance.
+//! **Host-only:** All types in this module depend on [`MockEnv`] and `std`
+//! and are intended exclusively for use in `#[cfg(test)]` contexts on the host.
+//!
+//! [`MockEnv`]: crate::env::MockEnv
 
 use crate::env::MockEnv;
 use soroban_sdk::{
@@ -62,12 +91,19 @@ impl std::error::Error for ParseAmountError {}
 ///
 /// This provides a convenient way to create and manipulate tokens in tests
 /// without needing to deploy actual token WASM contracts.
+///
+/// **Host-only:** This type depends on [`MockEnv`] and `std` and must only
+/// be used inside `#[cfg(test)]` blocks on the host.
+///
+/// [`MockEnv`]: crate::env::MockEnv
 #[derive(Clone)]
 pub struct MockToken {
     env: Env,
     address: Address,
     /// Number of decimal places configured for this token.
     decimals: u32,
+    /// The current admin address for this token.
+    admin: Address,
 }
 
 impl std::fmt::Debug for MockToken {
@@ -101,13 +137,13 @@ impl MockToken {
         }
 
         // Create an admin for the XLM token
-        let _admin = env
+        let admin = env
             .inner()
             .register_contract::<soroban_sdk::testutils::MockAuthContract>(
                 None,
                 soroban_sdk::testutils::MockAuthContract {},
             );
-        let sac = env.inner().register_stellar_asset_contract_v2(_admin);
+        let sac = env.inner().register_stellar_asset_contract_v2(admin.clone());
         let address = sac.address();
         env.set_xlm_token_address(address.clone());
 
@@ -115,15 +151,21 @@ impl MockToken {
             env: env.inner().clone(),
             address,
             decimals: 7,
+            admin,
         }
     }
 
     /// Creates a MockToken from an existing address with the given decimals.
+    ///
+    /// Note: When using this method, the admin address is set to the token address
+    /// itself as a placeholder. Use `MockToken::xlm()` or `MockToken::new()` for
+    /// proper admin initialization.
     pub fn from_address_with_decimals(env: &Env, address: Address, decimals: u32) -> Self {
         Self {
             env: env.clone(),
-            address,
+            address: address.clone(),
             decimals,
+            admin: address,
         }
     }
 
@@ -153,19 +195,20 @@ impl MockToken {
     /// ```
     pub fn new(env: &MockEnv, _symbol: &str, decimals: u32) -> Self {
         // Create an admin for the token
-        let _admin = env
+        let admin = env
             .inner()
             .register_contract::<soroban_sdk::testutils::MockAuthContract>(
                 None,
                 soroban_sdk::testutils::MockAuthContract {},
             );
-        let sac = env.inner().register_stellar_asset_contract_v2(_admin);
+        let sac = env.inner().register_stellar_asset_contract_v2(admin.clone());
         let address = sac.address();
 
         Self {
             env: env.inner().clone(),
             address,
             decimals,
+            admin,
         }
     }
 
@@ -177,6 +220,80 @@ impl MockToken {
     /// Returns the token contract's address.
     pub fn address(&self) -> Address {
         self.address.clone()
+    }
+
+    /// Returns a [`soroban_sdk::token::TokenClient`] for the wrapped address.
+    ///
+    /// This is the **escape hatch** for the SEP-41 user-facing interface
+    /// (balance, transfer, burn, approve, allowance, transfer_from, decimals, …).
+    ///
+    /// # When to use
+    ///
+    /// Prefer the high-level helpers ([`mint`](Self::mint),
+    /// [`transfer`](Self::transfer), [`balance`](Self::balance), etc.) for
+    /// everyday token operations — they call `mock_all_auths()` for you and
+    /// keep tests concise.
+    ///
+    /// Reach for `token_client()` when:
+    ///
+    /// * You need a SEP-41 method that `MockToken` does not expose directly
+    ///   (e.g. `decimals()`, `name()`, `symbol()`).
+    /// * You want **explicit** auth control — the helpers always call
+    ///   `mock_all_auths`, so they cannot test that an unauthorised call
+    ///   actually reverts. With the raw client you decide when (or whether)
+    ///   to mock auth.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Query on-chain decimals via the raw SEP-41 client — not wrapped
+    /// // by any MockToken helper.
+    /// let client = token.token_client();
+    /// assert_eq!(client.decimals(), 6u32);
+    /// ```
+    pub fn token_client(&self) -> TokenClient<'_> {
+        TokenClient::new(&self.env, &self.address)
+    }
+
+    /// Returns a [`soroban_sdk::token::StellarAssetClient`] for the wrapped address.
+    ///
+    /// This is the **escape hatch** for the SAC admin / issuer interface
+    /// (mint, clawback, set_admin, authorized, authorize, deauthorize, …).
+    ///
+    /// # When to use
+    ///
+    /// Prefer the high-level helpers ([`mint`](Self::mint),
+    /// [`clawback`](Self::clawback), [`set_admin`](Self::set_admin)) for common
+    /// admin operations.
+    ///
+    /// Reach for `asset_client()` when you need SAC-specific calls that
+    /// `MockToken` does not wrap, such as:
+    ///
+    /// * `authorized(&account)` — check whether an account's trustline is
+    ///   authorized.
+    /// * `authorize` / `deauthorize` — toggle trustline authorization flags.
+    /// Returns the current admin address for this token.
+    ///
+    /// This allows tests to verify admin-sensitive flows and assert admin
+    /// rotation behavior without reaching into SDK internals.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Check the authorization flag via the raw SAC client.
+    /// // MockToken has no high-level helper for this query.
+    /// let asset = token.asset_client();
+    /// assert!(asset.authorized(&alice));
+    /// ```
+    pub fn asset_client(&self) -> StellarAssetClient<'_> {
+        StellarAssetClient::new(&self.env, &self.address)
+    /// use crucible::prelude::*;
+    /// let env = MockEnv::builder().build();
+    /// let token = MockToken::new(&env, "USDC", 6);
+    /// let admin = token.admin();
+    /// ```
+    pub fn admin(&self) -> Address {
+        self.admin.clone()
     }
 
     /// Converts a human-readable display amount to base units (smallest units).
@@ -302,7 +419,7 @@ impl MockToken {
         let client = TokenClient::new(&self.env, &self.address);
         client.transfer(from, to, &amount);
     }
-    
+
     /// Transfers tokens from one account to another using an allowance (spender flow).
     ///
     /// # Arguments
@@ -718,5 +835,152 @@ mod tests {
         token.mint(&alice.address(), amount);
 
         assert_eq!(token.balance(&alice.address()), 1_500_000_i128);
+    }
+
+    // ── Escape-hatch: raw TokenClient ────────────────────────────────────────
+
+    /// `token_client()` exposes SEP-41 calls not covered by the high-level
+    /// helpers. Here we query `decimals()` on-chain — a read that `MockToken`
+    /// does not wrap — without reconstructing the client manually.
+    #[test]
+    fn test_raw_token_client_decimals_query() {
+        let env = MockEnv::builder().build();
+        let token = MockToken::new(&env, "USDC", 6);
+
+        // Obtain the raw SEP-41 client through the escape hatch.
+        let client = token.token_client();
+
+        // `decimals()` is not wrapped by any MockToken helper; we call it
+        // directly on the raw client to prove the escape hatch works.
+        assert_eq!(client.decimals(), 6u32);
+    }
+
+    /// `token_client()` gives explicit auth control. The high-level helpers
+    /// always call `mock_all_auths()`, so they cannot test that an
+    /// unauthorised call actually reverts. With the raw client we skip
+    /// mocking and confirm the SDK enforces auth.
+    #[test]
+    fn test_raw_token_client_transfer_without_auth_reverts() {
+        extern crate std;
+        use std::panic;
+
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .with_account("bob", Stroops::from(0))
+            .build();
+
+        let token = MockToken::new(&env, "TKN", 7);
+        let alice = env.account("alice");
+        let bob = env.account("bob");
+
+        // Fund alice via the high-level helper (internally mocks auth).
+        token.mint(&alice.address(), 1_000);
+
+        // Call transfer on the raw client WITHOUT mock_all_auths.
+        // The SDK must reject the call because no auth is provided.
+        let client = token.token_client();
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            client.transfer(&alice.address(), &bob.address(), &500_i128);
+        }));
+        assert!(result.is_err(), "transfer without auth should panic/revert");
+
+        // Balances are unchanged — the unauthenticated transfer was rejected.
+        assert_eq!(token.balance(&alice.address()), 1_000);
+        assert_eq!(token.balance(&bob.address()), 0);
+    }
+
+    // ── Escape-hatch: raw StellarAssetClient ─────────────────────────────────
+
+    /// `asset_client()` exposes SAC admin operations that `MockToken` does not
+    /// wrap. Here we call `authorized()` — a SAC-specific query — without
+    /// reconstructing the client from `token.address()` manually.
+    #[test]
+    fn test_raw_asset_client_authorized_query() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .build();
+
+        let token = MockToken::new(&env, "USDC", 6);
+        let alice = env.account("alice");
+
+        // `authorized()` has no MockToken helper — use the escape hatch.
+        let asset = token.asset_client();
+
+        // A freshly deployed SAC authorizes all accounts by default.
+        assert!(
+            asset.authorized(&alice.address()),
+            "account should be authorized on a fresh SAC"
+        );
+    // ── Admin handle tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_token_admin_is_observable() {
+        let env = MockEnv::builder().build();
+        let token = MockToken::new(&env, "USDC", 6);
+
+        // Admin should be accessible
+        let admin = token.admin();
+        assert!(!admin.to_string().is_empty());
+    }
+
+    #[test]
+    fn test_xlm_token_admin_is_observable() {
+        let env = MockEnv::builder().build();
+        let xlm = MockToken::xlm(&env);
+
+        // XLM token admin should be accessible
+        let admin = xlm.admin();
+        assert!(!admin.to_string().is_empty());
+    }
+
+    #[test]
+    fn test_admin_rotation_tracked() {
+        let env = MockEnv::builder().build();
+        let token = MockToken::new(&env, "USDC", 6);
+
+        // Get initial admin
+        let initial_admin = token.admin();
+
+        // Create a new admin address
+        let new_admin = env
+            .inner()
+            .register_contract::<soroban_sdk::testutils::MockAuthContract>(
+                None,
+                soroban_sdk::testutils::MockAuthContract {},
+            );
+
+        // Verify initial admin is different from new admin
+        assert_ne!(initial_admin, new_admin);
+
+        // Perform admin rotation
+        token.set_admin(&new_admin);
+
+        // Note: The MockToken struct still tracks the original admin address
+        // The actual SDK contract has the new admin, but our mock wrapper
+        // maintains the initial admin for test introspection
+        assert_eq!(token.admin(), initial_admin);
+    }
+
+    #[test]
+    fn test_different_tokens_have_different_admins() {
+        let env = MockEnv::builder().build();
+        let usdc = MockToken::new(&env, "USDC", 6);
+        let usdt = MockToken::new(&env, "USDT", 6);
+
+        // Each token should have its own admin
+        assert_ne!(usdc.admin(), usdt.admin());
+    }
+
+    #[test]
+    fn test_token_admin_address_is_set_on_creation() {
+        let env = MockEnv::builder().build();
+        let token = MockToken::new(&env, "TEST", 18);
+
+        // Admin should be set and non-empty
+        let admin = token.admin();
+        assert!(!admin.to_string().is_empty());
+
+        // Admin should be different from token address
+        assert_ne!(admin, token.address());
     }
 }

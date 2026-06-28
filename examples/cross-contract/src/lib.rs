@@ -8,10 +8,9 @@
 //! - [`Aggregator`] — calls `Router` to orchestrate multi-step workflows,
 //!   showing a two-level call chain.
 #![no_std]
-#![allow(deprecated)]
 
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, Env,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env,
 };
 
 // ---------------------------------------------------------------------------
@@ -65,18 +64,11 @@ enum RouterKey {
     Token,
 }
 
-/// Client interface for calling `Counter` from another contract.
-#[contractclient(name = "CounterClient")]
-pub trait CounterInterface {
-    fn increment(env: Env) -> u32;
-    fn get(env: Env) -> u32;
-}
-
 /// A router contract that orchestrates calls to `Counter` and a token.
 ///
 /// Demonstrates:
 /// - Calling another contract via a generated client (`CounterClient`).
-/// - Calling a token contract via `token::Client`.
+/// - Calling a token contract via `token::TokenClient`.
 /// - Storing cross-contract addresses in instance storage.
 #[contract]
 #[derive(Default)]
@@ -110,7 +102,7 @@ impl Router {
     pub fn route_transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         let token_addr: Address = env.storage().instance().get(&RouterKey::Token).unwrap();
-        token::Client::new(&env, &token_addr).transfer(&from, &to, &amount);
+        token::TokenClient::new(&env, &token_addr).transfer(&from, &to, &amount);
         env.events().publish((symbol_short!("routed"),), amount);
     }
 
@@ -129,15 +121,6 @@ impl Router {
 enum AggKey {
     Router,
     TotalRouted,
-}
-
-/// Client interface for calling `Router` from another contract.
-#[contractclient(name = "RouterClient")]
-pub trait RouterInterface {
-    fn initialize(env: Env, counter: Address, token: Address);
-    fn ping_counter(env: Env) -> u32;
-    fn route_transfer(env: Env, from: Address, to: Address, amount: i128);
-    fn counter_value(env: Env) -> u32;
 }
 
 /// An aggregator that calls `Router`, forming a two-level call chain:

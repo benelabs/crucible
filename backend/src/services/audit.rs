@@ -1,7 +1,8 @@
 //! Audit logging service and HTTP routes.
 
 use axum::{
-    extract::{Path, Query},
+    extract::{Path, Query, State},
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
@@ -156,6 +157,6 @@ pub fn routes(service: Arc<AuditService>) -> Router {
     Router::new()
         .route("/log", post(log_audit_event))
         .route("/reports", get(list_audit_reports))
-        .route("/reports/{id}", get(get_audit_report))
+        .route("/reports/:id", get(get_audit_report))
         .with_state(service)
 }

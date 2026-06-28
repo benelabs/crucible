@@ -39,8 +39,9 @@ impl Ctx {
         token.mint(&alice, STAKE_AMOUNT * 3);
         token.mint(&bob, STAKE_AMOUNT * 3);
 
-        env.mock_all_auths();
-        StakingClient::new(env.inner(), &id).initialize(&alice, &token.address());
+        env.with_mock_all_auths(|| {
+            StakingClient::new(env.inner(), &id).initialize(&alice, &token.address());
+        });
 
         Ctx {
             env,
@@ -64,8 +65,7 @@ impl Ctx {
 #[test]
 fn test_stake_transfers_tokens_to_contract() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+    ctx.env.with_mock_all_auths(|| ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None));
 
     assert_eq!(ctx.token.balance(&ctx.id), STAKE_AMOUNT);
     assert_eq!(ctx.token.balance(&ctx.alice), STAKE_AMOUNT * 2);
@@ -74,8 +74,7 @@ fn test_stake_transfers_tokens_to_contract() {
 #[test]
 fn test_stake_self_delegation_by_default() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+    ctx.env.with_mock_all_auths(|| ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None));
 
     // Without explicit delegate, voting power goes to self.
     assert_eq!(ctx.client().voting_power(&ctx.alice), STAKE_AMOUNT);
@@ -95,8 +94,7 @@ fn test_stake_with_explicit_delegate() {
 #[test]
 fn test_delegate_changes_voting_power() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+    ctx.env.with_mock_all_auths(|| ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None));
 
     // Alice delegates to Bob.
     ctx.client().delegate(&ctx.alice, &ctx.bob);
@@ -108,10 +106,12 @@ fn test_delegate_changes_voting_power() {
 #[test]
 fn test_delegate_then_redelegate() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
-    ctx.client().delegate(&ctx.alice, &ctx.bob);
-    ctx.client().delegate(&ctx.alice, &ctx.charlie);
+    {
+        let _auth = ctx.env.mock_all_auths_scoped();
+        ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+        ctx.client().delegate(&ctx.alice, &ctx.bob);
+        ctx.client().delegate(&ctx.alice, &ctx.charlie);
+    }
 
     assert_eq!(ctx.client().voting_power(&ctx.alice), 0);
     assert_eq!(ctx.client().voting_power(&ctx.bob), 0);
@@ -121,8 +121,7 @@ fn test_delegate_then_redelegate() {
 #[test]
 fn test_unstake_returns_tokens() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+    ctx.env.with_mock_all_auths(|| ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None));
     ctx.client().unstake(&ctx.alice);
 
     assert_eq!(ctx.token.balance(&ctx.alice), STAKE_AMOUNT * 3);
@@ -132,8 +131,7 @@ fn test_unstake_returns_tokens() {
 #[test]
 fn test_unstake_removes_voting_power() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+    ctx.env.with_mock_all_auths(|| ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None));
     ctx.client().unstake(&ctx.alice);
 
     assert_eq!(ctx.client().voting_power(&ctx.alice), 0);
@@ -153,12 +151,14 @@ fn test_unstake_removes_delegated_voting_power() {
 #[test]
 fn test_multiple_stakers_accumulate_voting_power() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    // Both alice and bob delegate to charlie.
-    ctx.client()
-        .stake(&ctx.alice, &STAKE_AMOUNT, &Some(ctx.charlie.clone()));
-    ctx.client()
-        .stake(&ctx.bob, &STAKE_AMOUNT, &Some(ctx.charlie.clone()));
+    {
+        let _auth = ctx.env.mock_all_auths_scoped();
+        // Both alice and bob delegate to charlie.
+        ctx.client()
+            .stake(&ctx.alice, &STAKE_AMOUNT, &Some(ctx.charlie.clone()));
+        ctx.client()
+            .stake(&ctx.bob, &STAKE_AMOUNT, &Some(ctx.charlie.clone()));
+    }
 
     assert_eq!(ctx.client().voting_power(&ctx.charlie), STAKE_AMOUNT * 2);
 }
@@ -190,8 +190,7 @@ fn test_delegate_without_stake_reverts() {
 #[test]
 fn test_stake_emits_event() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+    ctx.env.with_mock_all_auths(|| ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None));
     // Verify the staked event is present (alongside the SAC transfer event).
     let matching = ctx
         .env
@@ -202,9 +201,11 @@ fn test_stake_emits_event() {
 #[test]
 fn test_unstake_emits_event() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
-    ctx.client().unstake(&ctx.alice);
+    {
+        let _auth = ctx.env.mock_all_auths_scoped();
+        ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+        ctx.client().unstake(&ctx.alice);
+    }
     let matching = ctx
         .env
         .events_matching((soroban_sdk::symbol_short!("unstaked"),));
@@ -217,9 +218,11 @@ fn test_unstake_emits_event() {
 #[test]
 fn test_delegate_emits_event() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
-    ctx.client().delegate(&ctx.alice, &ctx.bob);
+    {
+        let _auth = ctx.env.mock_all_auths_scoped();
+        ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+        ctx.client().delegate(&ctx.alice, &ctx.bob);
+    }
     let matching = ctx
         .env
         .events_matching((soroban_sdk::symbol_short!("delegated"),));
@@ -232,9 +235,10 @@ fn test_delegate_emits_event() {
 #[test]
 fn test_get_stake_returns_correct_info() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client()
-        .stake(&ctx.alice, &STAKE_AMOUNT, &Some(ctx.bob.clone()));
+    ctx.env.with_mock_all_auths(|| {
+        ctx.client()
+            .stake(&ctx.alice, &STAKE_AMOUNT, &Some(ctx.bob.clone()));
+    });
 
     let info = ctx.client().get_stake(&ctx.alice);
     assert_eq!(info.amount, STAKE_AMOUNT);
@@ -252,9 +256,11 @@ fn test_get_stake_returns_zero_for_unknown() {
 #[test]
 fn test_additional_stake_accumulates() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
-    ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+    {
+        let _auth = ctx.env.mock_all_auths_scoped();
+        ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+        ctx.client().stake(&ctx.alice, &STAKE_AMOUNT, &None);
+    }
 
     let info = ctx.client().get_stake(&ctx.alice);
     assert_eq!(info.amount, STAKE_AMOUNT * 2);

@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(deprecated)]
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
 /// Binary outcome supported by the prediction market.
@@ -100,7 +99,7 @@ impl PredictionMarket {
         }
         trader.require_auth();
 
-        token::Client::new(&env, &state.token).transfer(
+        token::TokenClient::new(&env, &state.token).transfer(
             &trader,
             env.current_contract_address(),
             &amount,
@@ -163,7 +162,7 @@ impl PredictionMarket {
 
         let payout = Self::payout(&state, position);
         env.storage().instance().set(&key, &0_i128);
-        token::Client::new(&env, &state.token).transfer(
+        token::TokenClient::new(&env, &state.token).transfer(
             &env.current_contract_address(),
             &trader,
             &payout,

@@ -1,5 +1,7 @@
 use crate::api::contracts::ApiResponse;
 use crate::api::handlers::profiling::AppState;
+use crate::config::reload::ConfigManager;
+use crate::config::sanitize;
 use crate::error::AppError;
 use crate::services::contract_call_logger::{ContractCallLog, ContractCallLogger};
 use axum::{extract::State, response::IntoResponse, Json};
@@ -82,4 +84,22 @@ pub async fn get_admin_logs(
     let logs = logger.get_logs(None, 50).await?;
 
     Ok(Json(ApiResponse::new(logs)))
+}
+
+/// GET /api/v1/admin/config
+///
+/// Returns the current effective configuration with all sensitive fields redacted.
+/// This endpoint is intended for operators to inspect non-secret config for diagnostics.
+///
+/// **Redacted fields:**
+/// - `database.url` → `"[REDACTED]"`
+/// - `redis.url` → `"[REDACTED]"`
+/// - `redis.job_queue_url` → `"[REDACTED]"`
+/// - `server.tls.key_path` → `"[REDACTED]"`
+pub async fn get_effective_config(
+    State(config_manager): State<Arc<ConfigManager>>,
+) -> Result<impl IntoResponse, AppError> {
+    let config = config_manager.load();
+    let sanitized = sanitize::sanitize(&config);
+    Ok(Json(ApiResponse::new(sanitized)))
 }

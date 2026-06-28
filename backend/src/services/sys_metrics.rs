@@ -323,7 +323,7 @@ impl BuildMetricsService {
                    dependency_count, cache_hit_rate, cpu_usage, memory_usage_mb, build_timestamp
             FROM build_metrics
             ORDER BY build_timestamp DESC
-            LIMIT 
+            LIMIT $1
             "#,
         )
         .bind(limit)
@@ -358,7 +358,7 @@ impl BuildMetricsService {
                     build_timestamp,
                 },
             )
-            .collect())
+            .collect()
     }
 
 /// Delete all metrics for a project.

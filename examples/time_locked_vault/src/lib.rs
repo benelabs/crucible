@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(deprecated)]
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
 /// A single deposit held in the vault.
@@ -55,7 +54,7 @@ impl TimeLockedVault {
         }
         owner.require_auth();
 
-        token::Client::new(&env, &token).transfer(&owner, &env.current_contract_address(), &amount);
+        token::TokenClient::new(&env, &token).transfer(&owner, &env.current_contract_address(), &amount);
 
         let id: u64 = env
             .storage()
@@ -103,7 +102,7 @@ impl TimeLockedVault {
         dep.withdrawn = true;
         env.storage().instance().set(&DataKey::Deposit(id), &dep);
 
-        token::Client::new(&env, &dep.token).transfer(
+        token::TokenClient::new(&env, &dep.token).transfer(
             &env.current_contract_address(),
             &dep.owner,
             &dep.amount,

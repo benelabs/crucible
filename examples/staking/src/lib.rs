@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(deprecated)]
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
 /// Per-staker record.
@@ -59,7 +58,7 @@ impl Staking {
         staker.require_auth();
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        token::Client::new(&env, &token_addr).transfer(
+        token::TokenClient::new(&env, &token_addr).transfer(
             &staker,
             &env.current_contract_address(),
             &amount,
@@ -145,7 +144,7 @@ impl Staking {
             .remove(&DataKey::Stake(staker.clone()));
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        token::Client::new(&env, &token_addr).transfer(
+        token::TokenClient::new(&env, &token_addr).transfer(
             &env.current_contract_address(),
             &staker,
             &info.amount,

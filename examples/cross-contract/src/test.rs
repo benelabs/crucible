@@ -156,10 +156,10 @@ fn test_router_route_transfer_emits_event() {
 fn test_router_initialize_twice_panics() {
     let ctx = Ctx::setup();
     // Router is already initialized in Ctx::setup(); calling again must panic.
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.router()
             .initialize(&ctx.counter_id, &ctx.token.address());
-    });
+    }));
     assert!(result.is_err());
 }
 
@@ -239,9 +239,9 @@ fn test_aggregator_total_routed_starts_at_zero() {
 #[test]
 fn test_aggregator_initialize_twice_panics() {
     let ctx = Ctx::setup();
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.agg().initialize(&ctx.router_id);
-    });
+    }));
     assert!(result.is_err());
 }
 
@@ -293,9 +293,9 @@ fn test_transfer_insufficient_balance_reverts() {
     let ctx = Ctx::setup();
     // Alice has no tokens — transfer must fail.
     ctx.env.mock_all_auths();
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.agg().aggregate_transfer(&ctx.alice, &ctx.bob, &1_i128);
-    });
+    }));
     assert!(result.is_err());
     // Total routed must remain zero.
     assert_eq!(ctx.agg().total_routed(), 0);

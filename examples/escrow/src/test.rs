@@ -58,15 +58,16 @@ impl Ctx {
 
     /// Convenience: create a live escrow with unlock_time = BASE_TIME + LOCK_DURATION.
     fn create_escrow(&self) {
-        self.env.mock_all_auths();
-        self.client().create(
-            &self.depositor,
-            &self.recipient,
-            &self.arbiter,
-            &self.token.address(),
-            &AMOUNT,
-            &(BASE_TIME + LOCK_DURATION),
-        );
+        self.env.with_mock_all_auths(|| {
+            self.client().create(
+                &self.depositor,
+                &self.recipient,
+                &self.arbiter,
+                &self.token.address(),
+                &AMOUNT,
+                &(BASE_TIME + LOCK_DURATION),
+            );
+        });
     }
 }
 
@@ -92,8 +93,7 @@ fn test_claim_after_timeout() {
 
     // Advance past the time lock.
     ctx.env.advance_time(Duration::seconds(LOCK_DURATION + 1));
-    ctx.env.mock_all_auths();
-    ctx.client().claim();
+    ctx.env.with_mock_all_auths(|| ctx.client().claim());
 
     assert_eq!(ctx.token.balance(&ctx.recipient), AMOUNT);
     assert_eq!(ctx.token.balance(&ctx.id), 0);
@@ -116,8 +116,7 @@ fn test_arbiter_approve_allows_early_claim() {
     ctx.create_escrow();
 
     // Arbiter approves without waiting for the time lock.
-    ctx.env.mock_all_auths();
-    ctx.client().approve(&ctx.arbiter);
+    ctx.env.with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter));
 
     // Recipient claims immediately.
     ctx.client().claim();
@@ -146,8 +145,7 @@ fn test_refund_after_timeout() {
 
     // Advance past the time lock.
     ctx.env.advance_time(Duration::seconds(LOCK_DURATION + 1));
-    ctx.env.mock_all_auths();
-    ctx.client().refund();
+    ctx.env.with_mock_all_auths(|| ctx.client().refund());
 
     // Depositor gets their tokens back.
     assert_eq!(ctx.token.balance(&ctx.depositor), AMOUNT * 2);
@@ -169,8 +167,7 @@ fn test_double_claim_reverts() {
     ctx.create_escrow();
 
     ctx.env.advance_time(Duration::seconds(LOCK_DURATION + 1));
-    ctx.env.mock_all_auths();
-    ctx.client().claim();
+    ctx.env.with_mock_all_auths(|| ctx.client().claim());
 
     // Second claim should revert.
     assert_reverts!(ctx.client().claim(), "already settled");
@@ -179,14 +176,15 @@ fn test_double_claim_reverts() {
 #[test]
 fn test_create_emits_event() {
     let ctx = Ctx::setup();
-    ctx.env.mock_all_auths();
-    ctx.client().create(
-        &ctx.depositor,
-        &ctx.recipient,
-        &ctx.arbiter,
-        &ctx.token.address(),
-        &AMOUNT,
-        &(BASE_TIME + LOCK_DURATION),
-    );
+    ctx.env.with_mock_all_auths(|| {
+        ctx.client().create(
+            &ctx.depositor,
+            &ctx.recipient,
+            &ctx.arbiter,
+            &ctx.token.address(),
+            &AMOUNT,
+            &(BASE_TIME + LOCK_DURATION),
+        );
+    });
     assert_emitted!(ctx.env, ctx.id, (symbol_short!("created"),), AMOUNT);
 }

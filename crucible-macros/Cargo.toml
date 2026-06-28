@@ -2,8 +2,14 @@
 name = "crucible-macros"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 description = "Proc-macro support for the crucible Soroban testing framework."
-license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["soroban", "stellar", "testing", "smart-contracts", "macros"]
+categories = ["development-tools::testing"]
+
 
 [lib]
 proc-macro = true

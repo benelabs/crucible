@@ -1,6 +1,6 @@
 #![no_std]
 #![allow(deprecated)]
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, panic_with_error, token, Address, Env};
 
 /// Persistent state for the vesting schedule.
 #[contracttype]
@@ -28,6 +28,13 @@ enum DataKey {
     Schedule,
 }
 
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    Overflow = 1,
+}
+
 /// A cliff + linear vesting contract.
 ///
 /// Timeline:
@@ -42,7 +49,8 @@ pub struct Vesting;
 impl Vesting {
     /// Initialise the vesting schedule.
     ///
-    /// Transfers `total` tokens from `admin` into this contract.
+    /// Validates all parameters before transferring `total` tokens from `admin`
+    /// into this contract. Reverts on invalid schedules so no funds move.
     #[allow(clippy::too_many_arguments)]
     pub fn initialize(
         env: Env,
@@ -55,7 +63,15 @@ impl Vesting {
         duration: u64,
     ) {
         admin.require_auth();
+        let cliff_end = start.checked_add(cliff).unwrap_or_else(|| {
+            panic_with_error!(&env, ContractError::Overflow);
+        });
+        let _vesting_end = cliff_end.checked_add(duration).unwrap_or_else(|| {
+            panic_with_error!(&env, ContractError::Overflow);
+        });
+
         token::Client::new(&env, &token).transfer(&admin, env.current_contract_address(), &total);
+
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(
             &DataKey::Schedule,
@@ -104,7 +120,7 @@ impl Vesting {
         }
         s.claimed += claimable;
         env.storage().instance().set(&DataKey::Schedule, &s);
-        token::Client::new(&env, &s.token).transfer(
+        token::TokenClient::new(&env, &s.token).transfer(
             &env.current_contract_address(),
             &s.beneficiary,
             &claimable,
@@ -126,7 +142,7 @@ impl Vesting {
         s.revoked = true;
         env.storage().instance().set(&DataKey::Schedule, &s);
         if unvested > 0 {
-            token::Client::new(&env, &s.token).transfer(
+            token::TokenClient::new(&env, &s.token).transfer(
                 &env.current_contract_address(),
                 &admin,
                 &unvested,
@@ -140,11 +156,15 @@ impl Vesting {
 
     fn vested_at(env: &Env, s: &VestingSchedule) -> i128 {
         let now = env.ledger().timestamp();
-        let cliff_end = s.start + s.cliff;
+        let cliff_end = s.start.checked_add(s.cliff).unwrap_or_else(|| {
+            panic_with_error!(env, ContractError::Overflow);
+        });
         if now < cliff_end {
             return 0;
         }
-        let vesting_end = cliff_end + s.duration;
+        let vesting_end = cliff_end.checked_add(s.duration).unwrap_or_else(|| {
+            panic_with_error!(env, ContractError::Overflow);
+        });
         if now >= vesting_end {
             s.total
         } else {

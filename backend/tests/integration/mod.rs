@@ -5,6 +5,7 @@
 
 pub mod api_profile_test;
 pub mod api_status_test;
+pub mod health_test;
 pub mod services_test;
 pub mod workers_test;
 
@@ -20,7 +21,6 @@ use backend::{
         log_aggregator::LogAggregator, sys_metrics::MetricsExporter,
     },
 };
-use redis::Client as RedisClient;
 use std::sync::Arc;
 
 /// Build a test [`Router`] backed by fresh service instances.
@@ -30,15 +30,10 @@ pub fn test_app() -> Router {
         db: None,
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
-        config_manager: Arc::new(backend::config::reload::ConfigManager::new(
-            backend::config::AppConfig::default(),
-        )),
-        log_aggregator: Arc::new(backend::services::log_aggregator::LogAggregator::new().0),
-        redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
         config_manager: Arc::new(ConfigManager::new(AppConfig::default())),
         log_aggregator: Arc::new(log_aggregator),
         contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
-        redis: RedisClient::open("redis://127.0.0.1:1/").unwrap(),
+        redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
     });
 
     Router::new()

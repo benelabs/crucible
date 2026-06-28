@@ -6,6 +6,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod jobs;
+pub mod router;
 pub mod services;
 pub mod telemetry;
 pub mod utils;

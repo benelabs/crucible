@@ -11,7 +11,8 @@ fn create_token(env: &Env) -> (Address, Address) {
     let admin = Address::generate(env);
     let token_wasm = soroban_sdk::token::StellarAssetClient::new(
         env,
-        &env.register_stellar_asset_contract_v2(admin.clone()).address(),
+        &env.register_stellar_asset_contract_v2(admin.clone())
+            .address(),
     );
     (token_wasm.address.clone(), admin)
 }

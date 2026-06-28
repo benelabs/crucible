@@ -34,6 +34,8 @@ use redis::Client as RedisClient;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
+use tokio_util::sync::CancellationToken;
+
 use tower_http::{
     cors::{AllowOrigin, Any, CorsLayer},
     trace::TraceLayer,
@@ -250,39 +252,101 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::info!("Crucible backend listening on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    let result = tokio::select! {
-        res = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()) => {
-            db_pool.close().await;
-            res
-        },
-        _ = worker.run() => Ok(()),
+    let cancel_token = CancellationToken::new();
+    let worker_cancel_token = cancel_token.clone();
+
+    let worker_handle = tokio::spawn(async move {
+        // Apalis worker run loop.
+        // We also wait for cancellation so the supervisor task resolves promptly.
+        tokio::select! {
+            res = worker.run() => {
+                // Propagate result to the caller.
+                res
+            }
+            _ = worker_cancel_token.cancelled() => {
+                tracing::info!("Cancellation requested; stopping worker");
+                Ok(())
+            }
+        }
+    });
+
+    let server_cancel_token = cancel_token.clone();
+    let server_handle = tokio::spawn(async move {
+        let res = axum::serve(listener, app).with_graceful_shutdown(async move {
+            // Wait for cancellation to ensure both worker + server observe the same shutdown.
+            let _ = server_cancel_token.cancelled().await;
+        });
+
+        db_pool.close().await;
+        res
+    });
+
+    // Listen for Ctrl+C / SIGTERM and trigger global cancellation.
+    let signal_cancel_token = cancel_token.clone();
+    let signal_handle = tokio::spawn(async move {
+        let ctrl_c = async {
+            signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        };
+
+        #[cfg(unix)]
+        let terminate = async {
+            signal::unix::signal(signal::unix::SignalKind::terminate())
+                .expect("failed to install signal handler")
+                .recv()
+                .await;
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {
+                tracing::info!("Received Ctrl+C, initiating graceful shutdown");
+            }
+            _ = terminate => {
+                tracing::info!("Received SIGTERM, initiating graceful shutdown");
+            }
+        }
+
+        signal_cancel_token.cancel();
+    });
+
+
+    // Structured coordination: if worker fails, cancel the server.
+    let result: Result<(), anyhow::Error> = tokio::select! {
+        server_res = server_handle => {
+            match server_res {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(anyhow::Error::new(e)),
+                Err(join_err) => Err(anyhow::Error::new(join_err))
+            }
+        }
+        worker_res = worker_handle => {
+            // Cancel server, then report worker failure.
+            cancel_token.cancel();
+
+            match worker_res {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => {
+                    tracing::error!(error = %e, "Unhandled background worker crash; canceling HTTP server");
+                    Err(anyhow::Error::new(e))
+                }
+                Err(join_err) => {
+                    tracing::error!(error = %join_err, "Unhandled background worker task panicked or was aborted; canceling HTTP server");
+                    Err(anyhow::Error::new(join_err))
+                }
+            }
+        }
+        _ = signal_handle => {
+            // Signal triggered cancellation; wait for server/worker resolution implicitly.
+            Ok(())
+        }
     };
 
     result?;
     Ok(())
 }
 
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => tracing::info!("Received Ctrl+C, initiating graceful shutdown"),
-        _ = terminate => tracing::info!("Received SIGTERM, initiating graceful shutdown"),
-    }
-}
 
 fn build_cors_layer(config: &AppConfig) -> CorsLayer {
     if config.cors.allowed_origins.contains(&"*".to_string()) {

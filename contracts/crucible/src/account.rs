@@ -92,7 +92,7 @@ impl<'env> AccountBuilder<'env> {
     pub fn new(env: &'env MockEnv) -> Self {
         Self {
             env,
-            name: "unnamed".to_string(),
+            name: String::new(),
             xlm_balance: Stroops::from(0),
             token_balances: Vec::new(),
         }
@@ -135,6 +135,9 @@ impl<'env> AccountBuilder<'env> {
             token.mint(&address, amount);
         }
 
+        if self.name.is_empty() {
+            panic!("Account name must be set before building. Call .name("...") on AccountBuilder.");
+        }
         // 4. Register in MockEnv
         self.env.register_account(&self.name, address.clone());
 

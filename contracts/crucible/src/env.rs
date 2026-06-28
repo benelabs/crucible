@@ -444,6 +444,9 @@ impl MockEnv {
 
     /// Register an account with a name.
     pub fn register_account(&self, name: &str, address: Address) {
+        if self.accounts.borrow().contains_key(name) {
+            panic!("Account '{}' already registered. Use a unique name.", name);
+        }
         self.accounts.borrow_mut().insert(name.to_string(), address);
     }
 

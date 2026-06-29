@@ -26,7 +26,10 @@ macro_rules! assert_reverts {
         }));
         assert!(
             __result.is_err(),
-            "Expected contract call to revert (panic), but it succeeded"
+            "assert_reverts! failed: the expression did not revert (panic).\n\
+             \n\
+             Expression: {expr}",
+            expr = stringify!($expr),
         );
     }};
     ($expr:expr, $msg:literal) => {{
@@ -36,10 +39,12 @@ macro_rules! assert_reverts {
         }));
         assert!(
             __result.is_err(),
-            concat!(
-                "Expected contract call to revert, but it succeeded. Context: ",
-                $msg
-            )
+            "assert_reverts! failed: the expression did not revert (panic).\n\
+             \n\
+             Expression : {expr}\n\
+             Context    : {ctx}",
+            expr = stringify!($expr),
+            ctx  = $msg,
         );
     }};
 }
@@ -88,11 +93,25 @@ macro_rules! assert_emitted {
         });
         assert!(
             __found,
-            "Expected event not found.\n  contract: {:?}\n  topics:   {:?}\n  data:     {:?}\n  actual events: {:?}",
-            __want_contract,
-            __want_topics,
-            __want_data_xdr,
-            __all,
+            "assert_emitted! failed: expected event was not found.\n\
+             \n\
+             Contract : {contract}\n\
+             Topics   : {topics:?}\n\
+             Data     : {data:?}\n\
+             \n\
+             Events emitted by this contract ({count}):\n\
+             {actual}",
+            contract = __want_contract,
+            topics   = __want_topics,
+            data     = __want_data_xdr,
+            count    = __filtered.events().len(),
+            actual   = {
+                let lines: std::vec::Vec<String> = __filtered.events().iter().enumerate().map(|(i, ev)| {
+                    let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
+                    format!("  [{i}] topics={:?} data={:?}", body.topics, body.data)
+                }).collect();
+                if lines.is_empty() { "  (none)".to_string() } else { lines.join("\n") }
+            },
         );
     }};
 }
@@ -112,9 +131,19 @@ macro_rules! assert_not_emitted {
         let __events = $env.inner().events().all();
         assert!(
             __events.events().is_empty(),
-            "Expected no events to be emitted, but {} were emitted. Events: {:?}",
-            __events.events().len(),
-            __events
+            "assert_not_emitted! failed: expected no events, but {count} event(s) were emitted.\n\
+             \n\
+             Emitted events:\n\
+             {list}",
+            count = __events.events().len(),
+            list = {
+                let lines: std::vec::Vec<String> = __events.events().iter().enumerate().map(|(i, ev)| {
+                    let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
+                    format!("  [{i}] contract={:?} topics={:?} data={:?}",
+                        ev.contract_id, body.topics, body.data)
+                }).collect();
+                lines.join("\n")
+            },
         );
     }};
 }

@@ -12,6 +12,10 @@
 use crate::env::{MockEnv, Stroops};
 use crate::token::MockToken;
 use soroban_sdk::Address;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Global counter for generating unique unnamed account identifiers.
+static UNNAMED_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A handle to a Soroban account used in tests.
 #[derive(Clone)]
@@ -89,10 +93,15 @@ pub struct AccountBuilder<'env> {
 
 impl<'env> AccountBuilder<'env> {
     /// Creates a new `AccountBuilder` for the given environment.
+    ///
+    /// The default name is auto-generated as `"unnamed_<N>"` using a global
+    /// atomic counter, preventing collisions when multiple unnamed accounts
+    /// are built in the same test run.
     pub fn new(env: &'env MockEnv) -> Self {
+        let id = UNNAMED_COUNTER.fetch_add(1, Ordering::Relaxed);
         Self {
             env,
-            name: "unnamed".to_string(),
+            name: format!("unnamed_{id}"),
             xlm_balance: Stroops::from(0),
             token_balances: Vec::new(),
         }
@@ -224,6 +233,23 @@ mod tests {
         // Should be retrievable from env
         let charlie_ref = env.account("charlie");
         assert_eq!(charlie_ref.address(), charlie.address());
+    }
+
+    #[test]
+    fn test_unnamed_accounts_get_unique_names() {
+        let env = MockEnv::builder().build();
+        // Build multiple unnamed accounts — each should have a distinct name
+        // and both should be independently retrievable from the env.
+        let a = AccountBuilder::new(&env).fund_xlm(Stroops::xlm(1)).build();
+        let b = AccountBuilder::new(&env).fund_xlm(Stroops::xlm(2)).build();
+
+        // Names must differ.
+        assert_ne!(a.name(), b.name());
+        // Addresses must differ.
+        assert_ne!(a.address(), b.address());
+        // Both are retrievable from the env under their respective names.
+        assert_eq!(env.account(a.name()).address(), a.address());
+        assert_eq!(env.account(b.name()).address(), b.address());
     }
 }
 

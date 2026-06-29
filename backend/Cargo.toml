@@ -35,7 +35,7 @@ testutils = ["mockall"]
 # Web framework
 axum = { version = "0.7", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["full", "util"] }
-tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "request-id"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "request-id"] }
 tower_governor = "0.4"
 
 # Async runtime

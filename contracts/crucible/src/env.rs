@@ -237,6 +237,66 @@ impl MockEnv {
         self.inner.events().all()
     }
 
+    /// Returns all events emitted by a specific contract address.
+    ///
+    /// Useful for asserting that a particular contract (in a multi-contract
+    /// scenario) emitted (or did not emit) certain events.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let pool_events = env.events_from_contract(&pool_address);
+    /// assert!(!pool_events.is_empty());
+    /// ```
+    pub fn events_from_contract(&self, contract_id: &Address) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        use soroban_sdk::xdr::{self, ScAddress};
+        let all_events = self.inner.events().all();
+        let mut result = SorobanVec::new(&self.inner);
+        for event in all_events.events() {
+            if let Some(ref id) = event.contract_id {
+                let sc_addr = ScAddress::Contract(id.clone());
+                let addr = Address::from_val(&self.inner, &sc_addr);
+                if addr == *contract_id {
+                    let xdr::ContractEventBody::V0(body) = &event.body;
+                    let topics: SorobanVec<Val> = body.topics.clone().into_val(&self.inner);
+                    let data: Val = body.data.clone().into_val(&self.inner);
+                    result.push_back((addr, topics, data));
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns all events emitted by any of the given contract addresses.
+    ///
+    /// Useful for tracking events across multiple contracts simultaneously,
+    /// e.g. verifying that an aggregator routed a call through exactly one pool.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let events = env.events_from_contracts(&[&pool_a, &pool_b]);
+    /// assert_eq!(events.len(), 1); // only one pool was used
+    /// ```
+    pub fn events_from_contracts(&self, contract_ids: &[&Address]) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        use soroban_sdk::xdr::{self, ScAddress};
+        let all_events = self.inner.events().all();
+        let mut result = SorobanVec::new(&self.inner);
+        for event in all_events.events() {
+            if let Some(ref id) = event.contract_id {
+                let sc_addr = ScAddress::Contract(id.clone());
+                let addr = Address::from_val(&self.inner, &sc_addr);
+                if contract_ids.iter().any(|c| **c == addr) {
+                    let xdr::ContractEventBody::V0(body) = &event.body;
+                    let topics: SorobanVec<Val> = body.topics.clone().into_val(&self.inner);
+                    let data: Val = body.data.clone().into_val(&self.inner);
+                    result.push_back((addr, topics, data));
+                }
+            }
+        }
+        result
+    }
+
     /// Returns events matching the given topics.
     ///
     /// Updated for Soroban SDK v25.x ContractEvents compatibility.

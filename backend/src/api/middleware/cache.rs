@@ -1,9 +1,6 @@
-use axum::{
-    middleware::Next,
-    extract::Request,
-};
-use std::time::Duration;
+use axum::{extract::Request, middleware::Next};
 use redis::Client;
+use std::time::Duration;
 
 /// Cache key generator for HTTP requests
 #[derive(Debug, Clone)]
@@ -71,8 +68,6 @@ where
 
     fn call(&mut self, req: Req) -> Self::Future {
         let mut inner = self.inner.clone();
-        Box::pin(async move {
-            inner.call(req).await
-        })
+        Box::pin(async move { inner.call(req).await })
     }
 }

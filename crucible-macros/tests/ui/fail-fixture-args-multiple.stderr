@@ -1,0 +1,11 @@
+error: #[fixture] does not take arguments
+ --> tests/ui/fail-fixture-args-multiple.rs:4:11
+  |
+4 | #[fixture(foo, bar)]
+  |           ^^^^^^^^
+
+error[E0425]: cannot find type `MyFixture` in this scope
+ --> tests/ui/fail-fixture-args-multiple.rs:9:6
+  |
+9 | impl MyFixture {
+  |      ^^^^^^^^^ not found in this scope

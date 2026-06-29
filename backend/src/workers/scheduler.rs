@@ -184,24 +184,25 @@ async fn run_job_loop(
             }
         };
 
-        let acquired: bool = match redis::cmd("SET")
+        let acquired: Option<String> = match redis::cmd("SET")
             .arg(&lock_key)
             .arg("1")
             .arg("NX")
             .arg("PX")
             .arg(lock_ttl_ms)
-            .query_async(&mut conn)
+            .query_async::<Option<String>>(&mut conn)
             .await
         {
+            Ok(v) => v,
             Ok(Some(v)) if v == "OK" => true,
-            Ok(v) => v, // If it returns true/1
+            Ok(_) => false,
             Err(e) => {
                 error!("Failed to acquire distributed lock: {}", e);
                 continue;
             }
         };
 
-        if !acquired {
+        if acquired.as_deref() != Some("OK") {
             debug!("Another instance is running this tick, skipping");
             continue;
         }

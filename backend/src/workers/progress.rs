@@ -150,8 +150,8 @@ pub struct JobProgress {
 }
 
 mod instant_serde {
-    use serde::{self, Deserialize, Serializer, Deserializer};
-    use std::time::{Instant, Duration};
+    use serde::{self, Deserialize, Deserializer, Serializer};
+    use std::time::{Duration, Instant};
 
     pub fn serialize<S>(instant: &Instant, serializer: S) -> Result<S::Ok, S::Error>
     where

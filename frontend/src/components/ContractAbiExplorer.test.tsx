@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest';
 describe('ContractAbiExplorer', () => {
   it('renders default Counter contract and its functions list', () => {
     render(<ContractAbiExplorer />);
-    
+
     expect(screen.getAllByText('Counter')[0]).toBeInTheDocument();
     expect(screen.getAllByText('increment')[0]).toBeInTheDocument();
     expect(screen.getAllByText('decrement')[0]).toBeInTheDocument();
@@ -15,7 +15,7 @@ describe('ContractAbiExplorer', () => {
 
   it('switches between contracts', () => {
     render(<ContractAbiExplorer />);
-    
+
     const tokenBtn = screen.getByTestId('abi-select-token');
     fireEvent.click(tokenBtn);
 
@@ -26,7 +26,7 @@ describe('ContractAbiExplorer', () => {
 
   it('renders input fields for selected functions dynamically', () => {
     render(<ContractAbiExplorer />);
-    
+
     // Select reset function on Counter
     const resetBtn = screen.getByTestId('method-reset');
     fireEvent.click(resetBtn);
@@ -36,7 +36,7 @@ describe('ContractAbiExplorer', () => {
 
   it('handles execution and displays output stats', async () => {
     render(<ContractAbiExplorer />);
-    
+
     // Default is Counter, increment (u32, not get_value)
     const executeBtn = screen.getByTestId('execute-btn');
     fireEvent.click(executeBtn);

@@ -1,20 +1,7 @@
-//! SCHEDULER APPROACH: Option B — Custom Tokio interval loop with cron crate
-//! Rationale: We require strict control over execution guarantees such as distributed locking, timeouts, retries, and history logging. A custom loop using `tokio::time::sleep_until` and the `cron` crate allows us to wrap the execution precisely in a Redis lock and accurately handle timeouts using `tokio::time::timeout`.
+//! Background worker modules for the Crucible backend.
+//!
+//! This module groups all async worker implementations including retry logic,
+//! job processing, and other background task utilities.
 
-pub mod error;
-pub mod job_history;
-pub mod jobs;
-pub mod scheduler;
-
-pub mod cache_warm;
-pub mod executor;
-pub mod health;
-pub mod progress;
-
-#[cfg(test)]
-mod tests;
-
-pub use cache_warm::CacheWarmWorker;
-pub use executor::TaskExecutor;
-pub use health::WorkerHealthMonitor;
-pub use progress::JobProgressTracker;
+pub mod retry;
+pub mod priority;

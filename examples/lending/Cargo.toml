@@ -1,0 +1,13 @@
+[package]
+name = "crucible-example-lending"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+crucible = { path = "../../contracts/crucible" }

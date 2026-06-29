@@ -4,26 +4,35 @@
 //! overrides are passed securely via environment variables. This prevents environment variable sprawl,
 //! ensures typed nested structures, and makes local development frictionless without compromising
 //! production security.
+//!
+//! - [`AppConfig`] — hot-reloadable runtime configuration, loaded via the layered config crate.
+//! - [`reload`] — [`ConfigManager`] and Axum handlers for live config updates.
 
-use config::{Config, Environment as ConfigEnvironment, File, FileFormat};
+use config::{Config as ConfigBuilder, Environment as ConfigEnvironment, File, FileFormat};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+pub mod cors;
 pub mod database;
 pub mod error;
 pub mod observability;
 pub mod redis;
 pub mod reload;
+pub mod sanitize;
 pub mod server;
 
 #[cfg(test)]
 mod tests;
 
+pub use cors::CorsConfig;
 pub use database::DatabaseConfig;
 pub use error::ConfigError;
 pub use observability::ObservabilityConfig;
 pub use redis::RedisConfig;
+pub use sanitize::{sanitize, SanitizedConfig};
 pub use server::ServerConfig;
+
+
 
 /// The execution environment of the application.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -88,6 +97,8 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
     pub observability: ObservabilityConfig,
+    #[serde(default)]
+    pub cors: CorsConfig,
 }
 
 // Temporary fallback for testing/reloading if missing in main.rs
@@ -110,7 +121,7 @@ impl AppConfig {
             Environment::Production => include_str!("defaults/production.toml"),
         };
 
-        let builder = Config::builder()
+        let builder = ConfigBuilder::builder()
             // 1. Base configuration defaults
             .add_source(File::from_str(default_config, FileFormat::Toml))
             // 2. Environment-specific overrides
@@ -158,6 +169,22 @@ impl AppConfig {
 
         if self.redis.pool_size == 0 {
             errors.push("Redis pool_size must be greater than 0.".to_string());
+        }
+
+        if env == Environment::Production || env == Environment::Staging {
+            if self.cors.allowed_origins.is_empty() {
+                errors.push(
+                    "CORS allowed_origins must not be empty in Production/Staging. \
+                     Set explicit origins (e.g. APP_CORS__ALLOWED_ORIGINS__0=https://example.com)."
+                        .to_string(),
+                );
+            } else if self.cors.allowed_origins.contains(&"*".to_string()) {
+                errors.push(
+                    "CORS wildcard '*' is not allowed in Production/Staging. \
+                     Replace with explicit origins (e.g. APP_CORS__ALLOWED_ORIGINS__0=https://example.com)."
+                        .to_string(),
+                );
+            }
         }
 
         if !errors.is_empty() {

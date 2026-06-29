@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/somemorewater/crucible/discussions
+    about: Please ask questions and start discussions here, not in the issue tracker.
+  - name: Security vulnerability
+    url: https://github.com/somemorewater/crucible/security/advisories/new
+    about: Report security vulnerabilities via private advisory, not public issues.

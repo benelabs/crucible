@@ -13,9 +13,16 @@ High-performance Rust backend for the Crucible smart contract testing platform, 
 - **Axum**: High-performance web framework.
 - **SQLx**: Async PostgreSQL driver with compile-time checked queries.
 - **Redis**: Caching and threshold tracking.
+- **Upload Validation**: Safe file upload validation with size, name, and MIME checks.
 - **Tracing**: Observability and structured logging.
+- **Error Handling**: Structured `AppError` responses for HTTP clients.
 
 ## API Endpoints
+
+### Health & Observability
+- `GET /health/live` - Liveness probe for process health.
+- `GET /health/ready` - Readiness probe for PostgreSQL + Redis connectivity.
+- `GET /metrics` - Prometheus metrics exposition endpoint.
 
 ### Rules Management
 - `GET /api/alerts/rules` - List all alerting rules.
@@ -24,6 +31,11 @@ High-performance Rust backend for the Crucible smart contract testing platform, 
 
 ### Log Ingestion
 - `POST /api/alerts/ingest` - Ingest a log entry for pattern matching.
+
+### Security Audit Report Viewer
+- `GET /api/v1/audit/reports` — List recent audit events. Supports optional `event_type` and `limit` query parameters.
+- `GET /api/v1/audit/reports/:id` — Fetch details for a single audit event.
+- `POST /api/v1/audit/log` — Log a security audit event for later review.
 
 ### Build Error Analytics Dashboard API
 - `GET /api/v1/errors/dashboard/build-errors` — Returns build error analytics (total errors, error types, recent errors)
@@ -95,6 +107,34 @@ docker compose up -d
 
 # Check service health
 curl http://localhost:8080/health
+docker compose ps
+
+# Test the health endpoints
+curl http://localhost:8080/health/live
+curl http://localhost:8080/health/ready
+
+# Expected readiness response:
+# {"status":"healthy","database":"healthy","cache":"healthy","version":"0.1.0"}
+
+# Test the metrics endpoint
+curl http://localhost:8080/metrics
+
+# Test the API status endpoint
+curl http://localhost:8080/api/v1/status
+```
+
+### Applying Database Migrations
+SQLx migrations live in `backend/migrations/`. Apply them after the database is running:
+```bash
+export DATABASE_URL=postgres://crucible:crucible_secret@localhost:5432/crucible_db
+sqlx migrate run --source backend/migrations
+# or from the repo root:
+make db-migrate
+```
+
+Verify migration state at any time with:
+```bash
+sqlx migrate info --source backend/migrations
 ```
 
 ### Local Development (without Docker)
@@ -103,6 +143,8 @@ Run Postgres and Redis in Docker, but the Rust app natively:
 docker compose up -d postgres redis
 export DATABASE_URL=postgres://crucible:crucible_secret@localhost:5432/crucible_db
 export REDIS_URL=redis://:crucible_redis_secret@localhost:6379/0
+# Apply migrations before starting the app
+sqlx migrate run --source backend/migrations
 cargo run
 ```
 
@@ -151,7 +193,31 @@ backend/
 | `REDIS_PASSWORD`          | `crucible_redis_secret`     | Redis authentication password            |
 | `REDIS_POOL_SIZE`         | `5`                         | Redis connection pool size               |
 | `JWT_SECRET`              | *(dev default)*             | JWT signing secret                       |
-| `CORS_ALLOWED_ORIGINS`    | `localhost:3000,5173`       | Comma-separated allowed origins          |
+| `APP_CORS__ALLOWED_ORIGINS__0` | *(none)*               | Allowed CORS origin (use `__0`, `__1`, etc. for multiple) |
+
+### CORS Behavior per Environment
+
+CORS configuration is driven by `cors.allowed_origins` in the config system. The behavior changes with the environment:
+
+| Environment   | Default `allowed_origins` | Wildcard `*` allowed? | Behavior                                      |
+|---------------|---------------------------|------------------------|-----------------------------------------------|
+| Development   | `["*"]`                   | Yes                    | Permissive CORS — any origin, method, header  |
+| Staging       | `[]`                      | **No** (rejected)      | Must set explicit origins or startup fails    |
+| Production    | `[]`                      | **No** (rejected)      | Must set explicit origins or startup fails    |
+
+**Setting origins via environment variables:**
+
+Use indexed keys with the `APP__` prefix. The `config` crate maps `APP_CORS__ALLOWED_ORIGINS__N` to `cors.allowed_origins[N]`:
+
+```
+APP_CORS__ALLOWED_ORIGINS__0=https://app.example.com
+APP_CORS__ALLOWED_ORIGINS__1=https://admin.example.com
+```
+
+**Startup validation:**
+In Production or Staging, the application refuses to start if `allowed_origins` is empty or contains the wildcard `"*"`. The error message directs you to set explicit origins.
+
+**SEP-1 exception:** The `/.well-known/stellar.toml` endpoint always returns `Access-Control-Allow-Origin: *` — this is required by the Stellar protocol for wallet discovery and is independent of the application CORS configuration.
 
 ## Docker Compose Features
 
@@ -208,10 +274,68 @@ Extensions enabled: `uuid-ossp`, `pgcrypto`, `citext`
 
 ## API Endpoints
 
-| Method | Path             | Description                    |
-|--------|------------------|--------------------------------|
-| `GET`  | `/health`        | Health check (DB + Redis)      |
-| `GET`  | `/api/v1/status` | API status and version info    |
+| Method   | Path                                              | Description                          |
+|----------|---------------------------------------------------|--------------------------------------|
+| `GET`    | `/health`                                         | Health check (DB + Redis)            |
+| `GET`    | `/api/v1/status`                                  | API status and version info          |
+| `POST`   | `/api/v1/deployments`                             | Register a new deployment            |
+| `GET`    | `/api/v1/deployments/:id`                         | Get a deployment by UUID             |
+| `GET`    | `/api/v1/deployments/contract/:contract_id`       | List deployments for a contract      |
+| `PATCH`  | `/api/v1/deployments/:id/status`                  | Update deployment health status      |
+
+### Deploy Health
+
+The deploy-health API tracks the lifecycle and health of contract deployments.
+
+#### Register a deployment
+
+```http
+POST /api/v1/deployments
+Content-Type: application/json
+
+{
+  "contract_id": "CAABC123...",
+  "version": "1.2.0",
+  "metadata": { "network": "testnet" }
+}
+```
+
+Response `201 Created`:
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "contract_id": "CAABC123...",
+  "version": "1.2.0",
+  "status": "pending",
+  "deployed_at": "2026-05-27T22:00:00Z",
+  "last_checked_at": null,
+  "error_message": null,
+  "metadata": { "network": "testnet" },
+  "created_at": "2026-05-27T22:00:00Z",
+  "updated_at": "2026-05-27T22:00:00Z"
+}
+```
+
+#### Update deployment status
+
+```http
+PATCH /api/v1/deployments/:id/status
+Content-Type: application/json
+
+{
+  "status": "healthy"
+}
+```
+
+Valid status values: `pending` | `healthy` | `degraded` | `failed`.
+
+Pass `"error_message"` alongside `"status": "failed"` or `"status": "degraded"` to record a reason.
+
+#### Caching
+
+Single-deployment and contract-list responses are cached in Redis for 30 seconds.
+A `PATCH` to update status invalidates the per-deployment cache entry immediately.
 
 ## Production Deployment
 
@@ -221,7 +345,7 @@ For production, update the following:
 2. **Set `APP_ENV=production`**
 3. **Set `RUST_LOG=crucible_backend=info,tower_http=info`** — reduce log verbosity
 4. **Set a strong `JWT_SECRET`** — at least 64 characters
-5. **Restrict `CORS_ALLOWED_ORIGINS`** — to your frontend domain(s)
+5. **Set explicit `APP_CORS__ALLOWED_ORIGINS__0`** — to your frontend domain(s). Wildcard `*` is rejected in production.
 6. **Consider external managed databases** — for PostgreSQL and Redis at scale
 7. **Add TLS termination** — via a reverse proxy (nginx, Caddy, or cloud LB)
 
@@ -283,7 +407,7 @@ High-performance endpoints for monitoring application health and system metrics.
 - `/api/v1/profiling/health`: System health status.
 - `/api/status`: Unified health, metrics, and active recovery tasks.
 
-### 🔭 OpenTelemetry Tracing (Issue #251)
+### 🔭 OpenTelemetry Tracing (Issue #365)
 Production-grade distributed tracing with OTLP exporter and Jaeger integration.
 - **Full instrumentation**: HTTP handlers, database queries, Redis operations, background jobs
 - **Semantic conventions**: W3C trace context, OpenTelemetry semantic conventions
@@ -362,6 +486,7 @@ domain-specific factories remain available.
 | `error_recovery` | Tracks retry state for failing tasks with configurable max retries |
 | `log_aggregator` | Async MPSC-based log pipeline; persists entries via a background worker |
 | `log_alerts` | Threshold-based alerting over the log pipeline with sliding-window evaluation |
+| `logger` | Structured logging bootstrap; pretty output in development and JSON logs in staging/production |
 | `feature_flags` | Feature flag management backed by PostgreSQL with Redis caching |
 | `alerts` | Critical-error notification dispatcher — deduplication, in-memory queue, Redis pub/sub |
 | `tracing` | OpenTelemetry tracing initialisation — wires `tracing` spans to an OTLP HTTP exporter |
@@ -379,6 +504,7 @@ domain-specific factories remain available.
 | Name | Description |
 |---|---|
 | `logging` | Captures request/response metadata, latency, and status codes; integrated with `tracing` and `log_aggregator` |
+| `permissions` | Role-based access control (RBAC) with PostgreSQL storage and Redis caching for permission checks |
 
 ### Binaries (`src/bin/`)
 
@@ -472,8 +598,8 @@ All workers are designed to be production-ready with comprehensive error handlin
 
 2. **Run the backend** with tracing enabled:
    ```bash
-   export OTLP_ENDPOINT=http://localhost:4317
-   export ENV=dev
+   export APP_OBSERVABILITY__TRACING_ENDPOINT=http://localhost:4318/v1/traces
+   export APP_ENV=development
    cargo run -p backend
    ```
 
@@ -569,8 +695,8 @@ otel.kind = "internal"
 
 | Variable | Default | Description |
 |---|---|---|
-| `OTLP_ENDPOINT` | `http://localhost:4317` | OTLP gRPC endpoint |
-| `ENV` | `dev` | Environment (dev, staging, production) |
+| `APP_OBSERVABILITY__TRACING_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP HTTP traces endpoint |
+| `APP_ENV` | `development` | Environment (development, staging, production) |
 | `RUST_LOG` | `info,crucible=debug` | Log level filter |
 
 #### Sampling Strategies
@@ -664,7 +790,7 @@ Crucible uses a typed contract system for all API endpoints to ensure consistenc
 Production-grade distributed tracing with OTLP exporter and Jaeger integration.
 
 1. **Start Jaeger**: `docker-compose -f docker-compose-jaeger.yml up -d`
-2. **Run Backend**: `export OTLP_ENDPOINT=http://localhost:4317; cargo run -p backend`
+2. **Run Backend**: `export APP_OBSERVABILITY__TRACING_ENDPOINT=http://localhost:4318/v1/traces; cargo run -p backend`
 3. **View Traces**: Open `http://localhost:16686`
 
 Spans from every `#[tracing::instrument]`-annotated function are exported with **< 1% latency overhead**.
@@ -888,6 +1014,7 @@ If `APP_ENV` is omitted, the application safely defaults to `development` and em
 | `APP_REDIS__URL` | String | None | Yes | Redis connection string. **(SENSITIVE)** |
 | `APP_REDIS__JOB_QUEUE_URL` | String | Falls back to URL | No | Separate Redis instance for the job queue. **(SENSITIVE)** |
 | `APP_OBSERVABILITY__LOG_LEVEL` | String | (from TOML) | No | Logging verbosity (e.g., `info`, `warn`, `debug`). |
+| `APP_OBSERVABILITY__TRACING_ENDPOINT` | String | `http://localhost:4318/v1/traces` | No | OTLP HTTP traces endpoint for Jaeger or an OpenTelemetry Collector. |
 
 ### How to Add a New Configuration Field
 
@@ -958,3 +1085,132 @@ async fn test_create_resource() {
 ### Adding New Fixture Helpers
 To add reusable database states, write standard async functions in `src/test_utils/fixtures.rs` that accept `&PgPool`. Because schemas are isolated, fixtures never need to worry about cleaning up after themselves.
 
+```rust
+impl Validate for ProfileTriggerRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.duration_secs == 0 {
+            return Err("duration_secs must be > 0".to_string());
+        }
+        Ok(())
+    }
+}
+```
+## Structure
+- `src/api/` – API handlers and routing
+- `src/config/` – Environment configuration
+- `src/db/` – Database utilities and seed data
+- `src/jobs/` – Background job definitions (Apalis)
+- `src/services/` – Business logic and external integrations
+- `src/telemetry/` – Observability and logging setup
+- `src/workers/` – Background worker modules, including the exponential backoff retry policy
+
+## Exponential Backoff Retry Policy
+
+Crucible includes a production-ready retry module (`src/workers/retry.rs`) to safely retry fallible asynchronous operations (such as SQLx database transactions, Redis calls, or external Stellar Horizon requests).
+
+### Features
+- **Exponential Backoff**: Dynamically increases backoff duration using the formula `base_delay * multiplier^attempt`.
+- **Full Jitter**: Implements the AWS recommended full jitter strategy to prevent thundering herd problems.
+- **Conditional Retries**: Abort retries early based on the specific error encountered using the `ShouldRetry` predicate.
+- **Observability**: Built-in structured tracing (`tracing` spans and logs) to track retry attempts, backoff durations, and exhausted errors.
+- **Serializable Configuration**: `RetryConfig` supports direct Serialization/Deserialization for config-driven retries.
+
+### Usage Example
+```rust
+use backend::workers::retry::{RetryPolicy, RetryError};
+
+async fn perform_stellar_tx() -> Result<(), MyError> {
+    let policy = RetryPolicy::default()
+        .with_base_delay(std::time::Duration::from_millis(100))
+        .with_max_delay(std::time::Duration::from_secs(10));
+
+    policy.retry(|| async {
+        // Fallible operation
+        send_transaction().await
+    }).await.map_err(|err| err.into_inner())
+}
+```
+
+
+
+## Permissions & RBAC
+
+The backend implements role-based access control (RBAC) with three built-in roles and fine-grained permission management.
+
+### Roles
+
+| Role | Description |
+|---|---|
+| `admin` | Full system access, can manage all resources and permissions |
+| `user` | Standard user with limited permissions |
+| `guest` | Read-only access to public resources |
+
+### Permission System
+
+Permissions are defined as `(resource, action)` pairs stored in PostgreSQL and cached in Redis:
+
+use backend::api::middleware::permissions::{Permission, PermissionChecker};
+
+let checker = PermissionChecker::new(db, redis);
+let permission = Permission::new("contracts", "read");
+
+if checker.has_permission(user_id, &permission).await? {
+    // User has permission
+}
+
+### Default Permissions
+
+| Resource | Actions | Description |
+|---|---|---|
+| `contracts` | `read`, `write`, `delete` | Smart contract management |
+| `test_runs` | `read`, `write`, `delete` | Test execution management |
+| `users` | `read`, `write`, `delete` | User management |
+| `permissions` | `manage` | Permission assignment |
+
+### Using Permission Middleware
+
+use axum::{routing::get, Router};
+use backend::api::middleware::permissions::require_permission;
+
+let app = Router::new()
+    .route("/contracts", get(list_contracts))
+    .layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        require_permission("contracts", "read")
+    ));
+
+### Caching Strategy
+
+Permission checks are cached in Redis with a 5-minute TTL:
+
+- Cache key format: `perm:{user_id}:{resource}:{action}`
+- Role cache: `role:{user_id}`
+- Automatic invalidation on permission changes via `invalidate_cache(user_id)`
+
+### Managing Permissions
+
+```sql
+-- Grant permission to user
+INSERT INTO user_permissions (user_id, permission_id)
+SELECT 123, id FROM permissions 
+WHERE resource = 'contracts' AND action = 'write';
+
+-- Revoke permission
+DELETE FROM user_permissions 
+WHERE user_id = 123 
+  AND permission_id = (SELECT id FROM permissions WHERE resource = 'contracts' AND action = 'write');
+
+-- List user permissions
+SELECT p.resource, p.action, p.description
+FROM user_permissions up
+JOIN permissions p ON up.permission_id = p.id
+WHERE up.user_id = 123;
+
+### Database Schema
+
+Run migration `20260430000000_permissions.sql` to set up:
+
+- `user_role` enum type (`admin`, `user`, `guest`)
+- `permissions` table with resource/action pairs
+- `user_permissions` junction table
+- Indexes for performance optimization

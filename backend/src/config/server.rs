@@ -17,8 +17,29 @@ pub struct ServerConfig {
     pub request_timeout_ms: u64,
     /// Maximum number of concurrent connections
     pub max_connections: usize,
+    /// Maximum request body size in bytes (default: 10MB)
+    #[serde(default = "default_max_body_size")]
+    pub max_body_size: usize,
+    /// Maximum request body size for contract compilation in bytes (default: 1MB)
+    #[serde(default = "default_compile_max_size")]
+    pub compile_max_size: usize,
+    /// Maximum request body size for sandbox execution in bytes (default: 5MB)
+    #[serde(default = "default_sandbox_max_size")]
+    pub sandbox_max_size: usize,
     /// TLS configuration (required in production, optional elsewhere)
     pub tls: Option<TlsConfig>,
+}
+
+fn default_max_body_size() -> usize {
+    10 * 1024 * 1024 // 10MB
+}
+
+fn default_compile_max_size() -> usize {
+    1 * 1024 * 1024 // 1MB
+}
+
+fn default_sandbox_max_size() -> usize {
+    5 * 1024 * 1024 // 5MB
 }
 
 impl fmt::Debug for ServerConfig {
@@ -28,6 +49,9 @@ impl fmt::Debug for ServerConfig {
             .field("port", &self.port)
             .field("request_timeout_ms", &self.request_timeout_ms)
             .field("max_connections", &self.max_connections)
+            .field("max_body_size", &self.max_body_size)
+            .field("compile_max_size", &self.compile_max_size)
+            .field("sandbox_max_size", &self.sandbox_max_size)
             .field("tls", &self.tls)
             .finish()
     }

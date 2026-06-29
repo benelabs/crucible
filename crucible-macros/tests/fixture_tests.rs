@@ -17,9 +17,14 @@ fn fixture_ui_tests() {
     t.pass("tests/ui/pass-basic.rs");
     t.pass("tests/ui/pass-debug-already-derived.rs");
     t.pass("tests/ui/pass-generic.rs");
+    t.pass("tests/ui/pass-private-setup.rs");
 
     // --- fail cases ---
     t.compile_fail("tests/ui/fail-on-enum.rs");
+    t.compile_fail("tests/ui/fail-on-union.rs");
+    t.compile_fail("tests/ui/fail-on-fn.rs");
     t.compile_fail("tests/ui/fail-fixture-args.rs");
+    t.compile_fail("tests/ui/fail-fixture-args-multiple.rs");
     t.compile_fail("tests/ui/fail-missing-setup.rs");
+    t.compile_fail("tests/ui/fail-invalid-generics.rs");
 }

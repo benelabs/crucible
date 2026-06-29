@@ -12,6 +12,9 @@ idle_timeout_secs = 120
 [redis]
 pool_size = 100
 
+[cors]
+allowed_origins = []
+
 [observability]
 log_level = "info"
 enable_metrics = true

@@ -2,20 +2,37 @@
 members = [
     "backend",
     "contracts/crucible",
+    "contracts/treasury",
     "crucible-macros",
     "examples/counter",
     "examples/token",
-    "examples/escrow",
     "examples/vesting",
-    "examples/reputation",
-    "examples/vault",
+    "examples/staking",
+    "examples/time_locked_vault",
+    "examples/emergency_stop",
+    "examples/gasless",
+    "examples/cross-contract",
+    "examples/lending",
+    "examples/prediction-market",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.91.0"
+license = "MIT"
+description = "A batteries-included testing toolkit for Soroban smart contracts."
+repository = "https://github.com/anumukul/crucible"
+homepage = "https://github.com/anumukul/crucible"
+authors = ["Crucible Contributors"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
 
 [workspace.dependencies]
-soroban-sdk = { version = "25", features = ["testutils"] }
-crucible-macros = { path = "crucible-macros" }
+soroban-sdk = { version = "26", features = ["testutils"] }
+crucible-macros = { path = "crucible-macros", version = "0.1.0" }

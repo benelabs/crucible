@@ -8,7 +8,9 @@
 .app-container {
   min-height: 100vh;
   width: 100%;
-  background: radial-gradient(circle at 10% 20%, #0f172a 0%, #020617 90%);
+  background:
+    linear-gradient(180deg, rgba(8, 13, 24, 0.94), rgba(4, 8, 15, 0.98)),
+    url('./assets/hero.png') center/cover fixed;
   display: flex;
   flex-direction: column;
 }
@@ -17,27 +19,10 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 32px;
+  padding: 24px 48px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(15, 23, 42, 0.8);
   backdrop-filter: blur(10px);
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-
-@media (max-width: 950px) {
-  .app-header {
-    flex-direction: column;
-    gap: 16px;
-    padding: 16px;
-  }
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 .app-header h1 {
@@ -45,17 +30,52 @@
   font-size: 1.2rem;
   font-weight: 700;
   color: #f8fafc;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
 }
 
 .header-badge {
+  background: rgba(94, 234, 212, 0.1);
+  color: #5eead4;
   background: rgba(56, 189, 248, 0.1);
   color: #38bdf8;
-  padding: 3px 10px;
+  padding: 4px 12px;
   border-radius: 999px;
   font-size: 0.7rem;
   font-weight: 600;
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  border: 1px solid rgba(94, 234, 212, 0.22);
+}
+
+.header-tabs {
+  display: flex;
+  gap: 8px;
+  background: rgba(4, 8, 15, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  padding: 8px 18px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.tab-btn.active {
+  background: rgba(139, 92, 246, 0.12);
+  color: #c084fc;
+  border-color: rgba(139, 92, 246, 0.35);
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
 }
 
 /* Tab Navigation */
@@ -96,7 +116,8 @@
 
 .app-main {
   flex: 1;
-  padding: 32px;
+  padding: 34px 24px 48px;
+  padding: 48px 24px;
   display: flex;
   justify-content: center;
   width: 100%;
@@ -152,14 +173,17 @@
 }
 
 /* Compiler & Dependency Analyzer Content Grids */
-.compiler-content-grid, .analyzer-content-grid {
+.compiler-content-grid,
+.analyzer-content-grid {
   display: grid;
   grid-template-columns: 1.1fr 1fr;
   gap: 24px;
 }
 
 @media (max-width: 900px) {
-  .compiler-content-grid, .analyzer-content-grid {
+
+  .compiler-content-grid,
+  .analyzer-content-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -171,7 +195,8 @@
   margin-bottom: 16px;
 }
 
-.form-group-row label, .textarea-wrapper label {
+.form-group-row label,
+.textarea-wrapper label {
   font-size: 0.75rem;
   font-weight: 600;
   color: #94a3b8;
@@ -256,12 +281,18 @@
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Terminal Side Outputs */
-.terminal-side h3, .analysis-results-side h3 {
+.terminal-side h3,
+.analysis-results-side h3 {
   margin: 0 0 16px 0;
   font-size: 1rem;
   font-weight: 600;
@@ -285,13 +316,15 @@
 }
 
 /* Build logs styles */
-.build-output-wrapper, .audit-output-wrapper {
+.build-output-wrapper,
+.audit-output-wrapper {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.build-metrics-row, .audit-metrics-row {
+.build-metrics-row,
+.audit-metrics-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -363,7 +396,8 @@
   font-size: 0.8rem;
 }
 
-.table-header, .table-row {
+.table-header,
+.table-row {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;
   padding: 10px 16px;
@@ -408,4 +442,14 @@
 
 .dep-status.status-vulnerable {
   color: #f43f5e;
+}
+
+@media (max-width: 620px) {
+  .app-header {
+    padding: 18px 20px;
+  }
+
+  .app-main {
+    padding: 20px 14px 32px;
+  }
 }

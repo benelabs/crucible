@@ -1,4 +1,4 @@
-.PHONY: test lint doc build build-contracts build-backend run-backend
+.PHONY: test lint doc build build-contracts build-backend run-backend db-migrate
 
 test:
 	cargo test --workspace --all-features
@@ -18,6 +18,9 @@ build-backend:
 
 run-backend:
 	cargo run --package backend
+
+db-migrate:
+	sqlx migrate run --source backend/migrations
 
 doc:
 	cargo doc --workspace --no-deps --all-features --open

@@ -120,6 +120,11 @@ pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
             ///
             /// This is a convenience shorthand for `*self = Self::setup()`.  Use it to
             /// restore a clean environment between logical sections of a single test.
+            ///
+            /// # Compile error
+            ///
+            /// If you see a compiler error pointing here, add a `pub fn setup() -> Self`
+            /// associated function to the struct's `impl` block.
             pub fn reset(&mut self) {
                 *self = Self::setup();
             }

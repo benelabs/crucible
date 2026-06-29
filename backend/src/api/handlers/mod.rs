@@ -1,8 +1,11 @@
+pub mod admin;
 pub mod contracts;
+pub mod coverage;
 pub mod dashboard;
 pub mod errors;
+pub mod health;
+pub mod deploy_health;
 pub mod profiling;
+pub mod sandbox;
 pub mod stellar;
 pub mod ws;
-pub mod contracts;
-pub mod admin;

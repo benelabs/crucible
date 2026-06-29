@@ -1,6 +1,6 @@
 //! CONFIG APPROACH: Option A — layered config crate
 
-use crate::config::{AppConfig, Environment};
+use crate::config::{AppConfig, Environment, ObservabilityConfig};
 use std::str::FromStr;
 
 #[test]
@@ -70,6 +70,17 @@ fn test_load_development_config() {
 }
 
 #[test]
+fn test_production_observability_uses_json_logging() {
+    let observability = ObservabilityConfig {
+        log_level: "info".into(),
+        tracing_endpoint: None,
+        enable_metrics: false,
+    };
+
+    observability.init_tracing(Environment::Production);
+}
+
+#[test]
 fn test_production_missing_tls_validation() {
     temp_env::with_vars(
         [
@@ -78,6 +89,10 @@ fn test_production_missing_tls_validation() {
                 Some("postgres://user:pass@localhost/db"),
             ),
             ("APP_REDIS__URL", Some("redis://localhost:6379")),
+            (
+                "APP_CORS__ALLOWED_ORIGINS__0",
+                Some("https://example.com"),
+            ),
         ],
         || {
             let err = AppConfig::load(Environment::Production)
@@ -107,11 +122,12 @@ fn test_validation_collects_all_errors() {
 
             match err {
                 crate::config::ConfigError::ValidationError(errors) => {
-                    // TLS missing, DB URL empty, Redis URL empty
-                    assert!(errors.len() >= 3);
+                    // TLS missing, DB URL empty, Redis URL empty, CORS origins empty
+                    assert!(errors.len() >= 4);
                     assert!(errors.iter().any(|e| e.contains("TLS configuration")));
                     assert!(errors.iter().any(|e| e.contains("Database URL")));
                     assert!(errors.iter().any(|e| e.contains("Redis URL")));
+                    assert!(errors.iter().any(|e| e.contains("CORS")));
                 }
                 _ => panic!("Expected ValidationError, got {:?}", err),
             }
@@ -186,6 +202,7 @@ fn test_sensitive_fields_redacted_in_debug() {
             tracing_endpoint: None,
             enable_metrics: false,
         },
+        cors: crate::config::CorsConfig::default(),
     };
 
     let debug_str = format!("{:?}", config);
@@ -197,4 +214,61 @@ fn test_sensitive_fields_redacted_in_debug() {
 
     assert!(debug_str.contains("[REDACTED]"));
     assert!(debug_str.contains("/path/to/cert")); // Public cert path is OK
+}
+
+#[test]
+fn test_production_rejects_wildcard_cors() {
+    temp_env::with_vars(
+        [
+            (
+                "APP_DATABASE__URL",
+                Some("postgres://user:pass@localhost/db"),
+            ),
+            ("APP_REDIS__URL", Some("redis://localhost:6379")),
+            ("APP_CORS__ALLOWED_ORIGINS__0", Some("*")),
+        ],
+        || {
+            let err = AppConfig::load(Environment::Production)
+                .expect_err("Should fail with wildcard CORS in production");
+
+            match err {
+                crate::config::ConfigError::ValidationError(errors) => {
+                    assert!(
+                        errors.iter().any(|e| e.contains("CORS wildcard")),
+                        "Expected CORS wildcard error, got: {:?}",
+                        errors
+                    );
+                }
+                _ => panic!("Expected ValidationError, got {:?}", err),
+            }
+        },
+    );
+}
+
+#[test]
+fn test_production_rejects_empty_cors_origins() {
+    temp_env::with_vars(
+        [
+            (
+                "APP_DATABASE__URL",
+                Some("postgres://user:pass@localhost/db"),
+            ),
+            ("APP_REDIS__URL", Some("redis://localhost:6379")),
+        ],
+        || {
+            let err = AppConfig::load(Environment::Production)
+                .expect_err("Should fail with empty CORS origins in production");
+
+            match err {
+                crate::config::ConfigError::ValidationError(errors) => {
+                    assert!(
+                        errors.iter().any(|e| e.contains("CORS allowed_origins must not be empty")),
+                        "Expected CORS empty error, got: {:?}",
+                        errors
+                    );
+                }
+                _ => panic!("Expected ValidationError, got {:?}", err),
+            }
+        },
+    );
 }

@@ -49,7 +49,7 @@ impl CacheWarmWorker {
 
         // Store in Redis with TTL
         redis_conn
-            .set_ex(
+            .set_ex::<_, _, ()>(
                 "dashboard:metrics:latest",
                 serde_json::to_string(&dashboard_metrics)?,
                 300, // 5 minutes TTL
@@ -59,7 +59,7 @@ impl CacheWarmWorker {
         // Example: Warm popular build metrics
         let build_metrics = self.load_popular_builds().await?;
         redis_conn
-            .set_ex(
+            .set_ex::<_, _, ()>(
                 "builds:popular:latest",
                 serde_json::to_string(&build_metrics)?,
                 600, // 10 minutes TTL

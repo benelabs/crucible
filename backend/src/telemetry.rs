@@ -1,7 +1,6 @@
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// Initializes the tracing subscriber for observability.
-/// Uses EnvFilter to allow dynamic log level control.
 pub fn init_telemetry() {
     tracing_subscriber::registry()
         .with(

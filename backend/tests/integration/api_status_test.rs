@@ -38,15 +38,12 @@ async fn status_body_is_valid_json() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&bytes).expect("response must be JSON");
 
-    assert_eq!(json["status"], "healthy");
-    assert!(
-        json["metrics"].is_object(),
-        "metrics field must be an object"
-    );
-    assert!(
-        json["active_recovery_tasks"].is_array(),
-        "active_recovery_tasks must be an array"
-    );
+    assert_eq!(json["status"], "success");
+    let data = &json["data"];
+    assert_eq!(data["status"], "healthy");
+    assert!(data["uptime_secs"].is_number());
+    assert!(data["memory_used_bytes"].is_number());
+    assert!(data["active_recovery_tasks"].is_number());
 }
 
 #[tokio::test]
@@ -65,10 +62,10 @@ async fn status_metrics_fields_present() {
         .await
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    let metrics = &json["metrics"];
+    let data = &json["data"];
 
-    assert!(metrics["cpu_usage"].is_number());
-    assert!(metrics["memory_usage"].is_number());
-    assert!(metrics["uptime"].is_number());
-    assert!(metrics["timestamp"].is_string());
+    assert_eq!(data["status"], "healthy");
+    assert!(data["uptime_secs"].is_number());
+    assert!(data["memory_used_bytes"].is_number());
+    assert!(data["active_recovery_tasks"].is_number());
 }

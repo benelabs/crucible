@@ -3,12 +3,18 @@
 //! Provides `AccountHandle` - a wrapper around a Soroban `Address` with
 //! keypair signing support and balance helpers, and `AccountBuilder` for
 //! easy pre-funded account creation.
+//!
+//! **Host-only:** All types in this module depend on [`MockEnv`] and `std`
+//! and are intended exclusively for use in `#[cfg(test)]` contexts on the host.
+//!
+//! [`MockEnv`]: crate::env::MockEnv
 
 use crate::env::{MockEnv, Stroops};
 use crate::token::MockToken;
 use soroban_sdk::Address;
 
 /// A handle to a Soroban account used in tests.
+#[derive(Clone)]
 pub struct AccountHandle {
     mock_env: MockEnv,
     name: String,
@@ -63,6 +69,16 @@ impl AsRef<Address> for AccountHandle {
     }
 }
 
+impl std::fmt::Debug for AccountHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Intentionally omit `mock_env` and any future signing material from debug output.
+        f.debug_struct("AccountHandle")
+            .field("name", &self.name)
+            .field("address", &self.address)
+            .finish()
+    }
+}
+
 /// A builder for creating pre-funded accounts.
 pub struct AccountBuilder<'env> {
     env: &'env MockEnv,
@@ -106,7 +122,7 @@ impl<'env> AccountBuilder<'env> {
         let address = self
             .env
             .inner()
-            .register_contract(None, soroban_sdk::testutils::MockAuthContract {});
+            .register(soroban_sdk::testutils::MockAuthContract {}, ());
 
         // 2. Fund XLM if requested
         if self.xlm_balance.as_stroops() > 0 {
@@ -164,6 +180,34 @@ mod tests {
     }
 
     #[test]
+    fn test_account_handle_clone() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::xlm(100))
+            .build();
+
+        let alice = env.account("alice");
+        let cloned = alice.clone();
+
+        assert_eq!(cloned.name(), alice.name());
+        assert_eq!(cloned.address(), alice.address());
+        assert_eq!(cloned.xlm_balance(), alice.xlm_balance());
+    }
+
+    #[test]
+    fn test_account_handle_debug_omits_sensitive_fields() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::xlm(100))
+            .build();
+
+        let alice = env.account("alice");
+        let debug = format!("{alice:?}");
+
+        assert!(debug.contains("alice"));
+        assert!(debug.contains("AccountHandle"));
+        assert!(!debug.contains("mock_env"));
+    }
+
+    #[test]
     fn test_account_builder_fluent() {
         let env = MockEnv::builder().build();
         let usdc = MockToken::new(&env, "USDC", 6);
@@ -180,5 +224,55 @@ mod tests {
         // Should be retrievable from env
         let charlie_ref = env.account("charlie");
         assert_eq!(charlie_ref.address(), charlie.address());
+    }
+}
+
+#[cfg(test)]
+mod fixture_tests {
+    use crate::fixture;
+    use crate::prelude::*;
+    use soroban_sdk::Address;
+
+    #[fixture]
+    struct AccountsFixture {
+        pub env: MockEnv,
+        pub alice: AccountHandle,
+        pub bob: AccountHandle,
+    }
+
+    impl AccountsFixture {
+        pub fn setup() -> Self {
+            let env = MockEnv::builder()
+                .with_account("alice", Stroops::xlm(100))
+                .with_account("bob", Stroops::xlm(50))
+                .build();
+
+            Self {
+                alice: env.account("alice"),
+                bob: env.account("bob"),
+                env,
+            }
+        }
+    }
+
+    fn account_address(handle: AccountHandle) -> Address {
+        handle.address()
+    }
+
+    #[test]
+    fn fixture_with_account_handles_supports_debug_clone_and_reset() {
+        let mut fixture = AccountsFixture::setup();
+
+        let alice_addr = account_address(fixture.alice.clone());
+        assert_eq!(alice_addr, fixture.alice.address());
+        assert_eq!(fixture.env.account("alice").address(), fixture.alice.address());
+
+        let debug = format!("{fixture:?}");
+        assert!(debug.contains("alice"));
+        assert!(debug.contains("bob"));
+
+        fixture.reset();
+        assert_eq!(fixture.alice.xlm_balance(), Stroops::xlm(100).as_stroops());
+        assert_eq!(fixture.bob.xlm_balance(), Stroops::xlm(50).as_stroops());
     }
 }

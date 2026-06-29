@@ -1,0 +1,63 @@
+name: Supply Chain Security
+
+# Vets the Rust dependency tree for known vulnerabilities, license policy
+# violations, banned/duplicate crates, and untrusted sources. Runs on every
+# push/PR that touches dependencies and on a weekly schedule so newly
+# disclosed advisories are caught even without code changes.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'deny.toml'
+      - '.github/workflows/supply-chain.yml'
+  pull_request:
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'deny.toml'
+      - '.github/workflows/supply-chain.yml'
+  schedule:
+    # Weekly on Monday 06:00 UTC to catch freshly disclosed advisories.
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-deny:
+    name: cargo-deny (advisories, bans, licenses, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # Enforce all four policy categories defined in deny.toml.
+          command: check advisories bans licenses sources
+
+  cargo-audit:
+    name: cargo-audit (RUSTSEC vulnerability scan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-audit binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked || true
+
+      - name: Audit dependencies for known vulnerabilities
+        run: cargo audit --deny warnings

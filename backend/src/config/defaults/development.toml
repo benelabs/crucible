@@ -12,6 +12,9 @@ idle_timeout_secs = 3600 # Longer for easier local debugging
 [redis]
 pool_size = 5
 
+[cors]
+allowed_origins = ["*"]
+
 [observability]
 log_level = "debug"
 enable_metrics = false

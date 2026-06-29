@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Cpu, Play, HelpCircle, Code2, AlertCircle, FileText, CheckCircle2 } from 'lucide-react';
+import { Cpu, Play, HelpCircle, Code2, FileText, CheckCircle2 } from 'lucide-react';
 import './ContractAbiExplorer.css';
 
 interface FunctionArg {

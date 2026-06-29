@@ -1,0 +1,5 @@
+error: expected one of: `struct`, `enum`, `union`
+ --> tests/ui/fail-on-fn.rs:5:1
+  |
+5 | fn not_a_fixture() {}
+  | ^^

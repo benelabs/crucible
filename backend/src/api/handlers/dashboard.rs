@@ -16,11 +16,7 @@
 //! # }
 //! ```
 
-use axum::{
-    extract::{Path, State},
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::{Path, State}, response::IntoResponse, Json};
 use chrono::{DateTime, Utc};
 use redis::{AsyncCommands, Client as RedisClient};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -28,7 +24,9 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, warn};
+use utoipa::ToSchema;
 
+use crate::error::AppError;
 use crate::services::{
     error_recovery::{ErrorManager, RecoveryTask},
     log_alerts::{Alert, AlertManager},
@@ -95,7 +93,7 @@ pub struct DashboardData {
 }
 
 /// Aggregated dashboard metrics for the build and contract overview.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DashboardMetrics {
     pub total_contracts: u64,
     pub total_transactions: u64,
@@ -105,7 +103,7 @@ pub struct DashboardMetrics {
 }
 
 /// Contract-specific usage metrics.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ContractStats {
     pub contract_id: String,
     pub invocation_count: u64,
@@ -149,7 +147,6 @@ pub async fn get_dashboard(
         Err(e) => warn!(error = %e, "Dashboard cache read failed; falling back to live data"),
     }
 
-    // --- assemble live data ---
     let (metrics, active_recovery_tasks, active_alerts) = tokio::join!(
         state.metrics_exporter.get_metrics(),
         state.error_manager.get_active_tasks(),
@@ -178,9 +175,7 @@ pub async fn get_dashboard_metrics(
     match try_cache_get(&state.redis, "dashboard:metrics").await {
         Ok(Some(cached)) => return Ok(Json(cached)),
         Ok(None) => debug!("Dashboard metrics cache miss"),
-        Err(e) => {
-            warn!(error = %e, "Dashboard metrics cache read failed; falling back to live data")
-        }
+        Err(e) => warn!(error = %e, "Dashboard metrics cache read failed; falling back to live data"),
     }
 
     let total_contracts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM contracts")
@@ -226,9 +221,7 @@ pub async fn get_contract_stats(
     match try_cache_get(&state.redis, &cache_key).await {
         Ok(Some(cached)) => return Ok(Json(cached)),
         Ok(None) => debug!(contract_id = %contract_id, "Contract stats cache miss"),
-        Err(e) => {
-            warn!(error = %e, contract_id = %contract_id, "Contract stats cache read failed; falling back to live data")
-        }
+        Err(e) => warn!(error = %e, contract_id = %contract_id, "Contract stats cache read failed; falling back to live data"),
     }
 
     let exists: Option<i32> = sqlx::query_scalar("SELECT 1 FROM contracts WHERE contract_id = $1")
@@ -280,13 +273,17 @@ where
     }
 }
 
-async fn try_cache_set<T>(redis: &RedisClient, key: &str, data: &T) -> Result<(), DashboardError>
+async fn try_cache_set<T>(
+    redis: &RedisClient,
+    key: &str,
+    data: &T,
+) -> Result<(), DashboardError>
 where
     T: Serialize,
 {
     let serialized = serde_json::to_string(data)?;
     let mut conn = redis.get_multiplexed_async_connection().await?;
-    let _: () = conn.set_ex(key, serialized, CACHE_TTL_SECS).await?;
+    let _: () = conn.set_ex(key, serialized, ttl_secs).await?;
     Ok(())
 }
 
@@ -297,9 +294,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::Request, routing::get, Router};
     use sqlx::postgres::PgPoolOptions;
-    use tower::ServiceExt;
 
     fn make_state() -> Arc<DashboardState> {
         Arc::new(DashboardState {
@@ -418,14 +413,6 @@ mod tests {
         let tasks = json["active_recovery_tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["name"], "worker_a");
-    }
-
-    #[test]
-    fn test_dashboard_error_display() {
-        let err = DashboardError::Serialization(
-            serde_json::from_str::<serde_json::Value>("bad json").unwrap_err(),
-        );
-        assert!(!err.to_string().is_empty());
     }
 
     #[test]

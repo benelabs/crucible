@@ -87,7 +87,14 @@ async fn test_get_dashboard_metrics_empty_database() {
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager: Arc::new(AlertManager::new()),
         db: pool.clone(),
-        redis: redis.clone(),
+        redis_conn: redis.clone(),
+        metrics_exporter: Arc::new(backend::services::sys_metrics::MetricsExporter::new()),
+        error_manager: Arc::new(backend::services::error_recovery::ErrorManager::new()),
+        alert_manager: Arc::new(backend::services::log_alerts::AlertManager::new()),
+        redis_client: redis::Client::open(
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+        )
+        .unwrap(),
     });
 
     let app = Router::new()
@@ -144,7 +151,14 @@ async fn test_get_dashboard_metrics_with_data() {
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager: Arc::new(AlertManager::new()),
         db: pool.clone(),
-        redis: redis.clone(),
+        redis_conn: redis.clone(),
+        metrics_exporter: Arc::new(backend::services::sys_metrics::MetricsExporter::new()),
+        error_manager: Arc::new(backend::services::error_recovery::ErrorManager::new()),
+        alert_manager: Arc::new(backend::services::log_alerts::AlertManager::new()),
+        redis_client: redis::Client::open(
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+        )
+        .unwrap(),
     });
 
     let app = Router::new()
@@ -186,7 +200,14 @@ async fn test_get_contract_stats_not_found() {
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager: Arc::new(AlertManager::new()),
         db: pool.clone(),
-        redis: redis.clone(),
+        redis_conn: redis.clone(),
+        metrics_exporter: Arc::new(backend::services::sys_metrics::MetricsExporter::new()),
+        error_manager: Arc::new(backend::services::error_recovery::ErrorManager::new()),
+        alert_manager: Arc::new(backend::services::log_alerts::AlertManager::new()),
+        redis_client: redis::Client::open(
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+        )
+        .unwrap(),
     });
 
     let app = Router::new()
@@ -234,7 +255,14 @@ async fn test_get_contract_stats_success() {
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager: Arc::new(AlertManager::new()),
         db: pool.clone(),
-        redis: redis.clone(),
+        redis_conn: redis.clone(),
+        metrics_exporter: Arc::new(backend::services::sys_metrics::MetricsExporter::new()),
+        error_manager: Arc::new(backend::services::error_recovery::ErrorManager::new()),
+        alert_manager: Arc::new(backend::services::log_alerts::AlertManager::new()),
+        redis_client: redis::Client::open(
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+        )
+        .unwrap(),
     });
 
     let app = Router::new()
@@ -292,7 +320,14 @@ async fn test_redis_caching() {
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager: Arc::new(AlertManager::new()),
         db: pool.clone(),
-        redis: redis.clone(),
+        redis_conn: redis.clone(),
+        metrics_exporter: Arc::new(backend::services::sys_metrics::MetricsExporter::new()),
+        error_manager: Arc::new(backend::services::error_recovery::ErrorManager::new()),
+        alert_manager: Arc::new(backend::services::log_alerts::AlertManager::new()),
+        redis_client: redis::Client::open(
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+        )
+        .unwrap(),
     });
 
     let app = Router::new()

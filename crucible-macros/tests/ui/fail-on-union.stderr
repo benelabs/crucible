@@ -1,0 +1,5 @@
+error: #[fixture] can only be applied to structs
+ --> tests/ui/fail-on-union.rs:5:11
+  |
+5 | pub union MyFixture {
+  |           ^^^^^^^^^

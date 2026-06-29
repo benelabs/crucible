@@ -12,13 +12,31 @@
 //! - Span limits and baggage propagation
 //! - Zero-overhead when tracing is disabled
 
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::KeyValue;
+use opentelemetry_otlp::{Protocol, WithExportConfig};
+use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler, SdkTracerProvider, SpanLimits};
+use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions::resource;
 use std::time::Duration;
 use tracing::{info_span, warn};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{EnvFilter, Registry};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 
 /// Central tracing service for initialization and span creation
 pub struct TracingService;
+
+/// Keeps the OpenTelemetry provider alive and flushes spans during shutdown.
+pub struct TracingGuard {
+    tracer_provider: SdkTracerProvider,
+}
+
+impl Drop for TracingGuard {
+    fn drop(&mut self) {
+        if let Err(error) = self.tracer_provider.shutdown() {
+            eprintln!("failed to shut down OpenTelemetry tracer provider: {error:?}");
+        }
+    }
+}
 
 /// Configuration for the tracing service
 #[derive(Clone, Debug)]
@@ -44,7 +62,7 @@ pub struct TracingConfig {
 impl Default for TracingConfig {
     fn default() -> Self {
         Self {
-            otlp_endpoint: "http://localhost:4317".to_string(),
+            otlp_endpoint: "http://localhost:4318/v1/traces".to_string(),
             service_name: "crucible-backend".to_string(),
             service_version: env!("CARGO_PKG_VERSION").to_string(),
             environment: std::env::var("ENV").unwrap_or("dev".to_string()),
@@ -92,22 +110,97 @@ impl TracingConfig {
 
 impl TracingService {
     /// Initialize the global tracer provider with OTLP exporter
-    pub fn init(config: TracingConfig) -> anyhow::Result<()> {
-        let subscriber = Registry::default()
-            .with(
-                EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| EnvFilter::new("info,crucible=debug")),
-            )
-            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr));
+    pub fn init(config: TracingConfig) -> anyhow::Result<TracingGuard> {
+        Self::init_with_filter(config, None, false)
+    }
 
-        tracing::subscriber::set_global_default(subscriber)
-            .map_err(|e| anyhow::anyhow!("Failed to set global subscriber: {}", e))?;
+    /// Initialize tracing with the application log filter and formatter.
+    pub fn init_with_filter(
+        config: TracingConfig,
+        log_filter: Option<&str>,
+        json_logs: bool,
+    ) -> anyhow::Result<TracingGuard> {
+        let resource = Resource::builder()
+            .with_attributes(vec![
+                KeyValue::new(resource::SERVICE_NAME, config.service_name.clone()),
+                KeyValue::new(resource::SERVICE_VERSION, config.service_version.clone()),
+                KeyValue::new(resource::DEPLOYMENT_ENVIRONMENT, config.environment.clone()),
+                KeyValue::new("service.namespace", "crucible"),
+            ])
+            .build();
 
-        tracing::info!("Console tracing initialized successfully");
+        let sampler = if config.environment == "production" {
+            Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(config.sampling_ratio)))
+        } else {
+            Sampler::AlwaysOn
+        };
+
+        let span_limits = SpanLimits {
+            max_attributes_per_span: config.max_attributes_per_span,
+            max_events_per_span: config.max_events_per_span,
+            max_links_per_span: config.max_links_per_span,
+            ..SpanLimits::default()
+        };
+
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .with_protocol(Protocol::HttpBinary)
+            .with_endpoint(&config.otlp_endpoint)
+            .with_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build OTLP exporter: {}", e))?;
+
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_resource(resource)
+            .with_sampler(sampler)
+            .with_id_generator(RandomIdGenerator::default())
+            .with_span_limits(span_limits)
+            .with_batch_exporter(exporter)
+            .build();
+
+        // Get a tracer from the provider
+        let tracer = tracer_provider.tracer(config.service_name.clone());
+
+        let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::new(log_filter.unwrap_or("info,crucible=debug,tower_http=info"))
+        });
+
+        if json_logs {
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(telemetry_layer)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_current_span(true)
+                        .with_span_list(true)
+                        .with_writer(std::io::stderr),
+                )
+                .try_init()
+                .map_err(|e| anyhow::anyhow!("Failed to set global subscriber: {}", e))?;
+        } else {
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(telemetry_layer)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .pretty()
+                        .with_thread_ids(true)
+                        .with_target(true)
+                        .with_writer(std::io::stderr),
+                )
+                .try_init()
+                .map_err(|e| anyhow::anyhow!("Failed to set global subscriber: {}", e))?;
+        }
+
+        tracing::info!("OpenTelemetry tracing initialized successfully");
         tracing::info!("Service: {}", config.service_name);
         tracing::info!("Environment: {}", config.environment);
+        tracing::info!("OTLP Endpoint: {}", config.otlp_endpoint);
+        tracing::info!("Sampling Ratio: {:.1}%", config.sampling_ratio * 100.0);
 
-        Ok(())
+        Ok(TracingGuard { tracer_provider })
     }
 
     /// Create an HTTP request span with semantic conventions
@@ -216,7 +309,7 @@ mod tests {
     #[test]
     fn test_db_span_creation() {
         let span = TracingService::db_query_span(
-            "SELECT * FROM users WHERE id = $1",
+            "SELECT * FROM users WHERE id = ",
             "postgres",
             "SELECT",
         );

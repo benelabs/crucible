@@ -1,16 +1,25 @@
 import { useState } from 'react';
+import { EventListenerDashboard } from './components/EventListenerDashboard';
+import { TransactionSimulator } from './components/TransactionSimulator';
 import { GasCostEstimator } from './components/GasCostEstimator';
 import { MultiChainDashboard } from './components/MultiChainDashboard';
 import { ContractAbiExplorer } from './components/ContractAbiExplorer';
 import { DeveloperOnboardingTutorial } from './components/DeveloperOnboardingTutorial';
-import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen } from 'lucide-react';
+import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Radio } from 'lucide-react';
 import './App.css';
 
-type Tab = 'tutorial' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies';
+type Tab = 'events' | 'tutorial' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies';
+import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, Activity, Layers, BookOpen } from 'lucide-react';
+
+type Tab = 'tutorial' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies';
+import { WalletConnector } from './components/WalletConnector';
+import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet } from 'lucide-react';
+
+type Tab = 'tutorial' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'wallet';
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('tutorial');
-  
+
   // Compiler state
   const [compileProjName, setCompileProjName] = useState('my-soroban-contract');
   const [compileCode, setCompileCode] = useState(`// Paste Soroban smart contract source here\nuse soroban_sdk::{contract, contractimpl, Env};\n\n#[contract]\npub struct IncrementContract;\n\n#[contractimpl]\nimpl IncrementContract {\n    pub fn increment(env: Env) -> u32 {\n        let mut count: u32 = env.storage().instance().get(&"count").unwrap_or(0);\n        count += 1;\n        env.storage().instance().set(&"count", &count);\n        count\n    }\n}`);
@@ -69,67 +78,115 @@ function App() {
   return (
     <div className="app-container">
       <header className="app-header">
-        <div className="header-left">
+        <div className="header-brand">
           <h1>Crucible Developer Portal</h1>
           <div className="header-badge">Soroban Toolchain</div>
         </div>
         <nav className="tab-navigation">
           <button 
+            className={`nav-tab-btn ${activeTab === 'events' ? 'active' : ''}`}
+            onClick={() => setActiveTab('events')}
+            data-testid="tab-events"
+          >
+            <Radio size={15} />
+            Event Listener
+          </button>
+          <button 
             className={`nav-tab-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
+
+        <nav className="header-tabs" aria-label="Dashboard views">
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
             onClick={() => setActiveTab('tutorial')}
             data-testid="tab-tutorial"
           >
-            <BookOpen size={15} />
+            <BookOpen size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
             Tutorial
           </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'events' ? 'active' : ''}`}
+            onClick={() => setActiveTab('events')}
+            data-testid="tab-events"
+          >
+            <Activity size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Event Listener
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'simulator' ? 'active' : ''}`}
+            onClick={() => setActiveTab('simulator')}
+            data-testid="tab-simulator"
+          >
+            <Layers size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Tx Simulator
+          </button>
           <button 
-            className={`nav-tab-btn ${activeTab === 'metrics' ? 'active' : ''}`}
+            type="button"
+            className={`tab-btn ${activeTab === 'metrics' ? 'active' : ''}`}
             onClick={() => setActiveTab('metrics')}
             data-testid="tab-metrics"
           >
-            <Zap size={15} />
+            <Zap size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
             Gas Estimator
           </button>
           <button 
-            className={`nav-tab-btn ${activeTab === 'multichain' ? 'active' : ''}`}
+            type="button"
+            className={`tab-btn ${activeTab === 'multichain' ? 'active' : ''}`}
             onClick={() => setActiveTab('multichain')}
             data-testid="tab-multichain"
           >
-            <Globe size={15} />
+            <Globe size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
             Node Manager
           </button>
           <button 
-            className={`nav-tab-btn ${activeTab === 'abi' ? 'active' : ''}`}
+            type="button"
+            className={`tab-btn ${activeTab === 'abi' ? 'active' : ''}`}
             onClick={() => setActiveTab('abi')}
             data-testid="tab-abi"
           >
-            <Cpu size={15} />
+            <Cpu size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
             ABI Explorer
           </button>
           <button 
-            className={`nav-tab-btn ${activeTab === 'compiler' ? 'active' : ''}`}
+            type="button"
+            className={`tab-btn ${activeTab === 'compiler' ? 'active' : ''}`}
             onClick={() => setActiveTab('compiler')}
             data-testid="tab-compiler"
           >
-            <Terminal size={15} />
+            <Terminal size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
             Compiler Service
           </button>
           <button 
-            className={`nav-tab-btn ${activeTab === 'dependencies' ? 'active' : ''}`}
+            type="button"
+            className={`tab-btn ${activeTab === 'dependencies' ? 'active' : ''}`}
             onClick={() => setActiveTab('dependencies')}
             data-testid="tab-dependencies"
           >
-            <ShieldAlert size={15} />
+            <ShieldAlert size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
             Dep Analyzer
+          </button>
+          <button
+            className={`nav-tab-btn ${activeTab === 'wallet' ? 'active' : ''}`}
+            onClick={() => setActiveTab('wallet')}
+            data-testid="tab-wallet"
+          >
+            <Wallet size={15} />
+            Wallet
           </button>
         </nav>
       </header>
       
       <main className="app-main">
+        {activeTab === 'events' && <EventListenerDashboard />}
         {activeTab === 'tutorial' && <DeveloperOnboardingTutorial />}
+        {activeTab === 'events' && <EventListenerDashboard />}
+        {activeTab === 'simulator' && <TransactionSimulator />}
         {activeTab === 'metrics' && <GasCostEstimator />}
         {activeTab === 'multichain' && <MultiChainDashboard />}
         {activeTab === 'abi' && <ContractAbiExplorer />}
+        {activeTab === 'wallet' && <WalletConnector />}
         
         {activeTab === 'compiler' && (
           <div className="compiler-tab-panel container-panel">

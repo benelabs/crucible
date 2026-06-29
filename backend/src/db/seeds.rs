@@ -42,6 +42,9 @@ pub enum SeedError {
         /// Human-readable reason.
         reason: String,
     },
+    /// Multiple seed errors collected while running multiple steps.
+    #[error("Multiple seed errors: {0:?}")]
+    Multiple(Vec<SeedError>),
 }
 
 // ---------------------------------------------------------------------------
@@ -210,21 +213,31 @@ pub async fn seed_feature_flags(pool: &PgPool) -> Result<usize, SeedError> {
 /// Returns the first [`SeedError`] encountered, if any.
 pub async fn run_all(pool: &PgPool) -> Result<(), SeedError> {
     info!("Starting database seed");
+    // Run each step and collect errors so one failing step doesn't abort the rest.
+    let mut errors: Vec<SeedError> = Vec::new();
 
-    seed_users(pool).await.map_err(|e| SeedError::StepFailed {
-        step: "seed_users".to_string(),
-        reason: e.to_string(),
-    })?;
+    if let Err(e) = seed_users(pool).await {
+        errors.push(SeedError::StepFailed {
+            step: "seed_users".to_string(),
+            reason: e.to_string(),
+        });
+    }
 
-    seed_feature_flags(pool)
-        .await
-        .map_err(|e| SeedError::StepFailed {
+    if let Err(e) = seed_feature_flags(pool).await {
+        errors.push(SeedError::StepFailed {
             step: "seed_feature_flags".to_string(),
             reason: e.to_string(),
-        })?;
+        });
+    }
 
-    info!("Database seed complete");
-    Ok(())
+    if errors.is_empty() {
+        info!("Database seed complete");
+        Ok(())
+    } else if errors.len() == 1 {
+        Err(errors.remove(0))
+    } else {
+        Err(SeedError::Multiple(errors))
+    }
 }
 
 // ---------------------------------------------------------------------------

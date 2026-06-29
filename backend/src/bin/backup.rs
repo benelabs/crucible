@@ -19,13 +19,20 @@
 //!
 //! | Variable | Default | Description |
 //! |----------|---------|-------------|
-//! | `DATABASE_URL` | — | PostgreSQL connection string (required) |
+//! | `DATABASE_URL` | ΓÇö | PostgreSQL connection string (required) |
 //! | `REDIS_URL` | `redis://127.0.0.1/` | Redis connection string |
 //! | `BACKUP_QUEUE` | `backup_jobs` | Redis list key for backup jobs |
 //! | `RESTORE_QUEUE` | `restore_jobs` | Redis list key for restore jobs |
 //! | `BIND_ADDR` | `0.0.0.0:8080` | HTTP server bind address |
 //! | `BACKUP_DIR` | `/var/backups/crucible` | Directory for `pg_dump` output files |
 
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::{get, post},
+    Json, Router,
+};
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
@@ -292,12 +299,12 @@ pub async fn enqueue_restore(
 // HTTP handlers
 // ---------------------------------------------------------------------------
 
-/// `GET /health` — liveness probe.
+/// `GET /health` ΓÇö liveness probe.
 pub async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
 }
 
-/// `POST /backups` — create a backup record and enqueue the job.
+/// `POST /backups` ΓÇö create a backup record and enqueue the job.
 #[instrument(skip(state))]
 pub async fn create_backup(
     State(state): State<AppState>,
@@ -326,14 +333,14 @@ pub async fn create_backup(
     Ok((StatusCode::ACCEPTED, Json(response)))
 }
 
-/// `GET /backups` — list all backups.
+/// `GET /backups` ΓÇö list all backups.
 #[instrument(skip(state))]
 pub async fn list_backups(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let records = list_backup_rows(&state.db).await?;
     Ok(Json(records))
 }
 
-/// `GET /backups/:id` — fetch a single backup.
+/// `GET /backups/:id` ΓÇö fetch a single backup.
 #[instrument(skip(state))]
 pub async fn get_backup(
     State(state): State<AppState>,
@@ -345,7 +352,7 @@ pub async fn get_backup(
     Ok(Json(record))
 }
 
-/// `POST /backups/:id/restore` — enqueue a restore job for the given backup.
+/// `POST /backups/:id/restore` ΓÇö enqueue a restore job for the given backup.
 #[instrument(skip(state))]
 pub async fn restore_backup(
     State(state): State<AppState>,
@@ -437,11 +444,14 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
 
     // ------------------------------------------------------------------
-    // Unit tests — no I/O required
+    // Unit tests ΓÇö no I/O required
     // ------------------------------------------------------------------
 
     #[test]
@@ -531,7 +541,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Integration tests — HTTP layer only (no real DB/Redis)
+    // Integration tests ΓÇö HTTP layer only (no real DB/Redis)
     // ------------------------------------------------------------------
 
     /// Build a minimal router wired to a mock state for HTTP-layer tests.

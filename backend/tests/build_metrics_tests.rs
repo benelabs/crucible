@@ -122,7 +122,7 @@ async fn test_get_project_summary() {
             },
             compilation_time_ms: 3000 + (i as i64 * 100),
             dependency_count: 40 + i,
-            cache_hit_rate: Some(dec!(80.0 + (i as i64 * 2))),
+            cache_hit_rate: Some(rust_decimal::Decimal::from(80 + i * 2)),
             cpu_usage: Some(dec!(70.0)),
             memory_usage_mb: Some(512),
             build_timestamp: Utc::now(),

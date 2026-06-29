@@ -15,6 +15,10 @@ pool_size = 10
 connection_timeout_ms = 5000
 max_retries = 3
 
+[cors]
+allowed_origins = ["*"]
+
 [observability]
 log_level = "info"
+tracing_endpoint = "http://localhost:4318/v1/traces"
 enable_metrics = false

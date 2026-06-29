@@ -5,49 +5,59 @@ edition = "2021"
 description = "Backend API server for the Crucible smart contract testing platform"
 license = "MIT"
 authors = ["Crucible Contributors"]
+publish = false
 
 [[bin]]
-name = "crucible-backend"
+name = "backend"
 path = "src/main.rs"
 
 [[bin]]
 name = "backup"
 path = "src/bin/backup.rs"
 
+[[bench]]
+name = "performance"
+harness = false
+
+[[bench]]
+name = "dashboard_bench"
+harness = false
+
 [features]
+default = []
 testutils = ["mockall"]
 
 [dependencies]
-url = { version = "2", features = ["serde"] }
 # Web framework
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["full", "util"] }
 tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "request-id"] }
+tower_governor = "0.4"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
-# Database (Keep 0.8 from feature branch)
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json", "migrate", "macros", "rust_decimal"] }
+# Database (PostgreSQL via SQLx)
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json", "macros", "migrate", "rust_decimal"] }
 
-# Redis (Keep 0.27 from feature branch)
-redis = { version = "0.27", features = ["tokio-comp", "json", "connection-manager"] }
+# Redis
+redis = { version = "1.2", features = ["tokio-comp", "connection-manager", "json"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+schemars = "1.2"
 
-# Observability
+# Observability / Telemetry
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-
-# OpenTelemetry (Upgrade to 0.31+ from main branch)
 opentelemetry = { version = "0.31", features = ["trace"] }
 opentelemetry_sdk = { version = "0.31", features = ["trace", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
 tracing-opentelemetry = { version = "0.32", default-features = false }
 opentelemetry-semantic-conventions = "0.16"
+tonic = "0.14"
 
 # Utilities
 uuid = { version = "1.0", features = ["v4", "serde"] }
@@ -56,26 +66,32 @@ dotenvy = "0.15"
 thiserror = "1.0"
 anyhow = "1.0"
 config = "0.14.0"
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
-
-# External Integrations
-utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid"] }
-utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
-apalis = { version = "0.6" }
-apalis-redis = "0.6"
-rust_decimal = { version = "1.35", features = ["serde"] }
+rust_decimal = { version = "1.35", features = ["serde", "db-postgres"] }
+rust_decimal_macros = "1.35"
+arc-swap = "1.7"
 stellar-xdr = { version = "21.0", features = ["std"] }
+soroban-sdk = { workspace = true }
 base64 = "0.22"
 validator = { version = "0.19", features = ["derive"] }
-tower_governor = "0.4"
-mockall = { version = "0.13", optional = true }
-tonic = "0.12"
+async-trait = "0.1"
+url = { version = "2", features = ["serde"] }
+
+# API documentation
+utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid", "decimal"] }
+utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
+
+# Background jobs
+apalis = { version = "0.6" }
+apalis-redis = "0.6"
 
 # Scheduler
 tokio-util = "0.7"
 cron = "0.12"
-async-trait = "0.1"
-arc-swap = "1.7"
+
+# Optional mock support for tests
+mockall = { version = "0.13", optional = true }
+sha2 = "0.11.0"
+regex = "1.12.4"
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
@@ -84,16 +100,7 @@ testcontainers = "0.16"
 wiremock = "0.6"
 hyper = { version = "1.0", features = ["full"] }
 mime = "0.3"
-arc-swap = "1.7"
-async-trait = "0.1"
-rust_decimal_macros = "1.35"
+mockall = "0.13"
 criterion = { version = "0.5", features = ["async_tokio"] }
-temp-env = "0.3.6"
-toml = "0.8.12"
-http-body-util = "0.1"
 
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
+

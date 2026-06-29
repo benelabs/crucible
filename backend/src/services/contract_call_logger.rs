@@ -1,7 +1,7 @@
-use sqlx::PgPool;
-use serde::{Serialize, Deserialize};
-use tracing::{info, instrument};
 use crate::error::AppError;
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use tracing::{info, instrument};
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -48,7 +48,11 @@ impl ContractCallLogger {
     }
 
     #[instrument(skip(self))]
-    pub async fn get_logs(&self, contract_id: Option<String>, limit: i64) -> Result<Vec<ContractCallLog>, AppError> {
+    pub async fn get_logs(
+        &self,
+        contract_id: Option<String>,
+        limit: i64,
+    ) -> Result<Vec<ContractCallLog>, AppError> {
         let logs = if let Some(cid) = contract_id {
             sqlx::query_as::<_, ContractCallLog>(
                 "SELECT id, contract_id, function_name, arguments, caller, status, gas_used, timestamp \

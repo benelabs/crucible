@@ -101,7 +101,7 @@ impl<'env> AccountBuilder<'env> {
         let id = UNNAMED_COUNTER.fetch_add(1, Ordering::Relaxed);
         Self {
             env,
-            name: format!("unnamed_{id}"),
+            name: String::new(),
             xlm_balance: Stroops::from(0),
             token_balances: Vec::new(),
         }
@@ -144,6 +144,9 @@ impl<'env> AccountBuilder<'env> {
             token.mint(&address, amount);
         }
 
+        if self.name.is_empty() {
+            panic!("Account name must be set before building. Call .name("...") on AccountBuilder.");
+        }
         // 4. Register in MockEnv
         self.env.register_account(&self.name, address.clone());
 

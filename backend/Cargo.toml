@@ -93,7 +93,7 @@ tokio-util = "0.7"
 cron = "0.12"
 
 # Optional mock support for tests
-mockall = { version = "0.13", optional = true }
+mockall = { version = "0.15", optional = true }
 sha2 = "0.11.0"
 regex = "1.12.4"
 
@@ -104,7 +104,7 @@ testcontainers = "0.16"
 wiremock = "0.6"
 hyper = { version = "1.0", features = ["full"] }
 mime = "0.3"
-mockall = "0.13"
+mockall = "0.15"
 criterion = { version = "0.5", features = ["async_tokio"] }
 
 

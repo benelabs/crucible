@@ -597,6 +597,14 @@ cost.assert_snapshot_with_tolerance("name", 0.1); // custom 10% tolerance
 env.advance_time(Duration::days(30));
 env.advance_time(Duration::seconds(3600));
 
+// Advance by calendar months/years (handles variable month lengths and leap years)
+env.advance_time_by_months(6);
+env.advance_time_by_years(1);
+
+// Pure helpers for timestamp arithmetic
+use crucible::time::{add_months, add_years};
+let future = add_months(env.timestamp(), 3);
+
 // Set absolute ledger time
 env.set_timestamp(unix_ts: u64);
 

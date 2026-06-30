@@ -79,7 +79,7 @@ impl Ctx {
 fn test_deposit_supplies_liquidity() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
-    ctx.client().deposit(&ctx.lender, &LIQUIDITY);
+    ctx.client().deposit(&ctx.lender.address(), &LIQUIDITY);
 
     assert_eq!(ctx.asset.balance(&ctx.id), LIQUIDITY);
     assert_eq!(ctx.client().liquidity(), LIQUIDITY);
@@ -90,7 +90,7 @@ fn test_deposit_supplies_liquidity() {
 fn test_deposit_emits_event() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
-    ctx.client().deposit(&ctx.lender, &LIQUIDITY);
+    ctx.client().deposit(&ctx.lender.address(), &LIQUIDITY);
 
     let emitted = ctx.env.events_all().events().iter().any(|event| {
         let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
@@ -107,7 +107,7 @@ fn test_borrow_transfers_liquidity_and_records_debt() {
     ctx.fund_pool_and_collateral();
 
     ctx.env.mock_all_auths();
-    ctx.client().borrow(&ctx.borrower, &500_000_i128);
+    ctx.client().borrow(&ctx.borrower.address(), &500_000_i128);
 
     let position = ctx.client().position(&ctx.borrower);
     assert_eq!(position.borrowed, 500_000);
@@ -123,7 +123,7 @@ fn test_borrow_above_collateral_factor_reverts() {
 
     ctx.env.mock_all_auths();
     assert_reverts!(
-        ctx.client().borrow(&ctx.borrower, &1_600_000_i128),
+        ctx.client().borrow(&ctx.borrower.address(), &1_600_000_i128),
         "insufficient pool liquidity"
     );
 }
@@ -132,12 +132,12 @@ fn test_borrow_above_collateral_factor_reverts() {
 fn test_borrow_without_enough_collateral_reverts() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
-    ctx.client().deposit(&ctx.lender, &(LIQUIDITY * 2));
+    ctx.client().deposit(&ctx.lender.address(), &(LIQUIDITY * 2));
     ctx.client()
-        .deposit_collateral(&ctx.borrower, &100_000_i128);
+        .deposit_collateral(&ctx.borrower.address(), &100_000_i128);
 
     assert_reverts!(
-        ctx.client().borrow(&ctx.borrower, &100_000_i128),
+        ctx.client().borrow(&ctx.borrower.address(), &100_000_i128),
         "insufficient collateral"
     );
 }
@@ -147,8 +147,8 @@ fn test_repay_caps_overpayment_to_current_debt() {
     let ctx = Ctx::setup();
     ctx.fund_pool_and_collateral();
     ctx.env.mock_all_auths();
-    ctx.client().borrow(&ctx.borrower, &400_000_i128);
-    ctx.client().repay(&ctx.borrower, &900_000_i128);
+    ctx.client().borrow(&ctx.borrower.address(), &400_000_i128);
+    ctx.client().repay(&ctx.borrower.address(), &900_000_i128);
 
     assert_eq!(ctx.client().position(&ctx.borrower).borrowed, 0);
     assert_eq!(ctx.client().liquidity(), LIQUIDITY);
@@ -159,7 +159,7 @@ fn test_interest_accrues_to_debt_and_supply() {
     let ctx = Ctx::setup();
     ctx.fund_pool_and_collateral();
     ctx.env.mock_all_auths();
-    ctx.client().borrow(&ctx.borrower, &500_000_i128);
+    ctx.client().borrow(&ctx.borrower.address(), &500_000_i128);
 
     ctx.env.advance_time(Duration::days(365));
 
@@ -176,10 +176,10 @@ fn test_withdraw_respects_available_liquidity() {
     let ctx = Ctx::setup();
     ctx.fund_pool_and_collateral();
     ctx.env.mock_all_auths();
-    ctx.client().borrow(&ctx.borrower, &750_000_i128);
+    ctx.client().borrow(&ctx.borrower.address(), &750_000_i128);
 
     assert_reverts!(
-        ctx.client().withdraw(&ctx.lender, &500_000_i128),
+        ctx.client().withdraw(&ctx.lender.address(), &500_000_i128),
         "insufficient pool liquidity"
     );
 }
@@ -189,7 +189,7 @@ fn test_withdraw_reduces_supply_balance() {
     let ctx = Ctx::setup();
     ctx.fund_pool_and_collateral();
     ctx.env.mock_all_auths();
-    ctx.client().withdraw(&ctx.lender, &250_000_i128);
+    ctx.client().withdraw(&ctx.lender.address(), &250_000_i128);
 
     assert_eq!(ctx.client().position(&ctx.lender).supplied, 750_000);
     assert_eq!(ctx.asset.balance(&ctx.lender), LIQUIDITY + 250_000);
@@ -200,11 +200,11 @@ fn test_collateral_withdrawal_requires_healthy_position() {
     let ctx = Ctx::setup();
     ctx.fund_pool_and_collateral();
     ctx.env.mock_all_auths();
-    ctx.client().borrow(&ctx.borrower, &1_000_000_i128);
+    ctx.client().borrow(&ctx.borrower.address(), &1_000_000_i128);
 
     assert_reverts!(
         ctx.client()
-            .withdraw_collateral(&ctx.borrower, &1_000_000_i128),
+            .withdraw_collateral(&ctx.borrower.address(), &1_000_000_i128),
         "insufficient collateral"
     );
 }
@@ -214,9 +214,9 @@ fn test_collateral_can_be_withdrawn_after_repay() {
     let ctx = Ctx::setup();
     ctx.fund_pool_and_collateral();
     ctx.env.mock_all_auths();
-    ctx.client().borrow(&ctx.borrower, &500_000_i128);
-    ctx.client().repay(&ctx.borrower, &500_000_i128);
-    ctx.client().withdraw_collateral(&ctx.borrower, &COLLATERAL);
+    ctx.client().borrow(&ctx.borrower.address(), &500_000_i128);
+    ctx.client().repay(&ctx.borrower.address(), &500_000_i128);
+    ctx.client().withdraw_collateral(&ctx.borrower.address(), &COLLATERAL);
 
     assert_eq!(ctx.client().position(&ctx.borrower).collateral, 0);
     assert_eq!(ctx.collateral.balance(&ctx.borrower), COLLATERAL);
@@ -254,7 +254,7 @@ fn test_double_initialize_reverts() {
 
     assert_reverts!(
         ctx.client().initialize(
-            &ctx.admin,
+            &ctx.admin.address(),
             &ctx.asset.address(),
             &ctx.collateral.address(),
             &500_i128,

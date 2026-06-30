@@ -61,8 +61,8 @@ impl Ctx {
     fn meta_tx(&self, nonce: u64) -> MetaTx {
         make_meta_tx(
             self.env.inner(),
-            self.alice.clone(),
-            self.bob.clone(),
+            self.alice.address(),
+            self.bob.address(),
             self.token.address(),
             AMOUNT,
             nonce,
@@ -79,7 +79,7 @@ impl Ctx {
 fn test_execute_transfers_tokens() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
-    ctx.client().execute(&ctx.relayer, &ctx.meta_tx(0));
+    ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(0));
 
     assert_eq!(ctx.token.balance(&ctx.alice), AMOUNT * 4);
     assert_eq!(ctx.token.balance(&ctx.bob), AMOUNT);
@@ -90,7 +90,7 @@ fn test_nonce_increments_after_execute() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     assert_eq!(ctx.client().nonce(&ctx.alice), 0);
-    ctx.client().execute(&ctx.relayer, &ctx.meta_tx(0));
+    ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(0));
     assert_eq!(ctx.client().nonce(&ctx.alice), 1);
 }
 
@@ -98,17 +98,17 @@ fn test_nonce_increments_after_execute() {
 fn test_replay_attack_reverts() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
-    ctx.client().execute(&ctx.relayer, &ctx.meta_tx(0));
+    ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(0));
     // Replay with same nonce.
-    assert_reverts!(ctx.client().execute(&ctx.relayer, &ctx.meta_tx(0)), "nonce");
+    assert_reverts!(ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(0)), "nonce");
 }
 
 #[test]
 fn test_sequential_nonces_succeed() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
-    ctx.client().execute(&ctx.relayer, &ctx.meta_tx(0));
-    ctx.client().execute(&ctx.relayer, &ctx.meta_tx(1));
+    ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(0));
+    ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(1));
     assert_eq!(ctx.token.balance(&ctx.bob), AMOUNT * 2);
 }
 
@@ -119,7 +119,7 @@ fn test_expired_meta_tx_reverts() {
     // Advance time past the deadline.
     ctx.env.advance_time(Duration::seconds(3_601));
     assert_reverts!(
-        ctx.client().execute(&ctx.relayer, &ctx.meta_tx(0)),
+        ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(0)),
         "expired"
     );
 }
@@ -130,7 +130,7 @@ fn test_unauthorized_relayer_reverts() {
     ctx.env.mock_all_auths();
     // alice tries to act as relayer.
     assert_reverts!(
-        ctx.client().execute(&ctx.alice, &ctx.meta_tx(0)),
+        ctx.client().execute(&ctx.alice.address(), &ctx.meta_tx(0)),
         "unauthorized relayer"
     );
 }
@@ -140,13 +140,13 @@ fn test_wrong_nonce_reverts() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     // Nonce 1 is wrong when 0 is expected.
-    assert_reverts!(ctx.client().execute(&ctx.relayer, &ctx.meta_tx(1)), "nonce");
+    assert_reverts!(ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(1)), "nonce");
 }
 
 #[test]
 fn test_relayer_returns_correct_address() {
     let ctx = Ctx::setup();
-    assert_eq!(ctx.client().relayer(), ctx.relayer.clone());
+    assert_eq!(ctx.client().relayer(), ctx.relayer.address());
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn test_nonce_starts_at_zero() {
 fn test_execute_emits_event() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
-    ctx.client().execute(&ctx.relayer, &ctx.meta_tx(0));
+    ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(0));
     let matching = ctx
         .env
         .events_matching((soroban_sdk::symbol_short!("executed"),));
@@ -176,22 +176,22 @@ fn test_multiple_users_independent_nonces() {
     ctx.env.mock_all_auths();
 
     // Give bob some tokens too.
-    ctx.token.mint(&ctx.bob, AMOUNT * 5);
+    ctx.token.mint(&ctx.bob.address(), AMOUNT * 5);
 
     // alice executes nonce 0.
-    ctx.client().execute(&ctx.relayer, &ctx.meta_tx(0));
+    ctx.client().execute(&ctx.relayer.address(), &ctx.meta_tx(0));
 
     // bob's nonce is still 0 independently.
     let bob_tx = make_meta_tx(
         ctx.env.inner(),
-        ctx.bob.clone(),
-        ctx.alice.clone(),
+        ctx.bob.address(),
+        ctx.alice.address(),
         ctx.token.address(),
         AMOUNT,
         0,
         DEADLINE,
     );
-    ctx.client().execute(&ctx.relayer, &bob_tx);
+    ctx.client().execute(&ctx.relayer.address(), &bob_tx);
 
     assert_eq!(ctx.client().nonce(&ctx.alice), 1);
     assert_eq!(ctx.client().nonce(&ctx.bob), 1);

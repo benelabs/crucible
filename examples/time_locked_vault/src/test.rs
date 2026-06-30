@@ -66,7 +66,7 @@ fn test_deposit_transfers_tokens_to_vault() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
@@ -81,13 +81,13 @@ fn test_deposit_returns_incrementing_ids() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     let id0 = ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
     );
     let id1 = ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
@@ -102,7 +102,7 @@ fn test_withdraw_after_unlock_time() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     let id = ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
@@ -121,7 +121,7 @@ fn test_withdraw_before_unlock_time_reverts() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     let id = ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
@@ -136,7 +136,7 @@ fn test_double_withdraw_reverts() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     let id = ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
@@ -154,7 +154,7 @@ fn test_deposit_zero_amount_reverts() {
     ctx.env.mock_all_auths();
     assert_reverts!(
         ctx.client().deposit(
-            &ctx.alice,
+            &ctx.alice.address(),
             &ctx.token.address(),
             &0_i128,
             &ctx.unlock_time()
@@ -170,7 +170,7 @@ fn test_deposit_past_unlock_time_reverts() {
     // unlock_time in the past
     assert_reverts!(
         ctx.client()
-            .deposit(&ctx.alice, &ctx.token.address(), &AMOUNT, &(BASE_TIME - 1)),
+            .deposit(&ctx.alice.address(), &ctx.token.address(), &AMOUNT, &(BASE_TIME - 1)),
         "future"
     );
 }
@@ -180,14 +180,14 @@ fn test_multiple_depositors_independent() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     let id_a = ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
     );
     let id_b = ctx
         .client()
-        .deposit(&ctx.bob, &ctx.token.address(), &AMOUNT, &ctx.unlock_time());
+        .deposit(&ctx.bob.address(), &ctx.token.address(), &AMOUNT, &ctx.unlock_time());
 
     ctx.env.advance_time(Duration::seconds(LOCK_DURATION + 1));
     ctx.client().withdraw(&id_a);
@@ -202,14 +202,14 @@ fn test_get_deposit_returns_correct_data() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     let id = ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
     );
 
     let dep = ctx.client().get_deposit(&id);
-    assert_eq!(dep.owner, ctx.alice.clone());
+    assert_eq!(dep.owner, ctx.alice.address());
     assert_eq!(dep.amount, AMOUNT);
     assert_eq!(dep.unlock_time, ctx.unlock_time());
     assert!(!dep.withdrawn);
@@ -220,7 +220,7 @@ fn test_deposit_emits_event() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),
@@ -239,7 +239,7 @@ fn test_withdraw_emits_event() {
     let ctx = Ctx::setup();
     ctx.env.mock_all_auths();
     let id = ctx.client().deposit(
-        &ctx.alice,
+        &ctx.alice.address(),
         &ctx.token.address(),
         &AMOUNT,
         &ctx.unlock_time(),

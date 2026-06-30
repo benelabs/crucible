@@ -132,10 +132,10 @@ fn test_router_counter_value_reads_cross_contract() {
 #[test]
 fn test_router_route_transfer_moves_tokens() {
     let ctx = Ctx::setup();
-    ctx.token.mint(&ctx.alice, 1_000_i128);
+    ctx.token.mint(&ctx.alice.address(), 1_000_i128);
 
     ctx.env.mock_all_auths();
-    ctx.router().route_transfer(&ctx.alice, &ctx.bob, &400_i128);
+    ctx.router().route_transfer(&ctx.alice.address(), &ctx.bob.address(), &400_i128);
 
     assert_eq!(ctx.token.balance(&ctx.alice), 600_i128);
     assert_eq!(ctx.token.balance(&ctx.bob), 400_i128);
@@ -144,10 +144,10 @@ fn test_router_route_transfer_moves_tokens() {
 #[test]
 fn test_router_route_transfer_emits_event() {
     let ctx = Ctx::setup();
-    ctx.token.mint(&ctx.alice, 500_i128);
+    ctx.token.mint(&ctx.alice.address(), 500_i128);
 
     ctx.env.mock_all_auths();
-    ctx.router().route_transfer(&ctx.alice, &ctx.bob, &500_i128);
+    ctx.router().route_transfer(&ctx.alice.address(), &ctx.bob.address(), &500_i128);
 
     assert_emitted!(ctx.env, ctx.router_id, (symbol_short!("routed"),), 500_i128);
 }
@@ -158,7 +158,7 @@ fn test_router_initialize_twice_panics() {
     // Router is already initialized in Ctx::setup(); calling again must panic.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.router()
-            .initialize(&ctx.counter_id, &ctx.token.address());
+            .initialize(&ctx.counter_id.clone(), &ctx.token.address());
     }));
     assert!(result.is_err());
 }
@@ -194,11 +194,11 @@ fn test_aggregator_counter_value_reads_through_router() {
 #[test]
 fn test_aggregator_transfer_moves_tokens() {
     let ctx = Ctx::setup();
-    ctx.token.mint(&ctx.alice, 2_000_i128);
+    ctx.token.mint(&ctx.alice.address(), 2_000_i128);
 
     ctx.env.mock_all_auths();
     ctx.agg()
-        .aggregate_transfer(&ctx.alice, &ctx.bob, &1_000_i128);
+        .aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &1_000_i128);
 
     assert_eq!(ctx.token.balance(&ctx.alice), 1_000_i128);
     assert_eq!(ctx.token.balance(&ctx.bob), 1_000_i128);
@@ -207,13 +207,13 @@ fn test_aggregator_transfer_moves_tokens() {
 #[test]
 fn test_aggregator_transfer_tracks_total_routed() {
     let ctx = Ctx::setup();
-    ctx.token.mint(&ctx.alice, 3_000_i128);
+    ctx.token.mint(&ctx.alice.address(), 3_000_i128);
 
     ctx.env.mock_all_auths();
     ctx.agg()
-        .aggregate_transfer(&ctx.alice, &ctx.bob, &1_000_i128);
+        .aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &1_000_i128);
     ctx.agg()
-        .aggregate_transfer(&ctx.alice, &ctx.bob, &500_i128);
+        .aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &500_i128);
 
     assert_eq!(ctx.agg().total_routed(), 1_500_i128);
 }
@@ -221,11 +221,11 @@ fn test_aggregator_transfer_tracks_total_routed() {
 #[test]
 fn test_aggregator_transfer_emits_event_with_cumulative_total() {
     let ctx = Ctx::setup();
-    ctx.token.mint(&ctx.alice, 1_000_i128);
+    ctx.token.mint(&ctx.alice.address(), 1_000_i128);
 
     ctx.env.mock_all_auths();
     ctx.agg()
-        .aggregate_transfer(&ctx.alice, &ctx.bob, &1_000_i128);
+        .aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &1_000_i128);
 
     assert_emitted!(ctx.env, ctx.agg_id, (symbol_short!("aggtxfr"),), 1_000_i128);
 }
@@ -252,7 +252,7 @@ fn test_aggregator_initialize_twice_panics() {
 #[test]
 fn test_full_chain_ping_and_transfer() {
     let ctx = Ctx::setup();
-    ctx.token.mint(&ctx.alice, 5_000_i128);
+    ctx.token.mint(&ctx.alice.address(), 5_000_i128);
 
     ctx.env.mock_all_auths();
 
@@ -263,9 +263,9 @@ fn test_full_chain_ping_and_transfer() {
 
     // Transfer twice.
     ctx.agg()
-        .aggregate_transfer(&ctx.alice, &ctx.bob, &2_000_i128);
+        .aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &2_000_i128);
     ctx.agg()
-        .aggregate_transfer(&ctx.alice, &ctx.bob, &1_000_i128);
+        .aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &1_000_i128);
 
     assert_eq!(ctx.counter().get(), 3);
     assert_eq!(ctx.agg().total_routed(), 3_000_i128);
@@ -294,7 +294,7 @@ fn test_transfer_insufficient_balance_reverts() {
     // Alice has no tokens — transfer must fail.
     ctx.env.mock_all_auths();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.agg().aggregate_transfer(&ctx.alice, &ctx.bob, &1_i128);
+        ctx.agg().aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &1_i128);
     }));
     assert!(result.is_err());
     // Total routed must remain zero.

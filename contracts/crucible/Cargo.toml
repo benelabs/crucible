@@ -28,3 +28,6 @@ serde_json = { version = "1", optional = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-env-host = "26.1.3"
 crucible-macros = { workspace = true, optional = true }
+
+[dev-dependencies]
+static_assertions = "1.1.0"

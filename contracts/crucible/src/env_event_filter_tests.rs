@@ -18,15 +18,18 @@ mod tests {
     }
 
     fn map_parsed(
-        evs: Vec<CapturedEvent>,
-    ) -> Vec<(
+        env: &Env,
+        evs: std::vec::Vec<CapturedEvent>,
+    ) -> soroban_sdk::Vec<(
         soroban_sdk::Address,
         soroban_sdk::Vec<soroban_sdk::Val>,
         soroban_sdk::Val,
     )> {
-        evs.into_iter()
-            .map(|e| (e.contract, e.topics, e.data))
-            .collect()
+        let mut out = soroban_sdk::Vec::new(env);
+        for e in evs {
+            out.push_back((e.contract, e.topics, e.data));
+        }
+        out
     }
 
     #[test]
@@ -47,7 +50,7 @@ mod tests {
 
         assert_eq!(
             matching,
-            map_parsed(parsed),
+            map_parsed(env.inner(), parsed),
             "events_matching and events_parsed must return identical matches for the same topic filter"
         );
     }

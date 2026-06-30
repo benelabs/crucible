@@ -68,6 +68,10 @@ This writes (or overwrites) every snapshot that is exercised during the run. Rev
 4. Update docs if needed
 5. Open PR referencing the issue
 
+## Release Process
+
+Maintainers should follow the release checklist in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) before publishing a new version. It covers version bumps, changelog prep, SDK and docs verification, packaging, and tagging for both prereleases and stable releases.
+
 ## Need Help?
 
 Open an issue on the repository.

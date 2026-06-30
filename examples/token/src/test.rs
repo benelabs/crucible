@@ -161,7 +161,7 @@ fn test_mint_emits_event() {
     assert_emitted!(
         f.env,
         f.id,
-        (symbol_short!("mint"), alice.clone()),
+        (symbol_short!("mint"), alice.address()),
         1_000_i128
     );
 }

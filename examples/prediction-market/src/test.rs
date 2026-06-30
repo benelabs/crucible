@@ -103,7 +103,7 @@ fn test_initialize_rejects_past_close_time() {
     ctx.env.mock_all_auths();
     assert_reverts!(
         ctx.client()
-            .initialize(&ctx.admin, &ctx.token.address(), &BASE_TIME),
+            .initialize(&ctx.admin.address(), &ctx.token.address(), &BASE_TIME),
         "close time"
     );
 }
@@ -114,7 +114,7 @@ fn test_double_initialize_reverts() {
     ctx.initialize();
     assert_reverts!(
         ctx.client()
-            .initialize(&ctx.admin, &ctx.token.address(), &(BASE_TIME + CLOSE_DELAY)),
+            .initialize(&ctx.admin.address(), &ctx.token.address(), &(BASE_TIME + CLOSE_DELAY)),
         "already initialized"
     );
 }
@@ -124,10 +124,10 @@ fn test_buy_transfers_collateral_and_tracks_position() {
     let ctx = Ctx::setup();
     ctx.initialize();
     ctx.env.mock_all_auths();
-    ctx.client().buy(&ctx.alice, &Outcome::Yes, &ALICE_STAKE);
+    ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE);
 
     assert_eq!(
-        ctx.client().position(&ctx.alice, &Outcome::Yes),
+        ctx.client().position(&ctx.alice.address(), &Outcome::Yes),
         ALICE_STAKE
     );
     assert_eq!(ctx.client().pool_total(), ALICE_STAKE);
@@ -140,12 +140,12 @@ fn test_buy_accumulates_multiple_positions() {
     let ctx = Ctx::setup();
     ctx.initialize();
     ctx.env.mock_all_auths();
-    ctx.client().buy(&ctx.alice, &Outcome::Yes, &ALICE_STAKE);
-    ctx.client().buy(&ctx.alice, &Outcome::Yes, &BOB_STAKE);
-    ctx.client().buy(&ctx.carol, &Outcome::No, &CAROL_STAKE);
+    ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE);
+    ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &BOB_STAKE);
+    ctx.client().buy(&ctx.carol.address(), &Outcome::No, &CAROL_STAKE);
 
     let state = ctx.client().get_state();
-    assert_eq!(ctx.client().position(&ctx.alice, &Outcome::Yes), 1_000_000);
+    assert_eq!(ctx.client().position(&ctx.alice.address(), &Outcome::Yes), 1_000_000);
     assert_eq!(state.yes_total, 1_000_000);
     assert_eq!(state.no_total, CAROL_STAKE);
 }
@@ -156,7 +156,7 @@ fn test_buy_rejects_zero_amount() {
     ctx.initialize();
     ctx.env.mock_all_auths();
     assert_reverts!(
-        ctx.client().buy(&ctx.alice, &Outcome::Yes, &0_i128),
+        ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &0_i128),
         "positive"
     );
 }
@@ -168,7 +168,7 @@ fn test_buy_after_close_reverts() {
     ctx.env.advance_time(Duration::seconds(CLOSE_DELAY));
     ctx.env.mock_all_auths();
     assert_reverts!(
-        ctx.client().buy(&ctx.alice, &Outcome::Yes, &ALICE_STAKE),
+        ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE),
         "closed"
     );
 }
@@ -180,7 +180,7 @@ fn test_only_admin_can_resolve() {
     ctx.env.advance_time(Duration::seconds(CLOSE_DELAY));
     ctx.env.mock_all_auths();
     assert_reverts!(
-        ctx.client().resolve(&ctx.alice, &Outcome::Yes),
+        ctx.client().resolve(&ctx.alice.address(), &Outcome::Yes),
         "only the admin"
     );
 }
@@ -191,7 +191,7 @@ fn test_resolve_before_close_reverts() {
     ctx.fund_market();
     ctx.env.mock_all_auths();
     assert_reverts!(
-        ctx.client().resolve(&ctx.admin, &Outcome::Yes),
+        ctx.client().resolve(&ctx.admin.address(), &Outcome::Yes),
         "still open"
     );
 }
@@ -213,7 +213,7 @@ fn test_double_resolve_reverts() {
     ctx.fund_market();
     ctx.resolve_yes();
     assert_reverts!(
-        ctx.client().resolve(&ctx.admin, &Outcome::No),
+        ctx.client().resolve(&ctx.admin.address(), &Outcome::No),
         "already resolved"
     );
 }
@@ -248,8 +248,8 @@ fn test_winners_claim_proportional_payouts() {
         ctx.token.balance(&ctx.bob),
         2_000_000 - BOB_STAKE + bob_expected
     );
-    assert_eq!(ctx.client().position(&ctx.alice, &Outcome::Yes), 0);
-    assert_eq!(ctx.client().position(&ctx.bob, &Outcome::Yes), 0);
+    assert_eq!(ctx.client().position(&ctx.alice.address(), &Outcome::Yes), 0);
+    assert_eq!(ctx.client().position(&ctx.bob.address(), &Outcome::Yes), 0);
 }
 
 #[test]
@@ -277,7 +277,7 @@ fn test_no_side_can_win_and_claim_full_pool() {
     ctx.fund_market();
     ctx.env.advance_time(Duration::seconds(CLOSE_DELAY));
     ctx.env.mock_all_auths();
-    ctx.client().resolve(&ctx.admin, &Outcome::No);
+    ctx.client().resolve(&ctx.admin.address(), &Outcome::No);
 
     let pool = ALICE_STAKE + BOB_STAKE + CAROL_STAKE;
     assert_eq!(ctx.client().claim(&ctx.carol), pool);

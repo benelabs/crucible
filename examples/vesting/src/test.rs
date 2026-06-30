@@ -60,8 +60,8 @@ impl Ctx {
 
         ctx.env.mock_all_auths();
         VestingClient::new(ctx.env.inner(), &ctx.id).initialize(
-            &ctx.admin,
-            &ctx.beneficiary,
+            &ctx.admin.address(),
+            &ctx.beneficiary.address(),
             &ctx.token.address(),
             &TOTAL,
             &BASE_TIME,

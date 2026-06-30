@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "backup"
 path = "src/bin/backup.rs"
 
+[[bin]]
+name = "ci-report"
+path = "src/bin/ci_report.rs"
+
 [[bench]]
 name = "performance"
 harness = false
@@ -69,7 +73,7 @@ config = "0.14.0"
 rust_decimal = { version = "1.35", features = ["serde", "db-postgres"] }
 rust_decimal_macros = "1.35"
 arc-swap = "1.7"
-stellar-xdr = { version = "21.0", features = ["std"] }
+stellar-xdr = { version = "26.0", features = ["std"] }
 soroban-sdk = { workspace = true }
 base64 = "0.22"
 validator = { version = "0.19", features = ["derive"] }

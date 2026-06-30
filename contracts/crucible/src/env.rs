@@ -382,12 +382,55 @@ impl MockEnv {
         self.inner.mock_auths(auths);
     }
 
+    /// Returns the current ledger timestamp (UNIX seconds).
+    pub fn timestamp(&self) -> u64 {
+        self.inner.ledger().get().timestamp
+    }
+
     /// Advance the ledger timestamp by a duration.
     pub fn advance_time(&self, duration: Duration) {
         let info = self.inner.ledger().get();
         self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
             sequence_number: info.sequence_number,
             timestamp: info.timestamp + duration.as_seconds(),
+            protocol_version: info.protocol_version,
+            base_reserve: info.base_reserve,
+            network_id: info.network_id,
+            min_temp_entry_ttl: info.min_temp_entry_ttl,
+            min_persistent_entry_ttl: info.min_persistent_entry_ttl,
+            max_entry_ttl: info.max_entry_ttl,
+        });
+    }
+
+    /// Advance the ledger timestamp by `months` using calendar month arithmetic.
+    ///
+    /// When the current day does not exist in the target month (e.g. Jan 31 → Feb),
+    /// the result is clamped to the last valid day of that month.
+    pub fn advance_time_by_months(&self, months: u32) {
+        let info = self.inner.ledger().get();
+        let new_timestamp = crate::time::add_months(info.timestamp, months);
+        self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
+            sequence_number: info.sequence_number,
+            timestamp: new_timestamp,
+            protocol_version: info.protocol_version,
+            base_reserve: info.base_reserve,
+            network_id: info.network_id,
+            min_temp_entry_ttl: info.min_temp_entry_ttl,
+            min_persistent_entry_ttl: info.min_persistent_entry_ttl,
+            max_entry_ttl: info.max_entry_ttl,
+        });
+    }
+
+    /// Advance the ledger timestamp by `years` using calendar year arithmetic.
+    ///
+    /// When the current day does not exist in the target year (e.g. Feb 29 → non-leap year),
+    /// the result is clamped to Feb 28.
+    pub fn advance_time_by_years(&self, years: u32) {
+        let info = self.inner.ledger().get();
+        let new_timestamp = crate::time::add_years(info.timestamp, years);
+        self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
+            sequence_number: info.sequence_number,
+            timestamp: new_timestamp,
             protocol_version: info.protocol_version,
             base_reserve: info.base_reserve,
             network_id: info.network_id,
@@ -465,6 +508,66 @@ impl MockEnv {
         self.inner.events().all()
     }
 
+    /// Returns all events emitted by a specific contract address.
+    ///
+    /// Useful for asserting that a particular contract (in a multi-contract
+    /// scenario) emitted (or did not emit) certain events.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let pool_events = env.events_from_contract(&pool_address);
+    /// assert!(!pool_events.is_empty());
+    /// ```
+    pub fn events_from_contract(&self, contract_id: &Address) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        use soroban_sdk::xdr::{self, ScAddress};
+        let all_events = self.inner.events().all();
+        let mut result = SorobanVec::new(&self.inner);
+        for event in all_events.events() {
+            if let Some(ref id) = event.contract_id {
+                let sc_addr = ScAddress::Contract(id.clone());
+                let addr = Address::from_val(&self.inner, &sc_addr);
+                if addr == *contract_id {
+                    let xdr::ContractEventBody::V0(body) = &event.body;
+                    let topics: SorobanVec<Val> = body.topics.clone().into_val(&self.inner);
+                    let data: Val = body.data.clone().into_val(&self.inner);
+                    result.push_back((addr, topics, data));
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns all events emitted by any of the given contract addresses.
+    ///
+    /// Useful for tracking events across multiple contracts simultaneously,
+    /// e.g. verifying that an aggregator routed a call through exactly one pool.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let events = env.events_from_contracts(&[&pool_a, &pool_b]);
+    /// assert_eq!(events.len(), 1); // only one pool was used
+    /// ```
+    pub fn events_from_contracts(&self, contract_ids: &[&Address]) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        use soroban_sdk::xdr::{self, ScAddress};
+        let all_events = self.inner.events().all();
+        let mut result = SorobanVec::new(&self.inner);
+        for event in all_events.events() {
+            if let Some(ref id) = event.contract_id {
+                let sc_addr = ScAddress::Contract(id.clone());
+                let addr = Address::from_val(&self.inner, &sc_addr);
+                if contract_ids.iter().any(|c| **c == addr) {
+                    let xdr::ContractEventBody::V0(body) = &event.body;
+                    let topics: SorobanVec<Val> = body.topics.clone().into_val(&self.inner);
+                    let data: Val = body.data.clone().into_val(&self.inner);
+                    result.push_back((addr, topics, data));
+                }
+            }
+        }
+        result
+    }
+
     /// Returns events matching the given topics.
     ///
     /// Updated for Soroban SDK v25.x ContractEvents compatibility.
@@ -490,7 +593,7 @@ impl MockEnv {
                 continue;
             }
             let matches =
-                crate::event_topic_match::topics_match_by_payload(&filter_topics, &event_topics);
+                crate::event_topic_match::topics_match(&self.inner, &filter_topics, &event_topics);
             if matches {
                 let sc_addr = ScAddress::Contract(hash.clone());
                 let contract_id = Address::from_val(&self.inner, &sc_addr);
@@ -684,7 +787,7 @@ impl MockEnv {
     /// Auth is globally bypassed only for the duration of the dry-run call.
     /// After `simulate_inspect` returns the auth mock is cleared, so subsequent
     /// operations require explicit auth setup and will not silently pass.
-    pub fn simulate_inspect<F, T>(&self, f: F) -> InspectedTx<T>
+    pub fn simulate_inspect<F, T>(&self, f: F) -> SimulatedTx<T>
     where
         F: FnOnce() -> T,
     {
@@ -700,7 +803,7 @@ impl MockEnv {
         // Clear the global auth bypass so it does not leak into later operations.
         self.inner.mock_auths(&[]);
 
-        InspectedTx::new(
+        SimulatedTx::new(
             fee,
             instructions,
             auths,
@@ -728,6 +831,73 @@ impl MockEnv {
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
             track_costs: self.track_costs,
         }
+    }
+
+    /// Simulate a contract call that is expected to fail (panic/revert).
+    ///
+    /// Runs `f` under [`std::panic::catch_unwind`] and returns a
+    /// [`FailedCallResult`] indicating whether the call panicked and, if so,
+    /// what message was captured.  Auth is mocked for the duration of the call
+    /// and cleared before returning.
+    ///
+    /// This is useful for asserting that a cross-contract call chain rejects
+    /// invalid inputs or unauthorized callers without letting the panic
+    /// propagate out of the test.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let result = env.simulate_failing_call(|| client.claim());
+    /// assert!(result.did_fail());
+    /// assert!(result.panic_message().unwrap_or_default().contains("time lock"));
+    /// ```
+    pub fn simulate_failing_call<F, T>(&self, f: F) -> FailedCallResult
+    where
+        F: FnOnce() -> T + std::panic::UnwindSafe,
+    {
+        self.inner.mock_all_auths();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f();
+        }));
+        self.inner.mock_auths(&[]);
+
+        match outcome {
+            Err(payload) => {
+                // Try to extract a string message from the panic payload.
+                let message = if let Some(s) = payload.downcast_ref::<&str>() {
+                    Some(s.to_string())
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    Some(s.clone())
+                } else {
+                    None
+                };
+                FailedCallResult { failed: true, message }
+            }
+            Ok(()) => FailedCallResult { failed: false, message: None },
+        }
+    }
+}
+
+/// The outcome of a [`MockEnv::simulate_failing_call`] invocation.
+///
+/// Holds whether the call panicked (reverted) and any captured panic message.
+#[derive(Debug)]
+pub struct FailedCallResult {
+    failed: bool,
+    message: Option<String>,
+}
+
+impl FailedCallResult {
+    /// Returns `true` if the call panicked (i.e., reverted).
+    pub fn did_fail(&self) -> bool {
+        self.failed
+    }
+
+    /// Returns the panic message, if any was captured.
+    ///
+    /// Soroban host panics are typically `&str` or `String` payloads.  Returns
+    /// `None` when the call succeeded or the payload type was not recognisable.
+    pub fn panic_message(&self) -> Option<&str> {
+        self.message.as_deref()
     }
 }
 
@@ -926,7 +1096,7 @@ impl MockEnvBuilder {
 }
 
 #[cfg(test)]
-mod tests {
+mod extra_tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
 
@@ -1045,6 +1215,39 @@ mod tests {
 
         let alice = env2.account("alice");
         assert_eq!(alice.xlm_balance(), Stroops::xlm(100).as_stroops());
+    }
+}
+
+#[cfg(test)]
+mod time_advance_tests {
+    use super::*;
+    use crate::time::{add_months, datetime_to_unix};
+
+    const JAN_31_2024: u64 = 1_706_704_245;
+    const MAR_15_2024: u64 = 1_710_489_600;
+
+    #[test]
+    fn advance_time_by_months_updates_ledger() {
+        let env = MockEnv::builder().at_timestamp(JAN_31_2024).build();
+        env.advance_time_by_months(1);
+        assert_eq!(
+            env.timestamp(),
+            datetime_to_unix(2024, 2, 29, 12, 30, 45)
+        );
+    }
+
+    #[test]
+    fn advance_time_by_years_updates_ledger() {
+        let env = MockEnv::builder().at_timestamp(MAR_15_2024).build();
+        env.advance_time_by_years(1);
+        assert_eq!(env.timestamp(), datetime_to_unix(2025, 3, 15, 8, 0, 0));
+    }
+
+    #[test]
+    fn advance_time_by_months_chains_with_existing_timestamp() {
+        let env = MockEnv::builder().at_timestamp(MAR_15_2024).build();
+        env.advance_time_by_months(6);
+        assert_eq!(env.timestamp(), add_months(MAR_15_2024, 6));
     }
 }
 

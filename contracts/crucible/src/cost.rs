@@ -221,6 +221,16 @@ impl CostReport {
             tolerance,
             name,
         );
+
+        if let Some(fee) = self.fee_stroops {
+            check_i128_within_tolerance(
+                "fee_stroops",
+                saved.fee_stroops,
+                fee,
+                tolerance,
+                name,
+            );
+        }
     }
 }
 
@@ -239,7 +249,7 @@ fn check_within_tolerance(metric: &str, saved: u64, current: u64, tolerance: f64
 }
 
 #[cfg(feature = "snapshots")]
-fn check_i64_within_tolerance(metric: &str, saved: i64, current: i64, tolerance: f64, name: &str) {
+fn check_i128_within_tolerance(metric: &str, saved: i128, current: i128, tolerance: f64, name: &str) {
     if saved == 0 {
         if current != 0 {
             panic!(
@@ -344,15 +354,15 @@ mod tests {
 
     #[cfg(feature = "snapshots")]
     #[test]
-    fn test_check_i64_within_tolerance_allows_small_fee_increase() {
-        super::check_i64_within_tolerance("fee_stroops", 100, 104, 0.05, "test");
+    fn test_check_i128_within_tolerance_allows_small_fee_increase() {
+        super::check_i128_within_tolerance("fee_stroops", 100, 104, 0.05, "test");
     }
 
     #[cfg(feature = "snapshots")]
     #[test]
     #[should_panic(expected = "cost regression in snapshot 'test': fee_stroops increased")]
-    fn test_check_i64_within_tolerance_panics_on_fee_regression() {
-        super::check_i64_within_tolerance("fee_stroops", 100, 200, 0.05, "test");
+    fn test_check_i128_within_tolerance_panics_on_fee_regression() {
+        super::check_i128_within_tolerance("fee_stroops", 100, 200, 0.05, "test");
     }
 
     #[cfg(feature = "snapshots")]
@@ -383,7 +393,7 @@ mod tests {
         let report = CostReport::new_with_fee_estimate(
             10_000,
             5_000,
-            sample_fee_estimate(42),
+            42,
         );
         report.assert_snapshot_with_tolerance(snap_name, 0.05);
 
@@ -418,7 +428,7 @@ mod tests {
         let report = CostReport::new_with_fee_estimate(
             10_000,
             5_000,
-            sample_fee_estimate(200),
+            200,
         );
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             report.assert_snapshot_with_tolerance(snap_name, 0.05);

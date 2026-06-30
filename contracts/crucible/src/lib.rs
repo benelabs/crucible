@@ -10,6 +10,8 @@ pub mod macros;
 pub mod prelude;
 pub mod reputation;
 pub mod sim;
+#[path = "time_helpers.rs"]
+pub mod time;
 pub mod token;
 
 /// The `#[fixture]` attribute macro for defining reusable test setup structs.

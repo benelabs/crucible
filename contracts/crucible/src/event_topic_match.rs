@@ -7,7 +7,7 @@
 // handles into the host's object store — two semantically-equal values can have
 // different payloads, so `Val::get_payload()` comparison silently fails to match.
 
-use soroban_sdk::testutils::Compare;
+use soroban_env_host::Compare;
 use soroban_sdk::{Env, Val, Vec as SorobanVec};
 
 pub(crate) fn topics_match(

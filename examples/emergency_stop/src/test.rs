@@ -135,6 +135,7 @@ fn test_protected_action_succeeds_after_resume() {
         ctx.client().resume();
     }
     // Should not panic after resume.
+    let _auth = ctx.env.mock_all_auths_scoped();
     ctx.client().protected_action(&ctx.user);
 }
 
@@ -172,7 +173,7 @@ fn test_stop_emits_event() {
         ctx.env,
         ctx.id,
         (symbol_short!("stopped"),),
-        ctx.admin.clone()
+        ctx.admin.address()
     );
 }
 
@@ -195,6 +196,6 @@ fn test_add_guardian_emits_event() {
         ctx.env,
         ctx.id,
         (symbol_short!("guardian"),),
-        (symbol_short!("added"), ctx.guardian.clone())
+        (symbol_short!("added"), ctx.guardian.address())
     );
 }

@@ -49,7 +49,7 @@ fn test_basic_flow() {
 
     // proposer a creates a proposal
     ctx.env.mock_all_auths();
-    let tx = soroban_sdk::Bytes::from_array(&ctx.env, &[1, 2, 3]);
+    let tx = soroban_sdk::Bytes::from_array(&ctx.env.address(), &[1, 2, 3]);
     let id = ctx.client().propose(&ctx.a.address(), &tx);
     assert_emitted!(ctx.env, ctx.id, (symbol_short!("proposed"),), id);
 

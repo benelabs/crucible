@@ -178,9 +178,9 @@ fn test_create_emits_event() {
     let ctx = Ctx::setup();
     ctx.env.with_mock_all_auths(|| {
         ctx.client().create(
-            &ctx.depositor,
-            &ctx.recipient,
-            &ctx.arbiter,
+            &ctx.depositor.address(),
+            &ctx.recipient.address(),
+            &ctx.arbiter.address(),
             &ctx.token.address(),
             &AMOUNT,
             &(BASE_TIME + LOCK_DURATION),

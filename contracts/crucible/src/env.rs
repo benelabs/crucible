@@ -306,7 +306,15 @@ impl MockEnv {
             .borrow()
             .get(name)
             .cloned()
-            .unwrap_or_else(|| panic!("Account '{}' not found. Ensure it was registered via MockEnvBuilder or AccountBuilder.", name));
+            .unwrap_or_else(|| {
+                let mut available: Vec<_> = self.accounts.borrow().keys().cloned().collect();
+                available.sort();
+                panic!(
+                    "Account '{}' not found. Available accounts: [{}]. Ensure it was registered via MockEnvBuilder or AccountBuilder.",
+                    name,
+                    available.join(", ")
+                )
+            });
 
         AccountHandle::new(self.clone(), name.to_string(), address)
     }
@@ -318,7 +326,15 @@ impl MockEnv {
             .borrow()
             .get(type_name)
             .cloned()
-            .unwrap_or_else(|| panic!("Contract '{}' not registered", type_name))
+            .unwrap_or_else(|| {
+                let mut available: Vec<_> = self.contract_ids.borrow().keys().cloned().collect();
+                available.sort();
+                panic!(
+                    "Contract '{}' not registered. Available contracts: [{}]",
+                    type_name,
+                    available.join(", ")
+                )
+            })
     }
 
     /// Enable mock authorization for all calls.
@@ -1380,5 +1396,30 @@ mod auth_scope_tests {
             let _g = env.mock_all_auths_scoped();
         }
         assert!(env.inner().auths().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod missing_lookup_tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "Account 'missing' not found. Available accounts: [admin, alice, bob]. Ensure it was registered via MockEnvBuilder or AccountBuilder.")]
+    fn missing_account_shows_available() {
+        let env = MockEnv::builder()
+            .with_account("admin", Stroops::xlm(10))
+            .with_account("alice", Stroops::xlm(10))
+            .with_account("bob", Stroops::xlm(10))
+            .build();
+        env.account("missing");
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract 'alloc::string::String' not registered. Available contracts: [crucible::env::MockEnv]")]
+    fn missing_contract_shows_available() {
+        let env = MockEnv::default();
+        let addr = Address::generate(&env.inner);
+        env.register_contract::<MockEnv>(addr);
+        env.contract_id::<String>();
     }
 }

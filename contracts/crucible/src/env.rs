@@ -11,7 +11,7 @@ use crate::account::AccountHandle;
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use soroban_sdk::{
-    testutils::{ContractEvents, Events, Ledger},
+    testutils::{ContractEvents, Events, Ledger, Register},
     Address, Env, FromVal, IntoVal, Val, Vec as SorobanVec,
 };
 use std::cell::RefCell;
@@ -1050,24 +1050,23 @@ impl MockEnvBuilder {
     where
         C: soroban_sdk::testutils::ContractFunctionSet + Default + 'static,
     {
-        let contract_id = self.env.inner.register(C::default(), ());
+        let contract_id = C::default().register(&self.env.inner, None, ());
         self.env.register_contract::<C>(contract_id);
         self
     }
 
     /// Register a contract at a deterministic address.
     ///
-    /// This allows tests to associate a contract type with a known `Address` so
-    /// that callers can look up the address deterministically via
-    /// `env.contract_id::<C>()`. Note: this registers the mapping in the
-    /// `MockEnv` but does not deploy the contract instance to the underlying
-    /// `soroban_sdk::Env`. Use `with_contract` if you need the instance to be
-    /// available for calls.
+    /// This deploys the contract to the underlying `soroban_sdk::Env` at the
+    /// specified address and registers the type-to-address mapping so that
+    /// callers can look up the address deterministically via
+    /// `env.contract_id::<C>()`.
     pub fn with_contract_at<C>(self, id: &Address) -> Self
     where
         C: soroban_sdk::testutils::ContractFunctionSet + Default + 'static,
     {
-        self.env.register_contract::<C>(id.clone());
+        let contract_id = C::default().register(&self.env.inner, Some(id), ());
+        self.env.register_contract::<C>(contract_id);
         self
     }
 
@@ -1099,6 +1098,31 @@ impl MockEnvBuilder {
 mod extra_tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
+    // Use the counter contract from examples to test
+    use soroban_sdk::{contractimpl, Env};
+
+    // A simple test contract
+    #[soroban_sdk::contract]
+    #[derive(Default)]
+    struct TestContract;
+
+    #[contractimpl]
+    impl TestContract {
+        pub fn initialize(env: Env, value: u32) {
+            env.storage().instance().set(&soroban_sdk::symbol_short!("val"), &value);
+        }
+
+        pub fn get(env: Env) -> u32 {
+            env.storage().instance().get(&soroban_sdk::symbol_short!("val")).unwrap_or(0)
+        }
+
+        pub fn increment(env: Env) -> u32 {
+            let val = Self::get(env.clone());
+            let new_val = val + 1;
+            env.storage().instance().set(&soroban_sdk::symbol_short!("val"), &new_val);
+            new_val
+        }
+    }
 
     #[test]
     fn test_clone_shares_accounts() {
@@ -1215,6 +1239,70 @@ mod extra_tests {
 
         let alice = env2.account("alice");
         assert_eq!(alice.xlm_balance(), Stroops::xlm(100).as_stroops());
+    }
+
+    #[test]
+    fn test_with_contract_at_deploys_real_contract() {
+        let specific_addr = Address::generate(&Env::default());
+        let env = MockEnv::builder()
+            .with_contract_at::<TestContract>(&specific_addr)
+            .build();
+        
+        assert_eq!(env.contract_id::<TestContract>(), specific_addr);
+        
+        // Create a client and test that we can call the contract
+        let client = TestContractClient::new(&env.inner, &specific_addr);
+        client.initialize(&42);
+        assert_eq!(client.get(), 42);
+        assert_eq!(client.increment(), 43);
+    }
+
+    #[test]
+    fn test_with_contract_at_deterministic_address() {
+        let specific_addr = Address::generate(&Env::default());
+        
+        let env1 = MockEnv::builder()
+            .with_contract_at::<TestContract>(&specific_addr)
+            .build();
+        assert_eq!(env1.contract_id::<TestContract>(), specific_addr);
+        
+        let env2 = MockEnv::builder()
+            .with_contract_at::<TestContract>(&specific_addr)
+            .build();
+        assert_eq!(env2.contract_id::<TestContract>(), specific_addr);
+    }
+
+    #[test]
+    fn test_multiple_contracts_distinct_addresses() {
+        let addr1 = Address::generate(&Env::default());
+        let addr2 = Address::generate(&Env::default());
+        
+        let env = MockEnv::builder()
+            .with_contract_at::<TestContract>(&addr1)
+            // Also test with another contract (we'll use TestContract again for simplicity)
+            .build();
+        
+        env.register_contract::<TestContract>(addr2.clone());
+        
+        // Deploy a second contract at addr2 using register
+        TestContract::default().register(&env.inner, Some(&addr2), ());
+        
+        assert_eq!(env.contract_id::<TestContract>(), addr1);
+        assert_ne!(addr1, addr2);
+    }
+
+    #[test]
+    fn test_contract_state_persists() {
+        let addr = Address::generate(&Env::default());
+        let env = MockEnv::builder()
+            .with_contract_at::<TestContract>(&addr)
+            .build();
+        
+        let client = TestContractClient::new(&env.inner, &addr);
+        client.initialize(&10);
+        assert_eq!(client.increment(), 11);
+        assert_eq!(client.increment(), 12);
+        assert_eq!(client.get(), 12);
     }
 }
 

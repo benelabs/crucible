@@ -829,6 +829,73 @@ impl MockEnv {
             track_costs: self.track_costs,
         }
     }
+
+    /// Simulate a contract call that is expected to fail (panic/revert).
+    ///
+    /// Runs `f` under [`std::panic::catch_unwind`] and returns a
+    /// [`FailedCallResult`] indicating whether the call panicked and, if so,
+    /// what message was captured.  Auth is mocked for the duration of the call
+    /// and cleared before returning.
+    ///
+    /// This is useful for asserting that a cross-contract call chain rejects
+    /// invalid inputs or unauthorized callers without letting the panic
+    /// propagate out of the test.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let result = env.simulate_failing_call(|| client.claim());
+    /// assert!(result.did_fail());
+    /// assert!(result.panic_message().unwrap_or_default().contains("time lock"));
+    /// ```
+    pub fn simulate_failing_call<F, T>(&self, f: F) -> FailedCallResult
+    where
+        F: FnOnce() -> T + std::panic::UnwindSafe,
+    {
+        self.inner.mock_all_auths();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f();
+        }));
+        self.inner.mock_auths(&[]);
+
+        match outcome {
+            Err(payload) => {
+                // Try to extract a string message from the panic payload.
+                let message = if let Some(s) = payload.downcast_ref::<&str>() {
+                    Some(s.to_string())
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    Some(s.clone())
+                } else {
+                    None
+                };
+                FailedCallResult { failed: true, message }
+            }
+            Ok(()) => FailedCallResult { failed: false, message: None },
+        }
+    }
+}
+
+/// The outcome of a [`MockEnv::simulate_failing_call`] invocation.
+///
+/// Holds whether the call panicked (reverted) and any captured panic message.
+#[derive(Debug)]
+pub struct FailedCallResult {
+    failed: bool,
+    message: Option<String>,
+}
+
+impl FailedCallResult {
+    /// Returns `true` if the call panicked (i.e., reverted).
+    pub fn did_fail(&self) -> bool {
+        self.failed
+    }
+
+    /// Returns the panic message, if any was captured.
+    ///
+    /// Soroban host panics are typically `&str` or `String` payloads.  Returns
+    /// `None` when the call succeeded or the payload type was not recognisable.
+    pub fn panic_message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
 }
 
 /// RAII guard that clears mock auth when dropped.

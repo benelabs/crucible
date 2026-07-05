@@ -145,7 +145,7 @@ impl<'env> AccountBuilder<'env> {
         }
 
         if self.name.is_empty() {
-            panic!("Account name must be set before building. Call .name("...") on AccountBuilder.");
+            panic!("Account name must be set before building. Call .name(\"...\") on AccountBuilder.");
         }
         // 4. Register in MockEnv
         self.env.register_account(&self.name, address.clone());

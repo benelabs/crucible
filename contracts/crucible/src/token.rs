@@ -601,6 +601,74 @@ mod tests {
     }
 
     #[test]
+    fn test_transfer_from_uses_allowance() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .with_account("spender", Stroops::from(0))
+            .with_account("bob", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        let spender = env.account("spender");
+        let bob = env.account("bob");
+
+        token.mint(&alice.address(), 1_000_000);
+        token.approve(&alice.address(), &spender.address(), 500_000, 1000);
+
+        // Spender moves part of the allowance from alice to bob.
+        token.transfer_from(
+            &spender.address(),
+            &alice.address(),
+            &bob.address(),
+            200_000,
+        );
+
+        // Balances reflect the transfer.
+        assert_eq!(token.balance(&alice.address()), 800_000);
+        assert_eq!(token.balance(&bob.address()), 200_000);
+
+        // The allowance is drawn down by the spent amount.
+        assert_eq!(
+            token.allowance(&alice.address(), &spender.address()),
+            300_000
+        );
+    }
+
+    #[test]
+    fn test_transfer_from_fails_without_sufficient_allowance() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .with_account("spender", Stroops::from(0))
+            .with_account("bob", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        let spender = env.account("spender");
+        let bob = env.account("bob");
+
+        token.mint(&alice.address(), 1_000_000);
+        token.approve(&alice.address(), &spender.address(), 100_000, 1000);
+
+        // Spender attempts to move more than the approved allowance.
+        crate::assert_reverts!(token.transfer_from(
+            &spender.address(),
+            &alice.address(),
+            &bob.address(),
+            200_000,
+        ));
+
+        // Balances and allowance are unchanged.
+        assert_eq!(token.balance(&alice.address()), 1_000_000);
+        assert_eq!(token.balance(&bob.address()), 0);
+        assert_eq!(
+            token.allowance(&alice.address(), &spender.address()),
+            100_000
+        );
+    }
+
+    #[test]
     fn test_clawback_reduces_balance() {
         let env = MockEnv::builder()
             .with_account("alice", Stroops::from(0))

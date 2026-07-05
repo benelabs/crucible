@@ -95,7 +95,7 @@ macro_rules! assert_emitted {
             __found,
             "assert_emitted! failed: expected event was not found.\n\
              \n\
-             Contract : {contract}\n\
+             Contract : {contract:?}\n\
              Topics   : {topics:?}\n\
              Data     : {data:?}\n\
              \n\

@@ -90,7 +90,7 @@ apalis-redis = "0.6"
 
 # Scheduler
 tokio-util = "0.7"
-cron = "0.12"
+cron = "0.17"
 
 # Optional mock support for tests
 mockall = { version = "0.15", optional = true }

@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: crucible-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/benelabs/crucible.git'
+    path: infra
+    targetRevision: main
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: crucible
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

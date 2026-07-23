@@ -186,6 +186,7 @@ pub fn build_router(
                 .with_state(dashboard_state.clone()),
         )
         .nest("/api/v1/audit", audit::routes(audit_service))
+        .nest("/api/v1/metrics", crate::services::metrics::router())
         .nest("/api/v1/contracts", contracts_router)
         .route("/api/v1/networks", get(contract_handlers::get_networks))
         .nest("/api/v1/admin", admin_router)

@@ -5,17 +5,11 @@ import { GasCostEstimator } from './components/GasCostEstimator';
 import { MultiChainDashboard } from './components/MultiChainDashboard';
 import { ContractAbiExplorer } from './components/ContractAbiExplorer';
 import { DeveloperOnboardingTutorial } from './components/DeveloperOnboardingTutorial';
-import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Radio } from 'lucide-react';
+import { WalletConnector } from './components/WalletConnector';
+import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet, Activity, Layers } from 'lucide-react';
 import './App.css';
 
-type Tab = 'events' | 'tutorial' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies';
-import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, Activity, Layers, BookOpen } from 'lucide-react';
-
-type Tab = 'tutorial' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies';
-import { WalletConnector } from './components/WalletConnector';
-import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet } from 'lucide-react';
-
-type Tab = 'tutorial' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'wallet';
+type Tab = 'tutorial' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'wallet';
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('tutorial');
@@ -82,18 +76,6 @@ function App() {
           <h1>Crucible Developer Portal</h1>
           <div className="header-badge">Soroban Toolchain</div>
         </div>
-        <nav className="tab-navigation">
-          <button 
-            className={`nav-tab-btn ${activeTab === 'events' ? 'active' : ''}`}
-            onClick={() => setActiveTab('events')}
-            data-testid="tab-events"
-          >
-            <Radio size={15} />
-            Event Listener
-          </button>
-          <button 
-            className={`nav-tab-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
-
         <nav className="header-tabs" aria-label="Dashboard views">
           <button
             type="button"
@@ -168,11 +150,12 @@ function App() {
             Dep Analyzer
           </button>
           <button
-            className={`nav-tab-btn ${activeTab === 'wallet' ? 'active' : ''}`}
+            type="button"
+            className={`tab-btn ${activeTab === 'wallet' ? 'active' : ''}`}
             onClick={() => setActiveTab('wallet')}
             data-testid="tab-wallet"
           >
-            <Wallet size={15} />
+            <Wallet size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
             Wallet
           </button>
         </nav>

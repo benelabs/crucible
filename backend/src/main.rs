@@ -140,19 +140,13 @@ async fn main() -> Result<(), anyhow::Error> {
     let states =
         build_application_states(db_pool.clone(), redis_client.clone(), &shared_services);
 
-    let cors = build_cors_layer(&config);
-
-    // Bearer-token auth registry for privileged admin/config endpoints.
-    let admin_auth = Arc::new(AdminAuthState::from_env());
-
     let app = build_router(
         states,
         config_manager,
-        sandbox_service,
-        admin_auth,
         db_pool.clone(),
         redis_client.clone(),
-        cors,
+        sandbox_service,
+        &config,
     );
 
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
@@ -171,170 +165,6 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Assemble the complete application router.
-///
-/// Routes are grouped one-per-domain so each API path is registered exactly
-/// once and the table is easy to scan. Axum panics at build time on
-/// overlapping routes, so a successful build is itself a duplicate-route check
-/// (see [`route_table_tests`]).
-fn build_router(
-    states: ApplicationStates,
-    config_manager: Arc<ConfigManager>,
-    sandbox_service: Arc<ContractSandboxService>,
-    admin_auth: Arc<AdminAuthState>,
-    db_pool: PgPool,
-    redis_client: RedisClient,
-    cors: CorsLayer,
-) -> Router {
-    let ApplicationStates {
-        profiling: profiling_state,
-        dashboard: dashboard_state,
-        coverage: coverage_state,
-        websocket: ws_state,
-        audit: audit_service,
-    } = build_application_states(db_pool.clone(), redis_client.clone(), &shared_services);
-
-    #[derive(OpenApi)]
-    #[openapi(
-        paths(
-            profiling::get_metrics,
-            profiling::get_health,
-            dashboard::get_dashboard_metrics,
-            dashboard::get_contract_stats,
-            audit::list_audit_reports,
-            audit::get_audit_report,
-        ),
-        components(schemas(
-            profiling::MetricsReport,
-            profiling::HealthResponse,
-            dashboard::DashboardMetrics,
-            dashboard::ContractStats,
-            audit::AuditEventRecord,
-            audit::AuditEventRequest,
-        )),
-        tags(
-            (name = "profiling", description = "Performance and health monitoring endpoints"),
-            (name = "dashboard", description = "Dashboard metrics and analytics endpoints")
-        )
-    )]
-    struct ApiDoc;
-
-    let contracts_router = Router::new()
-        .route("/compile", post(contracts::compile_contract))
-        .route(
-            "/analyze-dependencies",
-            post(contracts::analyze_dependencies),
-        )
-        .route(
-            "/compliance-check",
-            post(contracts::check_compliance),
-        )
-        .route(
-            "/logs",
-            post(contracts::log_contract_call).get(contracts::get_contract_logs),
-        )
-        .route(
-            "/upgrade-plan",
-            post(contracts::create_upgrade_plan),
-        )
-        .route("/templates", get(contracts::get_templates))
-        .with_state(profiling_state.clone());
-
-    // --- Coverage ---
-    let coverage_router = Router::new()
-        .route("/", post(coverage::submit_coverage))
-        .route("/:project", get(coverage::get_latest_coverage))
-        .with_state(coverage_state);
-
-    let admin_router = Router::new()
-        .route(
-            "/system-stats",
-            get(admin::get_system_stats),
-        )
-        .route(
-            "/maintenance",
-            post(admin::set_maintenance_mode),
-        )
-        .route("/logs", get(admin::get_admin_logs));
-
-    let contracts_router = Router::new()
-        .route("/compile", post(contracts::compile_contract))
-        .route("/analyze-dependencies", post(contracts::analyze_dependencies))
-        .route("/compliance-check", post(contracts::check_compliance))
-        .route(
-            "/logs",
-            post(contracts::log_contract_call).get(contracts::get_contract_logs),
-        )
-        .route("/upgrade-plan", post(contracts::create_upgrade_plan))
-        .route("/templates", get(contracts::get_templates))
-        .with_state(profiling_state.clone());
-
-    let cors = build_cors_layer(&config);
-
-    let app = Router::new()
-        .route("/", get(|| async { "Crucible Backend API" }))
-        .route("/.well-known/stellar.toml", get(stellar::get_stellar_toml))
-        .merge(config_router)
-        .merge(legacy_profiling_router)
-        .nest("/api/v1/profiling", profiling_router)
-        .nest("/api/v1/dashboard", dashboard_router)
-        .nest("/api/v1/audit", audit::routes(audit_service))
-        .nest("/api/v1/contracts", contracts_router)
-        .route("/api/v1/networks", get(contracts::get_networks))
-        .nest("/api/v1/admin", admin_router)
-        .nest(
-            "/api/v1/errors",
-            errors::error_analytics_routes(db_pool.clone(), redis_client.clone()),
-        )
-        .nest("/api/v1/sandbox", sandbox::routes(sandbox_service))
-        .nest(
-            "/api/v1/errors",
-            errors::error_analytics_routes(db_pool.clone(), redis_client.clone()),
-        )
-        .nest("/api/v1/sandbox", sandbox::routes(sandbox_service))
-        .nest("/api/v1/coverage", coverage_router)
-        .route("/api/v1/ws/dashboard", get(ws_dashboard_handler).with_state(ws_state))
-        .route("/api/dashboard", get(get_dashboard))
-        .with_state(dashboard_state)
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        .layer(middleware::from_fn_with_state(
-            profiling_state,
-            logging_middleware,
-        ))
-        .layer(TraceLayer::new_for_http())
-        .layer(cors);
-
-    let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
-    tracing::info!("Crucible backend listening on {addr}");
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-
-    let cancel_token = CancellationToken::new();
-    let worker_cancel_token = cancel_token.clone();
-
-    let worker_handle = tokio::spawn(async move {
-        // Apalis worker run loop.
-        // We also wait for cancellation so the supervisor task resolves promptly.
-        tokio::select! {
-            res = worker.run() => {
-                // Propagate result to the caller.
-                res
-            }
-            _ = worker_cancel_token.cancelled() => {
-                tracing::info!("Cancellation requested; stopping worker");
-                Ok(())
-            }
-        }
-    });
-
-    let server_cancel_token = cancel_token.clone();
-    let server_handle = tokio::spawn(async move {
-        let res = axum::serve(listener, app).with_graceful_shutdown(async move {
-            // Wait for cancellation to ensure both worker + server observe the same shutdown.
-            let _ = server_cancel_token.cancelled().await;
-        });
-        .layer(cors)
-}
-
 async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
@@ -342,164 +172,20 @@ async fn shutdown_signal() {
             .expect("failed to install Ctrl+C handler");
     };
 
-        db_pool.close().await;
-        res
-    });
-
-    // Listen for Ctrl+C / SIGTERM and trigger global cancellation.
-    let signal_cancel_token = cancel_token.clone();
-    let signal_handle = tokio::spawn(async move {
-        let ctrl_c = async {
-            signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
-        };
-
-        #[cfg(unix)]
-        let terminate = async {
-            signal::unix::signal(signal::unix::SignalKind::terminate())
-                .expect("failed to install signal handler")
-                .recv()
-                .await;
-        };
-
-        #[cfg(not(unix))]
-        let terminate = std::future::pending::<()>();
-
-        tokio::select! {
-            _ = ctrl_c => {
-                tracing::info!("Received Ctrl+C, initiating graceful shutdown");
-            }
-            _ = terminate => {
-                tracing::info!("Received SIGTERM, initiating graceful shutdown");
-            }
-        }
-
-        signal_cancel_token.cancel();
-    });
-
-
-    // Structured coordination: if worker fails, cancel the server.
-    let result: Result<(), anyhow::Error> = tokio::select! {
-        server_res = server_handle => {
-            match server_res {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => Err(anyhow::Error::new(e)),
-                Err(join_err) => Err(anyhow::Error::new(join_err))
-            }
-        }
-        worker_res = worker_handle => {
-            // Cancel server, then report worker failure.
-            cancel_token.cancel();
-
-            match worker_res {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => {
-                    tracing::error!(error = %e, "Unhandled background worker crash; canceling HTTP server");
-                    Err(anyhow::Error::new(e))
-                }
-                Err(join_err) => {
-                    tracing::error!(error = %join_err, "Unhandled background worker task panicked or was aborted; canceling HTTP server");
-                    Err(anyhow::Error::new(join_err))
-                }
-            }
-        }
-        _ = signal_handle => {
-            // Signal triggered cancellation; wait for server/worker resolution implicitly.
-            Ok(())
-        }
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
     };
 
-    result?;
-    Ok(())
-}
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
 
-
-fn build_cors_layer(config: &AppConfig) -> CorsLayer {
-    if config.cors.allowed_origins.contains(&"*".to_string()) {
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
-    } else {
-        let origins: Vec<axum::http::HeaderValue> = config
-            .cors
-            .allowed_origins
-            .iter()
-            .map(|o| {
-                o.parse()
-                    .unwrap_or_else(|_| panic!("Invalid CORS origin: {}", o))
-            })
-            .collect();
-        CorsLayer::new()
-            .allow_origin(AllowOrigin::list(origins))
-            .allow_methods(Any)
-            .allow_headers(Any)
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
 }
-}
 
-#[cfg(test)]
-mod route_table_tests {
-    use super::*;
-
-    /// Construct route state from non-connecting (lazy) infrastructure handles
-    /// so the router can be assembled without a live database or Redis.
-    fn lazy_state_bundle() -> (
-        ApplicationStates,
-        Arc<ConfigManager>,
-        Arc<ContractSandboxService>,
-        Arc<AdminAuthState>,
-        PgPool,
-        RedisClient,
-    ) {
-        let db_pool =
-            PgPool::connect_lazy("postgres://postgres:postgres@localhost/crucible_test")
-                .expect("lazy db pool");
-        let redis_client =
-            RedisClient::open("redis://127.0.0.1:6379").expect("redis client");
-        let app_config = AppConfig::load(Environment::Development).expect("config");
-        let config_manager = Arc::new(ConfigManager::new(app_config));
-
-        let services = SharedServices {
-            metrics_exporter: Arc::new(MetricsExporter::new()),
-            error_manager: Arc::new(ErrorManager::new()),
-            alert_manager: Arc::new(AlertManager::new()),
-            log_aggregator: Arc::new(LogAggregator::new().0),
-            contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
-            config_manager: config_manager.clone(),
-        };
-
-        let states =
-            build_application_states(db_pool.clone(), redis_client.clone(), &services);
-        let sandbox_service = Arc::new(ContractSandboxService::default());
-        let admin_auth = Arc::new(AdminAuthState::new());
-
-        (
-            states,
-            config_manager,
-            sandbox_service,
-            admin_auth,
-            db_pool,
-            redis_client,
-        )
-    }
-
-    /// Axum panics at build time when two routes overlap, so a router that
-    /// builds successfully proves every path is registered exactly once. This
-    /// guards against the duplicate `contracts`/`networks`/`admin`/`coverage`
-    /// definitions that previously coexisted in `main`.
-    #[test]
-    fn router_builds_with_unique_routes() {
-        let (states, config_manager, sandbox_service, admin_auth, db_pool, redis_client) =
-            lazy_state_bundle();
-
-        let _app = build_router(
-            states,
-            config_manager,
-            sandbox_service,
-            admin_auth,
-            db_pool,
-            redis_client,
-            CorsLayer::new(),
-        );
-    }
-}

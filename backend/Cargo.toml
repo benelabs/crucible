@@ -6,6 +6,7 @@ description = "Backend API server for the Crucible smart contract testing platfo
 license = "MIT"
 authors = ["Crucible Contributors"]
 publish = false
+default-run = "backend"
 
 [[bin]]
 name = "backend"

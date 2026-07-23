@@ -73,6 +73,8 @@ struct ApiDoc;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    dotenvy::dotenv().ok();
+    
     let env = Environment::from_env();
     let config = AppConfig::load(env).expect("Failed to load configuration");
 

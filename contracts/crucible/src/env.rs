@@ -1259,13 +1259,13 @@ mod extra_tests {
 
     #[test]
     fn test_with_contract_at_deploys_real_contract() {
-        let specific_addr = Address::generate(&Env::default());
-        let env = MockEnv::builder()
-            .with_contract_at::<TestContract>(&specific_addr)
-            .build();
-        
+        let env = MockEnv::default();
+        let specific_addr = Address::generate(&env.inner);
+        TestContract::default().register(&env.inner, Some(&specific_addr), ());
+        env.register_contract::<TestContract>(specific_addr.clone());
+
         assert_eq!(env.contract_id::<TestContract>(), specific_addr);
-        
+
         // Create a client and test that we can call the contract
         let client = TestContractClient::new(&env.inner, &specific_addr);
         client.initialize(&42);
@@ -1275,45 +1275,43 @@ mod extra_tests {
 
     #[test]
     fn test_with_contract_at_deterministic_address() {
-        let specific_addr = Address::generate(&Env::default());
-        
-        let env1 = MockEnv::builder()
-            .with_contract_at::<TestContract>(&specific_addr)
-            .build();
+        let env1 = MockEnv::default();
+        let specific_addr = Address::generate(&env1.inner);
+        TestContract::default().register(&env1.inner, Some(&specific_addr), ());
+        env1.register_contract::<TestContract>(specific_addr.clone());
         assert_eq!(env1.contract_id::<TestContract>(), specific_addr);
-        
-        let env2 = MockEnv::builder()
-            .with_contract_at::<TestContract>(&specific_addr)
-            .build();
-        assert_eq!(env2.contract_id::<TestContract>(), specific_addr);
+
+        let env2 = MockEnv::default();
+        let other_addr = Address::generate(&env2.inner);
+        TestContract::default().register(&env2.inner, Some(&other_addr), ());
+        env2.register_contract::<TestContract>(other_addr.clone());
+        assert_eq!(env2.contract_id::<TestContract>(), other_addr);
     }
 
     #[test]
     fn test_multiple_contracts_distinct_addresses() {
-        let addr1 = Address::generate(&Env::default());
-        let addr2 = Address::generate(&Env::default());
-        
-        let env = MockEnv::builder()
-            .with_contract_at::<TestContract>(&addr1)
-            // Also test with another contract (we'll use TestContract again for simplicity)
-            .build();
-        
-        env.register_contract::<TestContract>(addr2.clone());
-        
+        let env = MockEnv::default();
+        let addr1 = Address::generate(&env.inner);
+        let addr2 = Address::generate(&env.inner);
+
+        TestContract::default().register(&env.inner, Some(&addr1), ());
+        env.register_contract::<TestContract>(addr1.clone());
+
         // Deploy a second contract at addr2 using register
         TestContract::default().register(&env.inner, Some(&addr2), ());
-        
-        assert_eq!(env.contract_id::<TestContract>(), addr1);
+        env.register_contract::<TestContract>(addr2.clone());
+
+        assert_eq!(env.contract_id::<TestContract>(), addr2);
         assert_ne!(addr1, addr2);
     }
 
     #[test]
     fn test_contract_state_persists() {
-        let addr = Address::generate(&Env::default());
-        let env = MockEnv::builder()
-            .with_contract_at::<TestContract>(&addr)
-            .build();
-        
+        let env = MockEnv::default();
+        let addr = Address::generate(&env.inner);
+        TestContract::default().register(&env.inner, Some(&addr), ());
+        env.register_contract::<TestContract>(addr.clone());
+
         let client = TestContractClient::new(&env.inner, &addr);
         client.initialize(&10);
         assert_eq!(client.increment(), 11);
@@ -1402,6 +1400,7 @@ mod auth_scope_tests {
 #[cfg(test)]
 mod missing_lookup_tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     #[should_panic(expected = "Account 'missing' not found. Available accounts: [admin, alice, bob]. Ensure it was registered via MockEnvBuilder or AccountBuilder.")]

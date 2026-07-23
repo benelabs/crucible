@@ -173,12 +173,15 @@ fn test_database_to_pool_options() {
 #[test]
 fn test_sensitive_fields_redacted_in_debug() {
     let config = crate::config::AppConfig {
-        server: crate::config::ServerConfig {
+        server: crate::config::server::ServerConfig {
             host: "localhost".into(),
             port: 8080,
             request_timeout_ms: 1000,
             max_connections: 10,
-            tls: Some(crate::config::TlsConfig {
+            max_body_size: 10 * 1024 * 1024,
+            compile_max_size: 1024 * 1024,
+            sandbox_max_size: 5 * 1024 * 1024,
+            tls: Some(crate::config::server::TlsConfig {
                 cert_path: "/path/to/cert".into(),
                 key_path: "/path/to/secret.key".into(),
             }),

@@ -1,16 +1,15 @@
-use super::audit::*;
-use axum::Json;
 use axum::{body::Body, http::Request, http::StatusCode};
+use backend::services::audit::{AuditEvent, AuditEventRequest, AuditService, routes};
 use redis::AsyncCommands;
 use serde_json::json;
-use sqlx::{Executor, PgPool};
+use sqlx::{Executor, PgPool, Row};
 use std::sync::Arc;
 use tokio::sync::OnceCell;
+use tower::ServiceExt;
 
 // Mock or test helpers for DB and Redis
 static DB_POOL: OnceCell<PgPool> = OnceCell::const_new();
 static REDIS_CLIENT: OnceCell<Arc<redis::Client>> = OnceCell::const_new();
-use tower::ServiceExt;
 
 async fn setup() -> (AuditService, PgPool, Arc<redis::Client>) {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for tests");
@@ -22,10 +21,9 @@ async fn setup() -> (AuditService, PgPool, Arc<redis::Client>) {
 }
 
 async fn cleanup_audit_logs(db: &PgPool) {
-    sqlx::query!("DELETE FROM audit_logs")
+    let _ = sqlx::query("DELETE FROM audit_logs")
         .execute(db)
-        .await
-        .ok();
+        .await;
 }
 
 #[tokio::test]
@@ -40,22 +38,23 @@ async fn test_log_event_success() {
     let result = service.log_event(event.clone()).await;
     assert!(result.is_ok());
     // Check DB
-    let row = sqlx::query!(
-        "SELECT * FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT 1",
-        event.event_type
-    )
-    .fetch_one(&db)
-    .await
-    .unwrap();
+    let row = sqlx::query("SELECT event_type, user_id FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT 1")
+        .bind(&event.event_type)
+        .fetch_optional(&db)
+        .await
+        .unwrap();
 
-    let row = sqlx::query!(
-        "SELECT * FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT 1",
-        event.event_type
-    )
-    .fetch_one(&db)
-    .await
-    .unwrap();
-    assert_eq!(row.user_id, Some("user123".to_string()));
+    let row = sqlx::query("SELECT event_type, user_id FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT 1")
+        .bind(&event.event_type)
+        .fetch_optional(&db)
+        .await
+        .unwrap();
+    let row = row.and_then(|row| {
+        let event_type: String = row.get("event_type");
+        let user_id: Option<String> = row.get("user_id");
+        Some((event_type, user_id))
+    });
+    assert_eq!(row.as_ref().map(|(_, user_id)| user_id.clone()), Some(Some("user123".to_string())));
 
     let mut conn = redis.get_async_connection().await.unwrap();
     let val: String = conn.lpop("audit_queue", None).await.unwrap();
@@ -80,13 +79,11 @@ async fn test_log_audit_event_handler() {
         .header("content-type", "application/json")
         .body(Body::from(body))
         .unwrap();
-    let resp = axum::Server::bind(&"127.0.0.1:0".parse().unwrap())
-        .serve(app.into_make_service())
-        .with_graceful_shutdown(async {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await
-        })
-        .await;
-    assert!(resp.is_ok());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        axum::serve(listener, app.clone())
+    ).await;
 
     let resp = app.oneshot(response).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
@@ -119,23 +116,53 @@ async fn test_list_audit_reports() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(events.is_array());
     assert!(events.as_array().unwrap().len() >= 1);
 }
 
+#[tokio::test]
 async fn test_get_audit_report() {
-    let row = sqlx::query!("SELECT id FROM audit_logs ORDER BY timestamp DESC LIMIT 1")
-        .fetch_one(&db)
+    let (service, db, _) = setup().await;
+    let service = Arc::new(service);
+    let app = axum::Router::new().merge(routes(service.clone()));
+
+    service
+        .log_event(AuditEvent {
+            event_type: "login_attempt".to_string(),
+            user_id: Some("user123".to_string()),
+            details: json!({"ip": "127.0.0.1"}),
+            timestamp: chrono::Utc::now(),
+        })
+        .await
+        .unwrap();
+
+    let row = sqlx::query("SELECT id, event_type FROM audit_logs ORDER BY timestamp DESC LIMIT 1")
+        .fetch_optional(&db)
+        .await
+        .unwrap();
+
+    let row = row.unwrap();
+    let id: i64 = row.get("id");
+    let event_type: String = row.get("event_type");
+
+    let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/reports/{}", row.id))
+                .uri(format!("/reports/{}", id))
                 .body(Body::empty())
                 .unwrap(),
-        );
+        )
+        .await
+        .unwrap();
 
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let event: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(event["id"], row.id);
-    assert_eq!(event["event_type"], "login_attempt");
+    assert_eq!(event["id"], id);
+    assert_eq!(event["event_type"], event_type);
 }

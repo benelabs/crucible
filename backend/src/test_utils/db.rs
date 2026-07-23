@@ -23,7 +23,7 @@ use uuid::Uuid;
 /// # Errors
 ///
 /// Returns AppError if database creation, connection, or migration fails
-pub async fn setup_test_db() -> Result<PgPool, AppError> {
+pub async fn setup_test_db() -> Result<(PgPool, String), AppError> {
     // Get the base database URL from environment
     let database_url =
         env::var("DATABASE_URL").expect("DATABASE_URL must be set for test database setup");
@@ -62,7 +62,7 @@ pub async fn setup_test_db() -> Result<PgPool, AppError> {
     // Run migrations
     sqlx::migrate!("./migrations").run(&pool).await?;
 
-    Ok(pool)
+    Ok((pool, test_db_name))
 }
 
 /// Tears down a test database by closing the pool and dropping the database.
@@ -83,9 +83,9 @@ pub async fn teardown_test_db(pool: PgPool, db_name: &str) -> Result<(), AppErro
     // Close the pool first
     pool.close().await;
 
-    // Extract connection details to connect to admin database
-    let db_url = pool.options().get_url();
-    let mut url = url::Url::parse(db_url)?;
+    // Extract connection details to connect to admin database from the environment
+    let db_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set for test database teardown");
+    let mut url = url::Url::parse(&db_url)?;
 
     // Switch to admin database
     url.set_path("/postgres");
@@ -139,12 +139,7 @@ impl TestDb {
     ///
     /// Returns AppError if test database setup fails
     pub async fn new() -> Result<Self, AppError> {
-        let pool = setup_test_db().await?;
-
-        // Extract database name from the pool's URL
-        let db_url = pool.options().get_url();
-        let url = url::Url::parse(db_url)?;
-        let db_name = url.path().trim_start_matches('/').to_string();
+        let (pool, db_name) = setup_test_db().await?;
 
         Ok(Self { pool, db_name })
     }
@@ -212,14 +207,9 @@ mod tests {
         );
 
         // Setup test database manually
-        let pool = setup_test_db()
+        let (pool, db_name) = setup_test_db()
             .await
             .expect("Failed to create test database");
-
-        // Get database name
-        let db_url = pool.options().get_url();
-        let url = url::Url::parse(db_url).expect("Failed to parse database URL");
-        let db_name = url.path().trim_start_matches('/').to_string();
 
         // Verify we can query the database
         let result = sqlx::query_scalar::<_, i64>("SELECT 1")

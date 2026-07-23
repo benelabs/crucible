@@ -10,9 +10,11 @@ use axum::{
 };
 use backend::api::handlers::dashboard::get_dashboard;
 use backend::api::handlers::ws::ws_dashboard_handler;
+use utoipa::OpenApi;
 
 use backend::{
     api::handlers::{contracts, dashboard, errors, profiling, sandbox, stellar},
+    services::audit,
     api::middleware::logging::logging_middleware,
     app_state::{build_application_states, ApplicationStates, SharedServices},
     config::{
@@ -122,7 +124,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let health_cache = ConnectionManager::new(redis_client.clone()).await?;
     let health_queue = ConnectionManager::new(redis_client.clone()).await?;
 
-    let health_state = health::HealthState {
+    let health_state = backend::api::handlers::health::HealthState {
         db: db_pool.clone(),
         cache: health_cache,
         queue: health_queue,

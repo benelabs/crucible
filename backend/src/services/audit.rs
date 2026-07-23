@@ -55,9 +55,12 @@ impl AuditService {
         .await
         .map_err(AppError::Database)?;
 
-        let mut conn = self.redis.get_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
         let event_json = serde_json::to_string(&event).map_err(AppError::Serialization)?;
-        conn.lpush("audit_queue", event_json).await.map_err(AppError::Redis)?;
+        let _: () = conn
+            .lpush::<_, _, ()>("audit_queue", event_json)
+            .await
+            .map_err(AppError::Redis)?;
         Ok(())
     }
 
@@ -99,7 +102,7 @@ impl AuditService {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct AuditEventRequest {
     pub event_type: String,
     pub user_id: Option<String>,
@@ -133,6 +136,12 @@ pub async fn log_audit_event(
     Ok(axum::http::StatusCode::CREATED)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/audit/reports",
+    responses((status = 200, description = "List audit reports", body = [AuditEventRecord])),
+    tag = "audit"
+)]
 #[instrument(skip(service))]
 pub async fn list_audit_reports(
     State(service): State<Arc<AuditService>>,
@@ -145,6 +154,18 @@ pub async fn list_audit_reports(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/audit/reports/{id}",
+    params(
+        ("id" = i64, Path, description = "Report ID")
+    ),
+    responses(
+        (status = 200, description = "Audit report details", body = AuditEventRecord),
+        (status = 404, description = "Audit report not found")
+    ),
+    tag = "audit"
+)]
 #[instrument(skip(service))]
 pub async fn get_audit_report(
     State(service): State<Arc<AuditService>>,

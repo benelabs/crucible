@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn test_gas_optimizer_creation() {
         let optimizer = GasOptimizer::new();
-        assert_eq!(optimizer, optimizer);
+        assert!(optimizer.analyze_bytecode("0x123".to_string(), vec![]).is_err());
     }
 
     #[test]

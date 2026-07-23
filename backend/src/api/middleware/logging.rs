@@ -97,12 +97,10 @@ mod tests {
             db: None,
             metrics_exporter,
             error_manager,
-            config_manager: Arc::new(ConfigManager::new(AppConfig::default())),
+            config_manager: config_manager.clone(),
             log_aggregator,
-            db: Some(db),
             contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
             redis,
-            config_manager,
         });
 
         let app = Router::new()

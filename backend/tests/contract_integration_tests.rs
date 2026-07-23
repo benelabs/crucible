@@ -69,6 +69,7 @@ async fn test_profile_trigger_validation_success() {
         error_manager: Arc::new(ErrorManager::new()),
         config_manager: Arc::new(ConfigManager::new(AppConfig::default())),
         log_aggregator: Arc::new(backend::services::log_aggregator::LogAggregator::new().0),
+        contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
         redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
     });
     let state = test_state();
@@ -108,6 +109,7 @@ async fn test_profile_trigger_validation_failure() {
         error_manager: Arc::new(ErrorManager::new()),
         config_manager: Arc::new(ConfigManager::new(AppConfig::default())),
         log_aggregator: Arc::new(backend::services::log_aggregator::LogAggregator::new().0),
+        contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
         redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
     });
     let state = test_state();

@@ -16,7 +16,14 @@
 //! # }
 //! ```
 
-use axum::{extract::{Path, State}, response::IntoResponse, Json};
+use axum::{
+    body::Body,
+    extract::{Path, State},
+    http::{Request, StatusCode},
+    response::IntoResponse,
+    routing::get,
+    Json, Router,
+};
 use chrono::{DateTime, Utc};
 use redis::{AsyncCommands, Client as RedisClient};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -168,6 +175,12 @@ pub async fn get_dashboard(
 }
 
 /// `GET /api/v1/dashboard/metrics` — return aggregate contract and pipeline metrics.
+#[utoipa::path(
+    get,
+    path = "/api/v1/dashboard/metrics",
+    responses((status = 200, description = "Dashboard metrics", body = DashboardMetrics)),
+    tag = "dashboard"
+)]
 #[tracing::instrument(skip(state))]
 pub async fn get_dashboard_metrics(
     State(state): State<Arc<DashboardState>>,
@@ -211,6 +224,18 @@ pub async fn get_dashboard_metrics(
 }
 
 /// `GET /api/v1/dashboard/contracts/:contract_id/stats` — return contract usage statistics.
+#[utoipa::path(
+    get,
+    path = "/api/v1/dashboard/contracts/{contract_id}/stats",
+    params(
+        ("contract_id" = String, Path, description = "Contract identifier")
+    ),
+    responses(
+        (status = 200, description = "Contract stats", body = ContractStats),
+        (status = 404, description = "Contract not found")
+    ),
+    tag = "dashboard"
+)]
 #[tracing::instrument(skip(state))]
 pub async fn get_contract_stats(
     Path(contract_id): Path<String>,
@@ -283,7 +308,7 @@ where
 {
     let serialized = serde_json::to_string(data)?;
     let mut conn = redis.get_multiplexed_async_connection().await?;
-    let _: () = conn.set_ex(key, serialized, ttl_secs).await?;
+    let _: () = conn.set_ex(key, serialized, CACHE_TTL_SECS).await?;
     Ok(())
 }
 
@@ -295,6 +320,7 @@ where
 mod tests {
     use super::*;
     use sqlx::postgres::PgPoolOptions;
+    use tower::ServiceExt;
 
     fn make_state() -> Arc<DashboardState> {
         Arc::new(DashboardState {

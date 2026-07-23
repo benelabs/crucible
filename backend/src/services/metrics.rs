@@ -461,6 +461,8 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_handler_returns_prometheus_text() {
+        use tower::ServiceExt;
+
         let metrics = Arc::new(MetricsRegistry::new());
         let app = axum::Router::new()
             .route("/metrics", axum::routing::get(metrics_handler))
@@ -473,7 +475,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "text/plain; version=0.0.4; charset=utf-8");
-        let body = axum::body::to_bytes(response.into_body()).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body = std::str::from_utf8(&body).unwrap();
         assert!(body.contains("process_start_time_seconds"));
     }

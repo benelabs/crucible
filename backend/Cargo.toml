@@ -46,7 +46,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json", "macros", "migrate", "rust_decimal"] }
 
 # Redis
-redis = { version = "1.2", features = ["tokio-comp", "connection-manager", "json"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager", "json"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -58,7 +58,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 opentelemetry = { version = "0.31", features = ["trace"] }
 opentelemetry_sdk = { version = "0.31", features = ["trace", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
 tracing-opentelemetry = { version = "0.32", default-features = false }
 opentelemetry-semantic-conventions = "0.16"
 tonic = "0.14"
@@ -81,8 +81,8 @@ async-trait = "0.1"
 url = { version = "2", features = ["serde"] }
 
 # API documentation
-utoipa = { version = "5.0", features = ["axum_extras", "chrono", "uuid", "decimal"] }
-utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
+utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid", "decimal"] }
+utoipa-swagger-ui = { version = "7.1", features = ["axum"] }
 
 # Background jobs
 apalis = { version = "0.6" }
@@ -96,6 +96,10 @@ cron = "0.12"
 mockall = { version = "0.15", optional = true }
 sha2 = "0.11.0"
 regex = "1.12.4"
+http = "1"
+http-body-util = "0.1"
+toml = "0.8"
+temp-env = "0.3"
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }

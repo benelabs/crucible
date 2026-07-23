@@ -19,7 +19,7 @@ use crate::services::contract_versioning::{
 use crate::services::contract_upgrade::{ContractUpgradeManager, ContractUpgradeRequest};
 use crate::services::dependency_analyzer::DependencyAnalyzer;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompileRequest {
     pub project_name: String,
@@ -70,7 +70,7 @@ pub async fn compile_contract(
     Json(payload): Json<CompileRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     // Validate payload size
-    validate_payload_size(&payload, state.config.server.compile_max_size, "compile")?;
+    validate_payload_size(&payload, state.config_manager.load().server.compile_max_size, "compile")?;
     
     // Validate source code
     if payload.source_code.trim().is_empty() {
@@ -103,7 +103,7 @@ pub async fn compile_contract(
     Ok(Json(ApiResponse::new(result)))
 }
 
-fn validate_payload_size<T>(
+fn validate_payload_size<T: serde::Serialize>(
     payload: &T,
     max_size: usize,
     endpoint: &str,

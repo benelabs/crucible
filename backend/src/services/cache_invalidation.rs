@@ -106,7 +106,7 @@ impl CacheInvalidationManager {
 
     /// Invalidate specific cache keys synchronously
     pub async fn invalidate_keys(&self, keys: Vec<String>) -> Result<(), anyhow::Error> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
         
         // Use pipelining for better performance
         let mut pipe = redis::pipe();
@@ -122,7 +122,7 @@ impl CacheInvalidationManager {
 
     /// Invalidate keys matching a pattern
     pub async fn invalidate_pattern(&self, pattern: &str) -> Result<(), anyhow::Error> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
         
         // Get all keys matching the pattern
         let keys: Vec<String> = redis::cmd("KEYS")
@@ -146,7 +146,7 @@ impl CacheInvalidationManager {
 
     /// Invalidate keys by tag (using Redis sets)
     pub async fn invalidate_by_tag(&self, tag: &str) -> Result<(), anyhow::Error> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
         
         // Get all keys associated with this tag
         let keys: Vec<String> = redis::cmd("SMEMBERS")
@@ -282,7 +282,7 @@ impl CacheInvalidationManager {
         redis_client: &Arc<redis::Client>,
         keys: Vec<String>,
     ) -> Result<(), anyhow::Error> {
-        let mut conn = redis_client.get_async_connection().await?;
+        let mut conn = redis_client.get_multiplexed_async_connection().await?;
         
         // Use pipelining for better performance
         let mut pipe = redis::pipe();
@@ -299,7 +299,7 @@ impl CacheInvalidationManager {
         patterns: Vec<String>,
     ) -> Result<(), anyhow::Error> {
         for pattern in &patterns {
-            let mut conn = redis_client.get_async_connection().await?;
+            let mut conn = redis_client.get_multiplexed_async_connection().await?;
             
             // Get all keys matching the pattern
             let keys: Vec<String> = redis::cmd("KEYS")
@@ -330,7 +330,7 @@ impl CacheInvalidationManager {
         tags: Vec<String>,
     ) -> Result<(), anyhow::Error> {
         for tag in &tags {
-            let mut conn = redis_client.get_async_connection().await?;
+            let mut conn = redis_client.get_multiplexed_async_connection().await?;
             
             // Get all keys associated with this tag
             let keys: Vec<String> = redis::cmd("SMEMBERS")
@@ -355,16 +355,7 @@ pub trait CacheAware {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockall::mock;
-    
-    mock! {
-        RedisClient {}
-        
-        impl redis::Client {
-            fn get_async_connection(&self) -> redis::RedisFuture<redis::aio::Connection>;
-        }
-    }
-    
+
     #[tokio::test]
     async fn test_cache_invalidation_manager_creation() {
         // Test that manager can be created

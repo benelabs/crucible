@@ -17,11 +17,11 @@ const mockLocalStorage = (() => {
       store = {};
     },
     length: 0,
-    key: (index: number) => null,
+    key: (_index: number) => null,
   };
 })();
 
-Object.defineProperty(global, 'localStorage', { value: mockLocalStorage, writable: true });
+Object.defineProperty(globalThis, 'localStorage', { value: mockLocalStorage, writable: true });
 if (typeof window !== 'undefined') {
   Object.defineProperty(window, 'localStorage', { value: mockLocalStorage, writable: true });
 }

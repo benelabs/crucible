@@ -17,6 +17,7 @@ use std::time::Instant;
 use axum::http::StatusCode;
 use axum::{body::to_bytes, routing::get, Router};
 use hyper::Request;
+use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 
 use backend::api::handlers::dashboard::{get_dashboard, DashboardState};
@@ -36,10 +37,15 @@ use crate::load::framework::{assert_load_result, LoadConfig, LoadResult};
 /// Redis is pointed at a port that will refuse connections so the handler
 /// exercises its graceful-degradation path (cache miss → live data).
 fn build_app() -> Router {
+    let db = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy("postgres://postgres:postgres@localhost:5432/postgres")
+        .expect("Failed to connect");
     let state = Arc::new(DashboardState {
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager: Arc::new(AlertManager::new()),
+        db,
         // Unreachable Redis — handler must degrade gracefully.
         redis: redis::Client::open("redis://127.0.0.1:1/").unwrap(),
     });
@@ -122,10 +128,15 @@ async fn test_dashboard_response_shape() {
 /// `metrics` object contains the expected sub-fields.
 #[tokio::test]
 async fn test_dashboard_metrics_fields() {
+    let db = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy("postgres://postgres:postgres@localhost:5432/postgres")
+        .expect("Failed to connect");
     let state = Arc::new(DashboardState {
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager: Arc::new(AlertManager::new()),
+        db,
         redis: redis::Client::open("redis://127.0.0.1:1/").unwrap(),
     });
     // Seed some metrics so the values are non-zero.
@@ -164,10 +175,16 @@ async fn test_dashboard_includes_recovery_tasks() {
         .await
         .unwrap();
 
+    let db = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy("postgres://postgres:postgres@localhost:5432/postgres")
+        .expect("Failed to connect");
+
     let state = Arc::new(DashboardState {
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager,
         alert_manager: Arc::new(AlertManager::new()),
+        db,
         redis: redis::Client::open("redis://127.0.0.1:1/").unwrap(),
     });
 
@@ -227,6 +244,8 @@ async fn test_dashboard_includes_active_alerts() {
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager,
+        db: sqlx::PgPool::connect_lazy("postgres://postgres:postgres@localhost/crucible_test")
+            .unwrap(),
         redis: redis::Client::open("redis://127.0.0.1:1/").unwrap(),
     });
 
@@ -401,6 +420,8 @@ async fn test_dashboard_shared_state_consistency() {
         metrics_exporter,
         error_manager: Arc::new(ErrorManager::new()),
         alert_manager: Arc::new(AlertManager::new()),
+        db: sqlx::PgPool::connect_lazy("postgres://postgres:postgres@localhost/crucible_test")
+            .unwrap(),
         redis: redis::Client::open("redis://127.0.0.1:1/").unwrap(),
     });
 

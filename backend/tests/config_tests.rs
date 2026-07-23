@@ -40,13 +40,12 @@ async fn test_config_get_endpoint() {
         error_manager: Arc::new(ErrorManager::new()),
         config_manager: config_manager.clone(),
         log_aggregator: Arc::new(backend::services::log_aggregator::LogAggregator::new().0),
+        contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
         redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
     });
-    let state = test_state(config_manager.clone());
-
     let app = Router::new()
         .route("/api/config", get(handle_get_config))
-        .with_state(state);
+        .with_state(config_manager.clone());
 
     let response = app
         .oneshot(
@@ -71,13 +70,12 @@ async fn test_config_reload_endpoint_no_file() {
         error_manager: Arc::new(ErrorManager::new()),
         config_manager: config_manager.clone(),
         log_aggregator: Arc::new(backend::services::log_aggregator::LogAggregator::new().0),
+        contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
         redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
     });
-    let state = test_state(config_manager.clone());
-
     let app = Router::new()
         .route("/api/config/reload", post(handle_reload))
-        .with_state(state);
+        .with_state(config_manager.clone());
 
     let response = app
         .oneshot(
@@ -101,7 +99,9 @@ async fn test_config_manager_patch() {
     let config_manager = ConfigManager::new(config);
 
     let patch = serde_json::json!({
-        "log_level": "debug",
+        "observability": {
+            "log_level": "debug"
+        },
         "server": {
             "port": 4000
         }
@@ -110,7 +110,7 @@ async fn test_config_manager_patch() {
     config_manager.update_from_patch(patch).unwrap();
 
     let updated = config_manager.load();
-    assert_eq!(updated.log_level, "debug");
+    assert_eq!(updated.observability.log_level, "debug");
     assert_eq!(updated.server.port, 4000);
     // Ensure other fields are preserved
     assert_eq!(updated.server.host, "0.0.0.0");
@@ -120,6 +120,7 @@ async fn test_config_manager_patch() {
 #[tokio::test]
 async fn test_sanitized_config_endpoint() {
     use backend::api::handlers::admin::get_effective_config;
+    use axum::response::IntoResponse;
     
     let config = AppConfig::default();
     let config_manager = Arc::new(ConfigManager::new(config));

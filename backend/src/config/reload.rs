@@ -57,6 +57,34 @@ impl ConfigManager {
         info!("Configuration successfully reloaded");
         Ok(())
     }
+
+    /// Update the configuration with a JSON patch/overlay.
+    pub fn update_from_patch(&self, patch: serde_json::Value) -> Result<(), ConfigReloadError> {
+        let current = self.load();
+        let mut current_json = serde_json::to_value(&*current)
+            .map_err(|e| ConfigReloadError::LoadError(ConfigError::LoadError(e.to_string())))?;
+
+        fn merge_json(a: &mut serde_json::Value, b: serde_json::Value) {
+            match (a, b) {
+                (serde_json::Value::Object(ref mut a), serde_json::Value::Object(b)) => {
+                    for (k, v) in b {
+                        merge_json(a.entry(k).or_insert(serde_json::Value::Null), v);
+                    }
+                }
+                (a, b) => {
+                    *a = b;
+                }
+            }
+        }
+
+        merge_json(&mut current_json, patch);
+
+        let new_config: BaseAppConfig = serde_json::from_value(current_json)
+            .map_err(|e| ConfigReloadError::LoadError(ConfigError::LoadError(e.to_string())))?;
+
+        self.current_config.store(Arc::new(new_config));
+        Ok(())
+    }
 }
 
 // In a real application, State type would be strongly typed for the app.

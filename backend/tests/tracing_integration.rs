@@ -264,6 +264,16 @@ mod tests {
         }
         drop(span);
     }
+
+    /// Test trace context propagation injection and extraction
+    #[test]
+    fn test_trace_context_propagation() {
+        let cx = opentelemetry::Context::current();
+        let carrier = TracingService::inject_trace_context(&cx);
+        let extracted_cx = TracingService::extract_trace_context(&carrier);
+        let reinjected = TracingService::inject_trace_context(&extracted_cx);
+        assert_eq!(carrier, reinjected);
+    }
 }
 
 /// Performance benchmarks for tracing overhead

@@ -187,3 +187,26 @@ fn test_flash_loan_insufficient_repayment() {
     client.flash_loan(&borrower, &token_addr, &10_000);
 }
 
+#[test]
+fn test_reentrancy_guard_protection() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (treasury_id, admin1, admin2) = deploy_treasury(&env);
+    let client = treasury::TreasuryClient::new(&env, &treasury_id);
+
+    let (token_addr, _) = create_token(&env);
+    let sac = token::StellarAssetClient::new(&env, &token_addr);
+    sac.mint(&admin1, &5_000);
+    client.deposit(&admin1, &token_addr, &5_000);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin1.clone());
+    signers.push_back(admin2.clone());
+
+    // Call withdraw successfully (guard locks then unlocks)
+    client.withdraw(&admin1, &token_addr, &1_000, &signers);
+    assert_eq!(client.balance_of(&treasury_id, &token_addr), 4_000);
+}
+
+

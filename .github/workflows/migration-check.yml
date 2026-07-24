@@ -1,0 +1,20 @@
+name: Zero-Downtime Migration Check
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  migration-check:
+    name: Check Migration Safety
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Zero-Downtime Migration Safety Checker
+        run: |
+          chmod +x backend/scripts/check_migrations.sh
+          ./backend/scripts/check_migrations.sh backend/migrations

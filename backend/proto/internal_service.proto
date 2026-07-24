@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package internal.v1;
+
+// Internal Service definition for inter-service communication
+service InternalService {
+  rpc Ping (PingRequest) returns (PingResponse);
+  rpc GetContractMetrics (ContractMetricsRequest) returns (ContractMetricsResponse);
+  rpc StreamContractEvents (ContractEventStreamRequest) returns (stream ContractEventResponse);
+}
+
+message PingRequest {
+  string client_id = 1;
+  int64 timestamp = 2;
+}
+
+message PingResponse {
+  string status = 1;
+  int64 server_time = 2;
+  string version = 3;
+}
+
+message ContractMetricsRequest {
+  string contract_id = 1;
+  string network = 2;
+}
+
+message ContractMetricsResponse {
+  string contract_id = 1;
+  int64 total_calls = 2;
+  int64 total_gas_used = 3;
+  double avg_execution_time_ms = 4;
+  int64 error_count = 5;
+}
+
+message ContractEventStreamRequest {
+  string contract_id = 1;
+  repeated string topics = 2;
+}
+
+message ContractEventResponse {
+  string contract_id = 1;
+  string topic = 2;
+  bytes payload = 3;
+  int64 sequence = 4;
+  int64 timestamp = 5;
+}

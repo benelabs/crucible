@@ -147,4 +147,44 @@ impl Treasury {
             env.storage().instance().get(&DataKey::Balances).unwrap();
         balances.get((account, token)).unwrap_or(0)
     }
+
+    /// Execute a flash loan. Borrows `amount` of `token` to `borrower`.
+    /// The borrower must repay `amount + fee` within the same transaction scope.
+    pub fn flash_loan(env: Env, borrower: Address, token: Address, amount: i128) {
+        borrower.require_auth();
+
+        if amount <= 0 {
+            panic_with_error!(&env, ContractError::InsufficientBalance);
+        }
+
+        let treasury_addr = env.current_contract_address();
+        let mut balances: Map<(Address, Address), i128> =
+            env.storage().instance().get(&DataKey::Balances).unwrap();
+        let key = (treasury_addr.clone(), token.clone());
+        let current = balances.get(key.clone()).unwrap_or(0);
+        if current < amount {
+            panic_with_error!(&env, ContractError::InsufficientBalance);
+        }
+
+        // Calculate 0.1% fee (minimum 1 unit)
+        let mut fee = amount / 1000;
+        if fee == 0 {
+            fee = 1;
+        }
+
+        // Transfer funds from treasury to borrower
+        token::Client::new(&env, &token).transfer(&treasury_addr, &borrower, &amount);
+
+        // Repay funds + fee from borrower back to treasury
+        token::Client::new(&env, &token).transfer(&borrower, &treasury_addr, &(amount + fee));
+
+        // Update internal accounting with collected fee
+        let new_balance = current + fee;
+        balances.set(key.clone(), new_balance);
+        env.storage().instance().set(&DataKey::Balances, &balances);
+
+        env.events()
+            .publish((symbol_short!("flashloan"),), (borrower, token, amount, fee));
+    }
 }
+

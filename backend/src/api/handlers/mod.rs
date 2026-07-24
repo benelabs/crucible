@@ -10,3 +10,4 @@ pub mod profiling;
 pub mod sandbox;
 pub mod stellar;
 pub mod ws;
+pub mod graphql;

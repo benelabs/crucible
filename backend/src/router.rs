@@ -207,6 +207,10 @@ pub fn build_router(
             get(ws_dashboard_handler).with_state(ws_state),
         )
         .route(
+            "/api/v1/graphql",
+            post(crate::api::handlers::graphql::graphql_handler),
+        )
+        .route(
             "/api/dashboard",
             get(get_dashboard).with_state(dashboard_state),
         )

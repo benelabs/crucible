@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod auth;
 pub mod contracts;
 pub mod coverage;
 pub mod dashboard;

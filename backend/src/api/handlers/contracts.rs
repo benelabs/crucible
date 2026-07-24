@@ -146,7 +146,8 @@ pub async fn get_networks() -> Result<impl IntoResponse, AppError> {
         NetworkConfig {
             id: "mainnet".to_string(),
             name: "Soroban Mainnet".to_string(),
-            rpc_url: "https://soroban-testnet.stellar.org:443".to_string(), // placeholder/mock url
+            rpc_url: std::env::var("SOROBAN_MAINNET_RPC_URL")
+                .unwrap_or_else(|_| "https://soroban-mainnet.stellar.org:443".to_string()),
             passphrase: "Public Global Stellar Network ; October 2015".to_string(),
             status: "online".to_string(),
             ping_ms: 82,

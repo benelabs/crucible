@@ -1,0 +1,206 @@
+.webgl-explorer-container {
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 12px;
+  padding: 20px;
+  color: #f3f4f6;
+  font-family: inherit;
+}
+
+.webgl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.webgl-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.webgl-title h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  color: #f9fafb;
+}
+
+.title-icon {
+  color: #6366f1;
+}
+
+.webgl-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.control-btn {
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  color: #d1d5db;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.control-btn:hover {
+  background: #374151;
+  color: #ffffff;
+  border-color: #6366f1;
+}
+
+.webgl-viewport {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  background: #030712;
+  border-radius: 8px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.webgl-canvas {
+  flex: 1;
+  border-radius: 6px;
+  cursor: grab;
+}
+
+.webgl-canvas:active {
+  cursor: grabbing;
+}
+
+.node-inspector-drawer {
+  width: 320px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #374151;
+  padding-bottom: 10px;
+}
+
+.drawer-header h3 {
+  font-size: 15px;
+  margin: 0;
+  color: #818cf8;
+}
+
+.drawer-icon {
+  color: #818cf8;
+}
+
+.status-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: capitalize;
+}
+
+.status-confirmed {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid #059669;
+}
+
+.status-pending {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid #d97706;
+}
+
+.drawer-body {
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.detail-row .label {
+  color: #9ca3af;
+}
+
+.detail-row .value {
+  color: #e5e7eb;
+  font-weight: 500;
+}
+
+.detail-row .hash {
+  font-family: monospace;
+  font-size: 11px;
+  color: #a5b4fc;
+}
+
+.calls-heading {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #d1d5db;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.contract-calls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.call-card {
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.call-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.function-name {
+  font-family: monospace;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.gas-tag {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.call-details {
+  font-size: 11px;
+  color: #9ca3af;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mono {
+  font-family: monospace;
+  color: #cbd5e1;
+}

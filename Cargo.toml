@@ -3,6 +3,7 @@ members = [
     "backend",
     "contracts/crucible",
     "contracts/treasury",
+    "contracts/proxy",
     "crucible-macros",
     "examples/counter",
     "examples/token",

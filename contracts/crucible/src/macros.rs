@@ -70,6 +70,8 @@ macro_rules! assert_reverts {
 #[macro_export]
 macro_rules! assert_emitted {
     ($env:expr, $contract_id:expr, $topics:expr, $data:expr) => {{
+        extern crate std;
+        use std::string::ToString as _;
         use soroban_sdk::testutils::Events as _;
         use soroban_sdk::IntoVal as _;
         use soroban_sdk::TryFromVal as _;
@@ -106,9 +108,9 @@ macro_rules! assert_emitted {
             data     = __want_data_xdr,
             count    = __filtered.events().len(),
             actual   = {
-                let lines: std::vec::Vec<String> = __filtered.events().iter().enumerate().map(|(i, ev)| {
+                let lines: std::vec::Vec<std::string::String> = __filtered.events().iter().enumerate().map(|(i, ev)| {
                     let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
-                    format!("  [{i}] topics={:?} data={:?}", body.topics, body.data)
+                    std::format!("  [{i}] topics={:?} data={:?}", body.topics, body.data)
                 }).collect();
                 if lines.is_empty() { "  (none)".to_string() } else { lines.join("\n") }
             },
@@ -127,6 +129,8 @@ macro_rules! assert_emitted {
 #[macro_export]
 macro_rules! assert_not_emitted {
     ($env:expr) => {{
+        extern crate std;
+        use std::string::ToString as _;
         use soroban_sdk::testutils::Events as _;
         let __events = $env.inner().events().all();
         assert!(
@@ -137,9 +141,9 @@ macro_rules! assert_not_emitted {
              {list}",
             count = __events.events().len(),
             list = {
-                let lines: std::vec::Vec<String> = __events.events().iter().enumerate().map(|(i, ev)| {
+                let lines: std::vec::Vec<std::string::String> = __events.events().iter().enumerate().map(|(i, ev)| {
                     let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
-                    format!("  [{i}] contract={:?} topics={:?} data={:?}",
+                    std::format!("  [{i}] contract={:?} topics={:?} data={:?}",
                         ev.contract_id, body.topics, body.data)
                 }).collect();
                 lines.join("\n")

@@ -289,6 +289,183 @@ impl CapturedEvent {
     }
 }
 
+/// Wrapper around matching events returned by `env.events_matching()` to provide
+/// ergonomic access, filtering, conversion, and testing assertions.
+#[derive(Clone)]
+pub struct EventMatches {
+    pub(crate) env: Env,
+    pub(crate) items: SorobanVec<(Address, SorobanVec<Val>, Val)>,
+}
+
+impl std::fmt::Debug for EventMatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventMatches")
+            .field("count", &self.items.len())
+            .field("events", &self.items)
+            .finish()
+    }
+}
+
+impl std::ops::Deref for EventMatches {
+    type Target = SorobanVec<(Address, SorobanVec<Val>, Val)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
+impl PartialEq for EventMatches {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items
+    }
+}
+
+impl Eq for EventMatches {}
+
+impl PartialEq<SorobanVec<(Address, SorobanVec<Val>, Val)>> for EventMatches {
+    fn eq(&self, other: &SorobanVec<(Address, SorobanVec<Val>, Val)>) -> bool {
+        &self.items == other
+    }
+}
+
+impl PartialEq<EventMatches> for SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    fn eq(&self, other: &EventMatches) -> bool {
+        self == &other.items
+    }
+}
+
+impl EventMatches {
+    /// Creates a new `EventMatches` wrapper.
+    pub fn new(env: Env, items: SorobanVec<(Address, SorobanVec<Val>, Val)>) -> Self {
+        Self { env, items }
+    }
+
+    /// Returns the underlying Soroban `Env`.
+    pub fn env(&self) -> &Env {
+        &self.env
+    }
+
+    /// Returns a reference to the inner SorobanVec.
+    pub fn inner(&self) -> &SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        &self.items
+    }
+
+    /// Consumes self and returns the inner SorobanVec.
+    pub fn into_inner(self) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        self.items
+    }
+
+    /// Returns the number of matched events.
+    pub fn len(&self) -> usize {
+        self.items.len() as usize
+    }
+
+    /// Returns true if no events matched.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Returns the event tuple at the specified index, if present.
+    pub fn get_event(&self, index: u32) -> Option<(Address, SorobanVec<Val>, Val)> {
+        if index < self.items.len() {
+            Some(self.items.get(index).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Returns the first matched event tuple, if any.
+    pub fn first_event(&self) -> Option<(Address, SorobanVec<Val>, Val)> {
+        self.get_event(0)
+    }
+
+    /// Returns the last matched event tuple, if any.
+    pub fn last_event(&self) -> Option<(Address, SorobanVec<Val>, Val)> {
+        let len = self.items.len();
+        if len > 0 {
+            Some(self.items.get(len - 1).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Filter matched events to only those emitted by the specified contract address.
+    pub fn by_contract(&self, contract: &Address) -> Self {
+        let mut filtered = SorobanVec::new(&self.env);
+        for item in self.items.iter() {
+            if item.0 == *contract {
+                filtered.push_back(item);
+            }
+        }
+        Self::new(self.env.clone(), filtered)
+    }
+
+    /// Decodes the event data at `index` into typed Rust value using `FromVal`.
+    pub fn data_as<D: FromVal<Env, Val>>(&self, index: u32) -> D {
+        let event = self.items.get(index).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::data_as index {} out of bounds (len {})",
+                index,
+                self.items.len()
+            )
+        });
+        D::from_val(&self.env, &event.2)
+    }
+
+    /// Decodes the topic at `topic_idx` of event at `event_idx` into typed Rust value using `FromVal`.
+    pub fn topic_as<T: FromVal<Env, Val>>(&self, event_idx: u32, topic_idx: u32) -> T {
+        let event = self.items.get(event_idx).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::topic_as event index {} out of bounds (len {})",
+                event_idx,
+                self.items.len()
+            )
+        });
+        let topic_val = event.1.get(topic_idx).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::topic_as topic index {} out of bounds (topics len {})",
+                topic_idx,
+                event.1.len()
+            )
+        });
+        T::from_val(&self.env, &topic_val)
+    }
+
+    /// Convert matches into a `Vec<CapturedEvent>` for typed inspection.
+    pub fn to_captured(&self) -> std::vec::Vec<CapturedEvent> {
+        let mut result = std::vec::Vec::with_capacity(self.len());
+        for item in self.items.iter() {
+            result.push(CapturedEvent {
+                env: self.env.clone(),
+                contract: item.0,
+                topics: item.1,
+                data: item.2,
+            });
+        }
+        result
+    }
+
+    /// Assert that at least one matching event was emitted.
+    pub fn assert_emitted(&self) {
+        assert!(
+            !self.is_empty(),
+            "Expected at least one matching event, but none were emitted"
+        );
+    }
+
+    /// Assert that exactly `expected` matching events were emitted.
+    pub fn assert_count(&self, expected: usize) {
+        assert_eq!(
+            self.len(),
+            expected,
+            "Expected {} matching event(s), but found {}",
+            expected,
+            self.len()
+        );
+    }
+}
+
+
 impl MockEnv {
     /// Returns the underlying `soroban_sdk::Env`.
     pub fn inner(&self) -> &Env {
@@ -584,10 +761,10 @@ impl MockEnv {
         result
     }
 
-    /// Returns events matching the given topics.
+    /// Returns events matching the given topics wrapped in ergonomic [`EventMatches`].
     ///
-    /// Updated for Soroban SDK v25.x ContractEvents compatibility.
-    pub fn events_matching<T>(&self, topics: T) -> SorobanVec<(Address, SorobanVec<Val>, Val)>
+    /// Updated for Soroban SDK v25.x ContractEvents compatibility and programmatic inspection ergonomics.
+    pub fn events_matching<T>(&self, topics: T) -> EventMatches
     where
         T: IntoVal<Env, SorobanVec<Val>>,
     {
@@ -617,7 +794,7 @@ impl MockEnv {
                 matching.push_back((contract_id, event_topics, data));
             }
         }
-        matching
+        EventMatches::new(self.inner.clone(), matching)
     }
 
     /// Returns events matching the given topics as typed [`CapturedEvent`] wrappers.

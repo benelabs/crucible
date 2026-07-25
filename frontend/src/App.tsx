@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { EventListenerDashboard } from './components/EventListenerDashboard';
 import { TransactionSimulator } from './components/TransactionSimulator';
 import { GasCostEstimator } from './components/GasCostEstimator';
@@ -69,12 +71,15 @@ function App() {
     }
   };
 
+  const { t } = useTranslation();
+
   return (
     <div className="app-container">
       <header className="app-header">
         <div className="header-brand">
-          <h1>Crucible Developer Portal</h1>
+          <h1>{t('app.title', 'Crucible')} Developer Portal</h1>
           <div className="header-badge">Soroban Toolchain</div>
+          <LanguageSwitcher />
         </div>
         <nav className="header-tabs" aria-label="Dashboard views">
           <button

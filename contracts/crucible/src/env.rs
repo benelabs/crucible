@@ -581,11 +581,18 @@ impl MockEnv {
     }
 
     /// Advance the ledger timestamp by a duration.
+    ///
+    /// # Panics
+    /// Panics if the timestamp overflows.
     pub fn advance_time(&self, duration: Duration) {
         let info = self.inner.ledger().get();
+        let new_ts = info
+            .timestamp
+            .checked_add(duration.as_seconds())
+            .expect("timestamp overflow in advance_time");
         self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
             sequence_number: info.sequence_number,
-            timestamp: info.timestamp + duration.as_seconds(),
+            timestamp: new_ts,
             protocol_version: info.protocol_version,
             base_reserve: info.base_reserve,
             network_id: info.network_id,
@@ -1571,6 +1578,79 @@ mod auth_scope_tests {
             let _g = env.mock_all_auths_scoped();
         }
         assert!(env.inner().auths().is_empty());
+    }
+
+    #[soroban_sdk::contract]
+    struct DummyProtectedContract;
+
+    #[soroban_sdk::contractimpl]
+    impl DummyProtectedContract {
+        pub fn protected_action(_env: soroban_sdk::Env, user: soroban_sdk::Address) -> u32 {
+            user.require_auth();
+            100
+        }
+    }
+
+    #[test]
+    fn protected_call_valid_auth_succeeds() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+
+        // 1. Global mock auth pattern
+        env.mock_all_auths();
+        assert_eq!(client.protected_action(&alice), 100);
+
+        // 2. Specific mock auth pattern
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &alice,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "protected_action",
+                args: (alice.clone(),).into_val(env.inner()),
+                sub_invokes: &[],
+            },
+        }]);
+        assert_eq!(client.protected_action(&alice), 100);
+    }
+
+    #[test]
+    #[should_panic]
+    fn protected_call_missing_auth_panics() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+
+        // Clear mock authorizations so require_auth fails
+        env.mock_auths(&[]);
+        client.protected_action(&alice);
+    }
+
+    #[test]
+    #[should_panic]
+    fn protected_call_wrong_signer_panics() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+
+        // Provide authorization for bob when alice is the required caller argument
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &bob,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "protected_action",
+                args: (alice.clone(),).into_val(env.inner()),
+                sub_invokes: &[],
+            },
+        }]);
+        client.protected_action(&alice);
     }
 }
 

@@ -1,5 +1,5 @@
 [package]
-name = "treasury"
+name = "crucible-proxy"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,5 +11,3 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-proptest = "1.4.0"
-

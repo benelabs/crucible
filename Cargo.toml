@@ -4,6 +4,7 @@ members = [
     "contracts/crucible",
     "contracts/treasury",
     "contracts/proxy",
+    "contracts/zk_verifier",
     "crucible-macros",
     "examples/counter",
     "examples/token",

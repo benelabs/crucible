@@ -34,6 +34,7 @@ enum DataKey {
     Policy(u64),
     Claim(u64),
     PolicyBalance(Address),
+    ReentrancyGuard,
 }
 
 /// Insurance Contract for smart contract failures
@@ -43,6 +44,22 @@ pub struct Insurance;
 
 #[contractimpl]
 impl Insurance {
+    fn lock_guard(env: &Env) -> Result<(), &'static str> {
+        let is_locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyGuard)
+            .unwrap_or(false);
+        if is_locked {
+            return Err("Reentrancy guard locked");
+        }
+        env.storage().instance().set(&DataKey::ReentrancyGuard, &true);
+        Ok(())
+    }
+
+    fn unlock_guard(env: &Env) {
+        env.storage().instance().set(&DataKey::ReentrancyGuard, &false);
+    }
     /// Initialize insurance contract
     pub fn initialize(env: Env, admin: Address, initial_reserves: i128) {
         let storage = env.storage().instance();

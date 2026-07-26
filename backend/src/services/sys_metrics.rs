@@ -15,7 +15,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::{debug, info, instrument, warn, error};
+use tracing::{debug, info, instrument};
 use uuid::Uuid;
 use crate::services::tracing::TracingService;
 

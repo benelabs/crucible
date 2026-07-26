@@ -17,12 +17,9 @@
 //! ```
 
 use axum::{
-    body::Body,
     extract::{Path, State},
-    http::{Request, StatusCode},
     response::IntoResponse,
-    routing::get,
-    Json, Router,
+    Json,
 };
 use chrono::{DateTime, Utc};
 use redis::{AsyncCommands, Client as RedisClient};
@@ -33,7 +30,6 @@ use thiserror::Error;
 use tracing::{debug, error, warn};
 use utoipa::ToSchema;
 
-use crate::error::AppError;
 use crate::services::{
     error_recovery::{ErrorManager, RecoveryTask},
     log_alerts::{Alert, AlertManager},

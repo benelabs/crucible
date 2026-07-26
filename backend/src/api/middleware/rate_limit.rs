@@ -4,7 +4,6 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use redis::AsyncCommands;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},

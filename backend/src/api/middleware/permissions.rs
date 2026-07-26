@@ -4,7 +4,6 @@
 //! Integrates with PostgreSQL for permission storage and Redis for caching.
 
 use axum::{
-    body::Body,
     extract::{Request, State},
     http::StatusCode,
     middleware::Next,

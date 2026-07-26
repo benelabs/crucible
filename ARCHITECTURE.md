@@ -680,6 +680,7 @@ Verify:
 
 ## Further Reading
 
+- [Architecture Decision Records](docs/adr/) — Index of all ADRs
 - [Soroban Documentation](https://soroban.stellar.org/)
 - [Cargo Workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html)
 - [Proc Macros](https://doc.rust-lang.org/reference/procedural-macros.html)

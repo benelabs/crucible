@@ -4,6 +4,7 @@
 //! - `assert_reverts!` — assert a contract call panics (reverts)
 //! - `assert_emitted!` — assert a specific event was emitted
 //! - `assert_not_emitted!` — assert no events were emitted
+//! - `assert_approx_eq!` — assert approximate numeric equality within tolerance
 
 /// Asserts that a contract invocation panics (reverts).
 ///
@@ -169,6 +170,59 @@ macro_rules! assert_not_emitted {
     }};
 }
 
+/// Asserts two numeric values are approximately equal within a tolerance.
+///
+/// This is useful for fee and reward calculations where rounding can produce
+/// small expected deltas.
+///
+/// # Example
+///
+/// ```ignore
+/// crate::assert_approx_eq!(100_i128, 101_i128, 1_i128);
+/// crate::assert_approx_eq!(10.0_f64, 10.01_f64, 0.02_f64);
+/// ```
+#[macro_export]
+macro_rules! assert_approx_eq {
+    ($actual:expr, $expected:expr, $tolerance:expr) => {{
+        let __actual = $actual;
+        let __expected = $expected;
+        let __tolerance = $tolerance;
+        let __zero = __tolerance - __tolerance;
+
+        assert!(
+            __tolerance >= __zero,
+            "assert_approx_eq! failed: tolerance must be non-negative.\n\
+             \n\
+             actual    = {:?}\n\
+             expected  = {:?}\n\
+             tolerance = {:?}",
+            __actual,
+            __expected,
+            __tolerance,
+        );
+
+        let __diff = if __actual >= __expected {
+            __actual - __expected
+        } else {
+            __expected - __actual
+        };
+
+        assert!(
+            __diff <= __tolerance,
+            "assert_approx_eq! failed: difference exceeds tolerance.\n\
+             \n\
+             actual     = {:?}\n\
+             expected   = {:?}\n\
+             difference = {:?}\n\
+             tolerance  = {:?}",
+            __actual,
+            __expected,
+            __diff,
+            __tolerance,
+        );
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use crate::env::MockEnv;
@@ -200,5 +254,19 @@ mod tests {
         // Each event should be found even though two events are present.
         crate::assert_emitted!(env, id, (symbol_short!("first"),), 1_u32);
         crate::assert_emitted!(env, id, (symbol_short!("second"),), 2_u32);
+    }
+
+    #[test]
+    fn test_assert_approx_eq_accepts_values_within_tolerance() {
+        crate::assert_approx_eq!(100_i128, 102_i128, 2_i128);
+        crate::assert_approx_eq!(10.0_f64, 10.01_f64, 0.02_f64);
+    }
+
+    #[test]
+    fn test_assert_approx_eq_panics_when_outside_tolerance() {
+        let result = std::panic::catch_unwind(|| {
+            crate::assert_approx_eq!(100_i128, 105_i128, 2_i128);
+        });
+        assert!(result.is_err());
     }
 }

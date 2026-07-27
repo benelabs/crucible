@@ -659,6 +659,60 @@ mod tests {
     }
 
     #[test]
+    fn test_transfer_from_consumes_allowance_and_updates_balances() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .with_account("spender", Stroops::from(0))
+            .with_account("bob", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        let spender = env.account("spender");
+        let bob = env.account("bob");
+
+        token.mint(&alice.address(), 1_000_000);
+        token.approve(&alice.address(), &spender.address(), 500_000, 1000);
+        token.transfer_from(
+            &spender.address(),
+            &alice.address(),
+            &bob.address(),
+            300_000,
+        );
+
+        assert_eq!(token.balance(&alice.address()), 700_000);
+        assert_eq!(token.balance(&bob.address()), 300_000);
+        assert_eq!(
+            token.allowance(&alice.address(), &spender.address()),
+            200_000
+        );
+    }
+
+    #[test]
+    fn test_transfer_from_exceeds_allowance_reverts() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .with_account("spender", Stroops::from(0))
+            .with_account("bob", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        let spender = env.account("spender");
+        let bob = env.account("bob");
+
+        token.mint(&alice.address(), 1_000_000);
+        token.approve(&alice.address(), &spender.address(), 200_000, 1000);
+
+        crate::assert_reverts!(token.transfer_from(
+            &spender.address(),
+            &alice.address(),
+            &bob.address(),
+            300_000
+        ));
+    }
+
+    #[test]
     fn test_clawback_reduces_balance() {
         let env = MockEnv::builder()
             .with_account("alice", Stroops::from(0))

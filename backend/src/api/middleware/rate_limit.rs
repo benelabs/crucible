@@ -4,15 +4,15 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 /// Configuration for Token Bucket Rate Limiter
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RateLimitConfig {
     pub capacity: u64,
     pub refill_rate_per_sec: u64,
@@ -44,6 +44,8 @@ pub struct TokenBucketRateLimiter {
     local_buckets: Arc<Mutex<HashMap<String, LocalTokenBucket>>>,
 }
 
+static SHARED_LIMITER: OnceLock<Arc<TokenBucketRateLimiter>> = OnceLock::new();
+
 impl TokenBucketRateLimiter {
     pub fn new(redis_client: Option<redis::Client>, config: RateLimitConfig) -> Self {
         Self {
@@ -51,6 +53,17 @@ impl TokenBucketRateLimiter {
             config,
             local_buckets: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Get global shared rate limiter instance
+    pub fn global() -> Arc<Self> {
+        SHARED_LIMITER
+            .get_or_init(|| Arc::new(Self::new(None, RateLimitConfig::default())))
+            .clone()
+    }
+
+    pub fn config(&self) -> &RateLimitConfig {
+        &self.config
     }
 
     /// Check and consume a token for a given key (IP address or API key)
@@ -154,7 +167,7 @@ impl TokenBucketRateLimiter {
 }
 
 /// Result of Rate Limit evaluation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RateLimitResult {
     pub allowed: bool,
     pub limit: u64,
@@ -162,26 +175,58 @@ pub struct RateLimitResult {
     pub reset_secs: u64,
 }
 
+/// Extract rate limiting key (API Key token or IP address) from request headers
+pub fn extract_rate_limit_key(headers: &HeaderMap) -> String {
+    // 1. Check API Key header
+    if let Some(key) = headers.get("x-api-key").and_then(|h| h.to_str().ok()) {
+        if !key.trim().is_empty() {
+            return format!("token:{}", key.trim());
+        }
+    }
+
+    // 2. Check Authorization header (Bearer token)
+    if let Some(auth) = headers.get("authorization").and_then(|h| h.to_str().ok()) {
+        if auth.to_lowercase().starts_with("bearer ") {
+            let token = auth[7..].trim();
+            if !token.is_empty() {
+                return format!("token:{}", token);
+            }
+        }
+    }
+
+    // 3. Check X-Forwarded-For header (first client IP)
+    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|h| h.to_str().ok()) {
+        if let Some(first_ip) = forwarded.split(',').next() {
+            let ip = first_ip.trim();
+            if !ip.is_empty() {
+                return format!("ip:{}", ip);
+            }
+        }
+    }
+
+    // 4. Check X-Real-IP header
+    if let Some(real_ip) = headers.get("x-real-ip").and_then(|h| h.to_str().ok()) {
+        let ip = real_ip.trim();
+        if !ip.is_empty() {
+            return format!("ip:{}", ip);
+        }
+    }
+
+    "ip:anonymous".to_string()
+}
+
 /// Axum Middleware function for Token Bucket Rate Limiting
 pub async fn rate_limit_middleware(
     request: Request,
     next: Next,
 ) -> Response {
-    // Extract key (API key header or IP)
-    let key = request
-        .headers()
-        .get("x-api-key")
-        .and_then(|h| h.to_str().ok())
-        .or_else(|| {
-            request
-                .headers()
-                .get("x-forwarded-for")
-                .and_then(|h| h.to_str().ok())
-        })
-        .unwrap_or("anonymous_client")
-        .to_string();
+    let key = extract_rate_limit_key(request.headers());
 
-    let limiter = TokenBucketRateLimiter::new(None, RateLimitConfig::default());
+    let limiter = request
+        .extensions()
+        .get::<Arc<TokenBucketRateLimiter>>()
+        .cloned()
+        .unwrap_or_else(TokenBucketRateLimiter::global);
 
     match limiter.check_and_consume(&key).await {
         Ok(result) => {
@@ -190,6 +235,7 @@ pub async fn rate_limit_middleware(
                 headers.insert("X-RateLimit-Limit", HeaderValue::from(result.limit));
                 headers.insert("X-RateLimit-Remaining", HeaderValue::from(result.remaining));
                 headers.insert("X-RateLimit-Reset", HeaderValue::from(result.reset_secs));
+                headers.insert("Retry-After", HeaderValue::from(result.reset_secs));
 
                 return (
                     StatusCode::TOO_MANY_REQUESTS,
@@ -207,5 +253,76 @@ pub async fn rate_limit_middleware(
             response
         }
         Err(_) => next.run(request).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, routing::get, Router};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_extract_rate_limit_key_priority() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(extract_rate_limit_key(&headers), "ip:anonymous");
+
+        headers.insert("x-real-ip", HeaderValue::from_static("192.168.1.1"));
+        assert_eq!(extract_rate_limit_key(&headers), "ip:192.168.1.1");
+
+        headers.insert("x-forwarded-for", HeaderValue::from_static("10.0.0.1, 10.0.0.2"));
+        assert_eq!(extract_rate_limit_key(&headers), "ip:10.0.0.1");
+
+        headers.insert("authorization", HeaderValue::from_static("Bearer secret-jwt"));
+        assert_eq!(extract_rate_limit_key(&headers), "token:secret-jwt");
+
+        headers.insert("x-api-key", HeaderValue::from_static("api-key-123"));
+        assert_eq!(extract_rate_limit_key(&headers), "token:api-key-123");
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_middleware_429_too_many_requests() {
+        let config = RateLimitConfig {
+            capacity: 2,
+            refill_rate_per_sec: 0,
+            ttl: Duration::from_secs(60),
+        };
+        let limiter = Arc::new(TokenBucketRateLimiter::new(None, config));
+
+        let app = Router::new()
+            .route("/test", get(|| async { "OK" }))
+            .layer(axum::middleware::from_fn(rate_limit_middleware))
+            .layer(axum::Extension(limiter));
+
+        // Request 1: 200 OK
+        let req1 = Request::builder()
+            .uri("/test")
+            .header("x-api-key", "client-1")
+            .body(Body::empty())
+            .unwrap();
+        let res1 = app.clone().oneshot(req1).await.unwrap();
+        assert_eq!(res1.status(), StatusCode::OK);
+        assert_eq!(res1.headers().get("X-RateLimit-Remaining").unwrap(), "1");
+
+        // Request 2: 200 OK
+        let req2 = Request::builder()
+            .uri("/test")
+            .header("x-api-key", "client-1")
+            .body(Body::empty())
+            .unwrap();
+        let res2 = app.clone().oneshot(req2).await.unwrap();
+        assert_eq!(res2.status(), StatusCode::OK);
+        assert_eq!(res2.headers().get("X-RateLimit-Remaining").unwrap(), "0");
+
+        // Request 3: 429 Too Many Requests
+        let req3 = Request::builder()
+            .uri("/test")
+            .header("x-api-key", "client-1")
+            .body(Body::empty())
+            .unwrap();
+        let res3 = app.oneshot(req3).await.unwrap();
+        assert_eq!(res3.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(res3.headers().contains_key("X-RateLimit-Limit"));
+        assert!(res3.headers().contains_key("Retry-After"));
     }
 }

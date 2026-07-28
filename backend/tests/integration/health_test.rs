@@ -68,7 +68,7 @@ async fn register_worker_hb(conn: &mut ConnectionManager) {
         "uptime_seconds": 0,
     })
     .to_string();
-    conn.set("worker:health-test-worker:health", &payload)
+    let _: () = conn.set("worker:health-test-worker:health", &payload)
         .await
         .expect("register_worker_hb");
 }

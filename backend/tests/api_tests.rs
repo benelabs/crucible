@@ -57,6 +57,7 @@ async fn test_get_status_endpoint() {
             backend::config::AppConfig::default(),
         )),
         log_aggregator: Arc::new(backend::services::log_aggregator::LogAggregator::new().0),
+        contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
         redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
     });
     let state = test_state();

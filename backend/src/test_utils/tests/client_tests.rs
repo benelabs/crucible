@@ -61,7 +61,7 @@ async fn test_get_status_and_text() {
     let client = ApiTestClient::new(test_router());
     let response = client.get("/health").send().await;
 
-    response.assert_status(StatusCode::OK);
+    let response = response.assert_status(StatusCode::OK);
     assert_eq!(response.text(), "OK");
 }
 
@@ -122,7 +122,7 @@ async fn test_query_params_appended() {
         .send()
         .await;
 
-    response.assert_status(StatusCode::OK);
+    let response = response.assert_status(StatusCode::OK);
     assert_eq!(response.text(), "hello-world");
 }
 

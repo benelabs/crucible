@@ -8,7 +8,7 @@ mod event_topic_match;
 pub mod fixture;
 pub mod macros;
 pub mod prelude;
-pub mod reputation;
+
 pub mod sim;
 #[path = "time_helpers.rs"]
 pub mod time;

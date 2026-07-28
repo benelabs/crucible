@@ -129,6 +129,11 @@ impl Governance {
             return Err("Insufficient voting power");
         }
 
+        // Check if voter already cast a vote for this proposal (Issue #680)
+        if storage.has(&DataKey::Vote(voter.clone(), proposal_id)) {
+            return Err("Already voted");
+        }
+
         // Record vote
         let vote = Vote {
             voter: voter.clone(),
@@ -222,5 +227,81 @@ impl Governance {
             .publish((symbol_short!("deleg"), from), amount);
 
         Ok(())
+    }
+}
+
+// Gas Optimization via Bit-Packing (Issue #704)
+// Packing multiple booleans and small integers into a single 64-bit storage key.
+// [bool flag1] [bool flag2] [u8 small_int] [u32 large_int] [16 bits reserved]
+// Total = 1 + 1 + 8 + 32 = 42 bits used, easily fits in u64.
+#[contracttype]
+#[derive(Clone, Copy)]
+pub struct PackedState {
+    pub packed: u64,
+}
+
+impl PackedState {
+    pub fn new(flag1: bool, flag2: bool, small_int: u8, large_int: u32) -> Self {
+        let mut packed: u64 = 0;
+        if flag1 { packed |= 1 << 0; }
+        if flag2 { packed |= 1 << 1; }
+        packed |= (small_int as u64) << 2;
+        packed |= (large_int as u64) << 10;
+        Self { packed }
+    }
+
+    pub fn flag1(&self) -> bool {
+        (self.packed & (1 << 0)) != 0
+    }
+
+    pub fn flag2(&self) -> bool {
+        (self.packed & (1 << 1)) != 0
+    }
+
+    pub fn small_int(&self) -> u8 {
+        ((self.packed >> 2) & 0xFF) as u8
+    }
+
+    pub fn large_int(&self) -> u32 {
+        ((self.packed >> 10) & 0xFFFFFFFF) as u32
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn test_double_voting_prevention() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, Governance);
+        let client = GovernanceClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let voter = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        client.initialize(&admin, &1_000_000);
+
+        // Grant voting power
+        let storage = env.storage().instance();
+        // Register proposal
+        let deadline = env.ledger().timestamp() + 1000;
+        let prop_id = client.create_proposal(&admin, &soroban_sdk::String::from_str(&env, "Test Proposal"), &soroban_sdk::String::from_str(&env, "Desc"), &deadline);
+
+        // Set voting power
+        env.as_contract(&contract_id, || {
+            env.storage().instance().set(&DataKey::VotingPower(voter.clone()), &500i128);
+        });
+
+        // First vote should succeed
+        let res1 = client.try_vote(&voter, &prop_id, &100i128, &true);
+        assert!(res1.is_ok());
+
+        // Second vote should fail with Already voted
+        let res2 = client.try_vote(&voter, &prop_id, &100i128, &true);
+        assert!(res2.is_err());
     }
 }

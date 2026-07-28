@@ -61,8 +61,8 @@ pub async fn execute_contract(
     }
     
     // Validate args size if present
-    if let Some(ref args) = request.args_xdr_base64 {
-        let args_size = args.len();
+    if !request.args_xdr_base64.is_empty() {
+        let args_size: usize = request.args_xdr_base64.iter().map(|s| s.len()).sum();
         const MAX_ARGS_SIZE: usize = 1 * 1024 * 1024; // 1MB
         
         if args_size > MAX_ARGS_SIZE {

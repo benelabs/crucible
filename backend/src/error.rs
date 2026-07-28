@@ -69,6 +69,10 @@ pub enum AppError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
+    /// 500 — A database migration failed.
+    #[error("Migration error: {0}")]
+    Migration(#[from] sqlx::migrate::MigrateError),
+
     /// 500 — An internal Redis error occurred.
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
@@ -84,6 +88,10 @@ pub enum AppError {
     /// 500 — Internal server error (no message).
     #[error("Internal server error")]
     Internal,
+
+    /// 502 — Stellar network communication failure.
+    #[error("URL parse error: {0}")]
+    UrlParse(#[from] url::ParseError),
 
     /// 502 — Stellar network communication failure.
     #[error("Stellar operation failed: {0}")]
@@ -129,6 +137,14 @@ impl IntoResponse for AppError {
                     "An internal database error occurred".to_string(),
                 )
             }
+            AppError::Migration(e) => {
+                error!("Migration error: {e:?}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "migration_error",
+                    "A database migration failed".to_string(),
+                )
+            }
             AppError::Redis(e) => {
                 error!("Redis error: {e:?}");
                 (
@@ -159,6 +175,14 @@ impl IntoResponse for AppError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal_error",
                     "An internal server error occurred".to_string(),
+                )
+            }
+            AppError::UrlParse(e) => {
+                error!("URL parse error: {e}");
+                (
+                    StatusCode::BAD_REQUEST,
+                    "invalid_url",
+                    "The provided URL was invalid".to_string(),
                 )
             }
             AppError::StellarError(msg) => {

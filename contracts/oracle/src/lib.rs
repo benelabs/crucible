@@ -74,17 +74,18 @@ impl Oracle {
     /// Submit price data from a source
     pub fn submit_price(
         env: Env,
+        source: Address,
         symbol: String,
         price: i128,
         source_name: String,
     ) -> Result<(), &'static str> {
-        let sender = env.current_contract_address();
+        source.require_auth();
 
         let storage = env.storage().instance();
 
-        // Verify sender is whitelisted
+        // Verify source address is whitelisted
         let is_whitelisted: bool = storage
-            .get(&DataKey::SourceWhitelist(sender.clone()))
+            .get(&DataKey::SourceWhitelist(source.clone()))
             .unwrap_or(false);
 
         if !is_whitelisted {
@@ -224,3 +225,7 @@ impl Oracle {
         Ok(age <= max_age_seconds)
     }
 }
+
+#[cfg(test)]
+mod test;
+

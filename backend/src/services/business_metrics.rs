@@ -603,7 +603,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     #[test]
-    fn test_metric_source_default() {
+    fn test_metric_source_default_manual() {
         let s: MetricSource = Default::default();
         assert_eq!(s, MetricSource::Manual);
     }

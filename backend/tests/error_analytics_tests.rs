@@ -31,7 +31,9 @@ async fn test_build_error_analytics_empty() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let analytics: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(analytics["total_errors"], 0);
 }
@@ -76,7 +78,9 @@ async fn test_build_error_analytics_with_data() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let analytics: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(analytics["total_errors"], 2);
     assert!(analytics["error_types"].as_array().unwrap().len() > 0);

@@ -10,6 +10,7 @@ use backend::config::reload::ConfigManager;
 use backend::config::AppConfig;
 use backend::services::{
     error_recovery::ErrorManager, log_aggregator::LogAggregator, sys_metrics::MetricsExporter,
+    contract_benchmark::ContractBenchmarkService,
 };
 use redis::Client as RedisClient;
 use sqlx::postgres::PgPoolOptions;
@@ -35,6 +36,7 @@ fn get_mock_state() -> Arc<AppState> {
         error_manager,
         config_manager,
         log_aggregator: Arc::new(log_aggregator),
+        contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
         redis,
     })
 }

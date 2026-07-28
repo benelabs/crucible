@@ -4,6 +4,24 @@ use axum::{body::Body, extract::State, http::Request, middleware::Next, response
 use std::{sync::Arc, time::Instant};
 use tracing::Instrument;
 
+/// Sanitize a string for safe log output by stripping newlines and control characters.
+///
+/// Replaces:
+/// - `\n` (newline) → space
+/// - `\r` (carriage return) → space
+/// - `\t` (tab) → space
+/// - All other ASCII control characters (0x00–0x1F, 0x7F) → empty string
+///
+/// This prevents log injection attacks where user-controlled input
+/// contains fake log entries via embedded newlines.
+pub fn sanitize_for_log(input: &str) -> String {
+    input.chars().filter_map(|c| match c {
+        '\n' | '\r' | '\t' => Some(' '),
+        c if c.is_ascii_control() => None,
+        c => Some(c),
+    }).collect()
+}
+
 /// Middleware to log HTTP requests and responses.
 ///
 /// This middleware captures:
@@ -23,7 +41,7 @@ pub async fn logging_middleware(
     let uri = request.uri().clone();
     let version = request.version();
 
-    let path = uri.path().to_string();
+    let path = sanitize_for_log(uri.path());
     let span = TracingService::http_request_span(method.as_str(), &path, None);
 
     let value = span.clone();
@@ -51,7 +69,10 @@ pub async fn logging_middleware(
         // Optionally persist log to LogAggregator
         let log_message = format!(
             "{} {} finished with {} in {:?}",
-            method, uri, status, latency
+            sanitize_for_log(method.as_str()),
+            path,
+            status,
+            latency
         );
 
         // We don't want to block the response on logging persistence
@@ -71,6 +92,66 @@ pub async fn logging_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_for_log_preserves_normal_text() {
+        let input = "GET /api/v1/users";
+        assert_eq!(sanitize_for_log(input), "GET /api/v1/users");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_replaces_newline_with_space() {
+        let input = "POST /api\nX-Injected: true";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\n'));
+        assert!(result.contains("true"));
+    }
+
+    #[test]
+    fn test_sanitize_for_log_replaces_carriage_return() {
+        let input = "data\r\nInjected";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\r'));
+        assert!(result.contains("Injected"));
+    }
+
+    #[test]
+    fn test_sanitize_for_log_replaces_tab() {
+        let input = "GET\t/path";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\t'));
+        assert_eq!(result, "GET /path");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_strips_control_characters() {
+        let input = format!("GET{} /path\x00null", '\x1b');
+        let result = sanitize_for_log(&input);
+        assert!(!result.contains('\x1b'));
+        assert!(!result.contains('\x00'));
+        assert_eq!(result, "GET  /pathnull");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_handles_empty_string() {
+        assert_eq!(sanitize_for_log(""), "");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_preserves_unicode() {
+        let input = "GET /café/🚀";
+        assert_eq!(sanitize_for_log(input), input);
+    }
+
+    #[test]
+    fn test_sanitize_for_log_mixed_injection_attempt() {
+        let input = "GET /\nHTTP/1.1\r\nX-User: admin\r\n";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\n'));
+        assert!(!result.contains('\r'));
+        assert!(result.contains("HTTP/1.1"));
+        assert!(result.contains("X-User"));
+    }
     use crate::config::{reload::ConfigManager, AppConfig};
     use crate::services::{
         contract_benchmark::ContractBenchmarkService, error_recovery::ErrorManager,
@@ -97,12 +178,10 @@ mod tests {
             db: None,
             metrics_exporter,
             error_manager,
-            config_manager: Arc::new(ConfigManager::new(AppConfig::default())),
+            config_manager: config_manager.clone(),
             log_aggregator,
-            db: Some(db),
             contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
             redis,
-            config_manager,
         });
 
         let app = Router::new()

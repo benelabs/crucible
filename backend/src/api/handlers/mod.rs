@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod auth;
 pub mod contracts;
 pub mod coverage;
 pub mod dashboard;
@@ -9,3 +10,4 @@ pub mod profiling;
 pub mod sandbox;
 pub mod stellar;
 pub mod ws;
+pub mod graphql;

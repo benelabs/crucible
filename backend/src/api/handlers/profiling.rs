@@ -59,11 +59,9 @@ pub struct HealthResponse {
     responses((status = 200, description = "Performance metrics", body = MetricsReport)),
     tag = "profiling"
 )]
-#[instrument(skip_all)]
-pub async fn get_metrics(
-    State(state): State<Arc<AppState>>,
-) -> Result<impl IntoResponse, AppError> {
-    let _enter = info_span!("metrics.collection").entered();
+pub async fn get_metrics(State(state): State<Arc<AppState>>) -> Result<Json<MetricsReport>, AppError> {
+    let _enter = tracing::Span::current();
+    let _ = _enter.enter();
     info!("Collecting performance metrics");
     let sys_metrics = state.metrics_exporter.get_metrics().await;
     Ok(Json(MetricsReport {
@@ -81,8 +79,7 @@ pub async fn get_metrics(
     responses((status = 200, description = "System health", body = HealthResponse)),
     tag = "profiling"
 )]
-#[instrument(skip_all)]
-pub async fn get_health(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
+pub async fn get_health(State(state): State<Arc<AppState>>) -> Result<Json<HealthResponse>, AppError> {
     let db_span = TracingService::db_query_span("SELECT 1", "postgres", "PING");
     let _db_enter = db_span.enter();
     let db_healthy = if let Some(ref pool) = state.db {

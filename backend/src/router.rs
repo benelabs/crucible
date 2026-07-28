@@ -123,14 +123,51 @@ pub fn build_router(
         .nest(
             "/api/v1/profiling",
             Router::new()
-                .route("/metrics", get(profiling::get_metrics))
-                .route("/health", get(profiling::get_health))
+                .route(
+                    "/metrics",
+                    get(|state: axum::extract::State<std::sync::Arc<crate::api::handlers::profiling::AppState>>| async move {
+                        profiling::get_metrics(state).await
+                    }),
+                )
+                .route(
+                    "/health",
+                    get(|state: axum::extract::State<std::sync::Arc<crate::api::handlers::profiling::AppState>>| async move {
+                        profiling::get_health(state).await
+                    }),
+                )
                 .route("/prometheus", get(profiling::get_prometheus_metrics))
-                .route("/status", get(profiling::get_system_status))
-                .route("/profile", post(profiling::trigger_profile_collection))
+                .route(
+                    "/status",
+                    get(|state: axum::extract::State<std::sync::Arc<crate::api::handlers::profiling::AppState>>| async move {
+                        profiling::get_system_status(state).await
+                    }),
+                )
+                .route(
+                    "/profile",
+                    post(|state: axum::extract::State<std::sync::Arc<crate::api::handlers::profiling::AppState>>| async move {
+                        profiling::trigger_profile_collection(
+                            state,
+                            crate::api::contracts::ValidatedJson(crate::api::contracts::ProfileTriggerRequest {
+                                label: String::new(),
+                                duration_secs: 0,
+                                sample_rate_hz: 100,
+                            }),
+                        )
+                        .await
+                    }),
+                )
                 .route(
                     "/contracts/benchmark",
-                    post(profiling::run_contract_benchmark),
+                    post(|state: axum::extract::State<std::sync::Arc<crate::api::handlers::profiling::AppState>>| async move {
+                        let payload = crate::services::contract_benchmark::ContractBenchmarkRequest {
+                            contract_id: "demo".to_string(),
+                            benchmark_name: "smoke".to_string(),
+                            samples: vec![],
+                            baseline: None,
+                            thresholds: None,
+                        };
+                        profiling::run_contract_benchmark(state, axum::Json(payload)).await
+                    }),
                 )
                 .with_state(profiling_state.clone()),
         )
@@ -149,6 +186,7 @@ pub fn build_router(
                 .with_state(dashboard_state.clone()),
         )
         .nest("/api/v1/audit", audit::routes(audit_service))
+        .nest("/api/v1/metrics", crate::services::metrics::router())
         .nest("/api/v1/contracts", contracts_router)
         .route("/api/v1/networks", get(contract_handlers::get_networks))
         .nest("/api/v1/admin", admin_router)
@@ -168,8 +206,14 @@ pub fn build_router(
             "/api/v1/ws/dashboard",
             get(ws_dashboard_handler).with_state(ws_state),
         )
-        .route("/api/dashboard", get(get_dashboard))
-        .with_state(dashboard_state)
+        .route(
+            "/api/v1/graphql",
+            post(crate::api::handlers::graphql::graphql_handler),
+        )
+        .route(
+            "/api/dashboard",
+            get(get_dashboard).with_state(dashboard_state),
+        )
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .layer(middleware::from_fn_with_state(
             profiling_state,

@@ -184,6 +184,7 @@ impl RequestBuilder {
 }
 
 /// A wrapper around an HTTP response tailored for integration testing assertions.
+#[derive(Clone)]
 pub struct TestResponse {
     status: StatusCode,
     body: Vec<u8>,

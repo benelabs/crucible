@@ -107,8 +107,8 @@ services:
   # ---------------------------------------------------------------------------
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
       args:
         RUST_VERSION: ${RUST_VERSION:-1.78}
     container_name: crucible-app

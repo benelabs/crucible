@@ -242,10 +242,100 @@ The `AccountHandle` type gives you:
 | `.token_balance(&token)` | `i128` | Balance in a given `MockToken` |
 | `.sign(payload)` | `Vec<u8>` | Sign an arbitrary payload with the account keypair |
 
-Authorization in tests is driven through the environment, not the account handle.
-Call `env.mock_all_auths()` to let every `require_auth()` succeed (the common
-happy-path style used throughout these examples), or `env.mock_auths(&[])` to
-clear authorizations so a protected call is expected to fail.
+Authorization in tests is driven through `MockEnv`:
+
+- `env.mock_all_auths()` — globally bypasses authorization checks for all subsequent calls.
+- `env.with_mock_all_auths(|| { ... })` — bypasses auth for the closure block, then clears authorizations (`env.mock_auths(&[])`).
+- `let _guard = env.mock_all_auths_scoped()` — RAII guard that bypasses auth until dropped.
+- `env.mock_auths(&[...])` — sets specific `MockAuth` entries or clears authorizations when passed `&[]`.
+
+#### Compile-Tested Protected Call Examples
+
+```rust
+use crucible::prelude::*;
+use soroban_sdk::{
+    contract, contractimpl, symbol_short,
+    testutils::{Address as _, AuthorizedFunction, MockAuth, MockAuthInvoke},
+    Address, Env, IntoVal,
+};
+
+#[contract]
+pub struct VaultContract;
+
+#[contractimpl]
+impl VaultContract {
+    pub fn withdraw(env: Env, owner: Address, amount: u64) -> u64 {
+        owner.require_auth();
+        amount
+    }
+}
+
+// 1. Happy-path: Valid authorization (using mock_all_auths or specific MockAuth)
+#[test]
+fn test_withdraw_valid_auth() {
+    let env = MockEnv::default();
+    let contract_id = env.inner().register(VaultContract, ());
+    let client = VaultContractClient::new(env.inner(), &contract_id);
+    let owner = Address::generate(env.inner());
+
+    // Option A: Global mock auth
+    env.mock_all_auths();
+    assert_eq!(client.withdraw(&owner, &100), 100);
+
+    // Option B: Granular MockAuth entry
+    env.mock_auths(&[MockAuth {
+        address: &owner,
+        invoke: &MockAuthInvoke {
+            sub_invocations: &[],
+            function: &AuthorizedFunction::Contract((
+                contract_id.clone(),
+                symbol_short!("withdraw"),
+                (owner.clone(), 100_u64).into_val(env.inner()),
+            )),
+        },
+    }]);
+    assert_eq!(client.withdraw(&owner, &100), 100);
+}
+
+// 2. Negative test: Missing authorization (env.mock_auths(&[]))
+#[test]
+#[should_panic]
+fn test_withdraw_missing_auth_panics() {
+    let env = MockEnv::default();
+    let contract_id = env.inner().register(VaultContract, ());
+    let client = VaultContractClient::new(env.inner(), &contract_id);
+    let owner = Address::generate(env.inner());
+
+    // Explicitly clear authorizations
+    env.mock_auths(&[]);
+    client.withdraw(&owner, &100);
+}
+
+// 3. Negative test: Wrong signer (providing MockAuth for another address)
+#[test]
+#[should_panic]
+fn test_withdraw_wrong_signer_panics() {
+    let env = MockEnv::default();
+    let contract_id = env.inner().register(VaultContract, ());
+    let client = VaultContractClient::new(env.inner(), &contract_id);
+    let owner = Address::generate(env.inner());
+    let attacker = Address::generate(env.inner());
+
+    // Provide auth for attacker when owner is required
+    env.mock_auths(&[MockAuth {
+        address: &attacker,
+        invoke: &MockAuthInvoke {
+            sub_invocations: &[],
+            function: &AuthorizedFunction::Contract((
+                contract_id.clone(),
+                symbol_short!("withdraw"),
+                (owner.clone(), 100_u64).into_val(env.inner()),
+            )),
+        },
+    }]);
+    client.withdraw(&owner, &100);
+}
+```
 
 ---
 

@@ -19,12 +19,10 @@ use tower::ServiceExt;
 
 use backend::api::handlers::profiling::{trigger_profile_collection, AppState};
 use backend::config::{reload::ConfigManager, AppConfig};
-use backend::config::{reload::ConfigManager, AppConfig};
 use backend::services::{
     contract_benchmark::ContractBenchmarkService, error_recovery::ErrorManager,
     log_aggregator::LogAggregator, sys_metrics::MetricsExporter,
 };
-use backend::services::{error_recovery::ErrorManager, sys_metrics::MetricsExporter};
 use redis::Client as RedisClient;
 
 use crate::load::framework::{assert_load_result, LoadConfig, LoadResult};
@@ -35,17 +33,13 @@ use crate::load::framework::{assert_load_result, LoadConfig, LoadResult};
 
 /// Build a test router wired to the `POST /api/profile` handler.
 fn build_app() -> Router {
-    let (log_aggregator, _rx) = backend::services::log_aggregator::LogAggregator::new();
     let (log_aggregator, _receiver) = LogAggregator::new();
     let state = Arc::new(AppState {
         db: None,
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
         config_manager: Arc::new(ConfigManager::new(AppConfig::default())),
-        log_aggregator: Arc::new(backend::services::log_aggregator::LogAggregator::new().0),
-        redis: redis::Client::open("redis://127.0.0.1/").unwrap(),
         log_aggregator: Arc::new(log_aggregator),
-        redis: redis::Client::open("redis://127.0.0.1:1/").unwrap(),
         contract_benchmark_service: Arc::new(ContractBenchmarkService::new()),
         redis: RedisClient::open("redis://127.0.0.1:1/").unwrap(),
     });

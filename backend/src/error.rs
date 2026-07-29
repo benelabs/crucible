@@ -19,6 +19,8 @@ pub struct ErrorResponse {
     pub code: String,
     /// Human-readable error message.
     pub message: String,
+    /// Timestamp of when the error occurred.
+    pub timestamp: String,
 }
 
 /// Application-level error type that unifies all possible error sources.
@@ -201,6 +203,7 @@ impl IntoResponse for AppError {
             Json(ErrorResponse {
                 code: code.to_string(),
                 message,
+                timestamp: chrono::Utc::now().to_rfc3339(),
             }),
         )
             .into_response()
@@ -246,9 +249,11 @@ mod tests {
         let resp = ErrorResponse {
             code: "not_found".into(),
             message: "Resource not found".into(),
+            timestamp: "2026-07-29T16:00:00Z".into(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"code\":\"not_found\""));
         assert!(json.contains("\"message\":\"Resource not found\""));
+        assert!(json.contains("\"timestamp\":\"2026-07-29T16:00:00Z\""));
     }
 }

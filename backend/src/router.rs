@@ -221,6 +221,7 @@ pub fn build_router(
         ))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
+        .fallback(crate::api::errors::api_fallback)
 }
 
 fn build_cors_layer(config: &AppConfig) -> CorsLayer {

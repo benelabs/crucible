@@ -103,8 +103,12 @@ pub async fn get_health(State(state): State<Arc<AppState>>) -> Result<Json<Healt
 }
 
 #[instrument(skip_all)]
-pub async fn get_prometheus_metrics() -> impl IntoResponse {
-    "backend_requests_total 1024\n".to_string()
+pub async fn get_prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let metrics = state.metrics_exporter.get_metrics().await;
+    format!(
+        "backend_requests_total 1024\nprocess_resident_memory_bytes {}\n",
+        metrics.process_resident_memory_bytes
+    )
 }
 
 #[instrument(skip_all)]

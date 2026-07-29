@@ -386,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn test_dashboard_metrics_fields() {
         let state = make_state();
-        state.metrics_exporter.update_metrics(42.0, 2048, 120).await;
+        state.metrics_exporter.update_metrics(42.0, 2048, 120, 4096, 2048).await;
 
         let app = make_app(state);
         let response = app

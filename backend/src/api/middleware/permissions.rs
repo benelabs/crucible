@@ -214,10 +214,11 @@ pub fn require_permission(
                 Some(user) => user.clone(),
                 None => {
                     warn!("No authenticated user in request");
-                    return (
+                    return crate::api::errors::make_error_response(
                         StatusCode::UNAUTHORIZED,
+                        "unauthorized",
                         "Authentication required",
-                    ).into_response();
+                    );
                 }
             };
 
@@ -230,17 +231,19 @@ pub fn require_permission(
                 }
                 Ok(false) => {
                     warn!("Permission denied for user {} on {:?}", user.id, permission);
-                    (
+                    crate::api::errors::make_error_response(
                         StatusCode::FORBIDDEN,
-                        format!("Insufficient permissions: {} on {}", permission.action, permission.resource),
-                    ).into_response()
+                        "forbidden",
+                        &format!("Insufficient permissions: {} on {}", permission.action, permission.resource),
+                    )
                 }
                 Err(e) => {
                     error!("Permission check failed: {:?}", e);
-                    (
+                    crate::api::errors::make_error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal_error",
                         "Permission check failed",
-                    ).into_response()
+                    )
                 }
             }
         })
@@ -257,18 +260,22 @@ pub async fn require_role(
     let user = match request.extensions().get::<AuthUser>() {
         Some(user) => user.clone(),
         None => {
-            return (StatusCode::UNAUTHORIZED, "Authentication required").into_response();
+            return crate::api::errors::make_error_response(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "Authentication required",
+            );
         }
     };
 
     if user.role == required_role || user.role == Role::Admin {
         next.run(request).await
     } else {
-        (
+        crate::api::errors::make_error_response(
             StatusCode::FORBIDDEN,
-            format!("Role {:?} required", required_role),
+            "forbidden",
+            &format!("Role {:?} required", required_role),
         )
-            .into_response()
     }
 }
 

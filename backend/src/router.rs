@@ -25,7 +25,7 @@ use crate::{
         admin, contracts as contract_handlers, coverage, dashboard,
         dashboard::get_dashboard, errors, profiling, sandbox, stellar, ws::ws_dashboard_handler,
     },
-    api::middleware::logging::logging_middleware,
+    api::middleware::{logging::logging_middleware, request_id::request_id_middleware},
     app_state::ApplicationStates,
     config::{
         reload::{handle_get_config, handle_reload, ConfigManager},
@@ -219,6 +219,7 @@ pub fn build_router(
             profiling_state,
             logging_middleware,
         ))
+        .layer(middleware::from_fn(request_id_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
 }

@@ -113,14 +113,14 @@ impl TokenBucketRateLimiter {
                     "#,
                 );
 
-                if let Ok((allowed_int, remaining, capacity)): Result<(i32, u64, u64), _> = script
+                let result: Result<(i32, u64, u64), _> = script
                     .key(&key_name)
                     .arg(self.config.capacity)
                     .arg(self.config.refill_rate_per_sec)
                     .arg(now)
                     .invoke_async(&mut conn)
-                    .await
-                {
+                    .await;
+                if let Ok((allowed_int, remaining, capacity)) = result {
                     return Ok(RateLimitResult {
                         allowed: allowed_int == 1,
                         limit: capacity,

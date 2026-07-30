@@ -25,7 +25,11 @@ use crate::{
         admin, alerts, contracts as contract_handlers, coverage, dashboard,
         dashboard::get_dashboard, errors, profiling, sandbox, stellar, ws::ws_dashboard_handler,
     },
-    api::middleware::{idempotency::idempotency_middleware, logging::logging_middleware},
+    api::middleware::{
+        content_type::require_json_content_type,
+        idempotency::idempotency_middleware,
+        logging::logging_middleware,
+    },
     app_state::ApplicationStates,
     config::{
         reload::{handle_get_config, handle_reload, ConfigManager},
@@ -231,6 +235,7 @@ pub fn build_router(
             profiling_state,
             logging_middleware,
         ))
+        .layer(middleware::from_fn(require_json_content_type))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
 }
@@ -330,5 +335,38 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn build_router_rejects_post_without_json_content_type() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/alerts/ingest")
+                    .method("POST")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    #[tokio::test]
+    async fn build_router_rejects_post_with_text_plain_content_type() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/alerts/ingest")
+                    .method("POST")
+                    .header("Content-Type", "text/plain")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 }

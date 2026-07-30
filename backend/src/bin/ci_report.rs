@@ -8,8 +8,8 @@
 //! cargo run --bin ci-report
 //! ```
 
-use std::io::Write;
 use serde_json::json;
+use std::io::Write;
 
 fn main() -> anyhow::Result<()> {
     // Collect arguments if any
@@ -27,10 +27,10 @@ fn main() -> anyhow::Result<()> {
         "report_type": "cli_output",
         "timestamp": chrono::Utc::now().to_rfc3339()
     });
-    
+
     let json_output = serde_json::to_string_pretty(&report_data)?;
     writeln!(std::io::stdout(), "{}", json_output)?;
-    
+
     Ok(())
 }
 
@@ -46,13 +46,14 @@ mod tests {
             "ci_integration": true,
             "report_type": "cli_output"
         });
-        
+
         let json_str = serde_json::to_string(&report_data).expect("Failed to serialize");
         assert!(json_str.contains("test-project"));
         assert!(json_str.contains("success"));
         assert!(json_str.contains("cli_output"));
-        
-        let parsed: serde_json::Value = serde_json::from_str(&json_str).expect("Failed to parse back to JSON");
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Failed to parse back to JSON");
         assert_eq!(parsed["status"], "success");
     }
 }

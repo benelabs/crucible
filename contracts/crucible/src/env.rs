@@ -200,9 +200,7 @@ impl Stroops {
     )]
     pub fn xlm_frac(xlm: f64) -> Self {
         assert!(xlm >= 0.0, "XLM amount cannot be negative: {}", xlm);
-        let amount = (xlm * 10_000_000.0)
-            .round()
-            as i128;
+        let amount = (xlm * 10_000_000.0).round() as i128;
         assert!(
             amount >= 0,
             "Converted stroops amount is negative, input may have been too small: {}",
@@ -465,7 +463,6 @@ impl EventMatches {
     }
 }
 
-
 impl MockEnv {
     /// Returns the underlying `soroban_sdk::Env`.
     pub fn inner(&self) -> &Env {
@@ -719,7 +716,10 @@ impl MockEnv {
     /// let pool_events = env.events_from_contract(&pool_address);
     /// assert!(!pool_events.is_empty());
     /// ```
-    pub fn events_from_contract(&self, contract_id: &Address) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    pub fn events_from_contract(
+        &self,
+        contract_id: &Address,
+    ) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
         use soroban_sdk::xdr::{self, ScAddress};
         let all_events = self.inner.events().all();
         let mut result = SorobanVec::new(&self.inner);
@@ -749,7 +749,10 @@ impl MockEnv {
     /// let events = env.events_from_contracts(&[&pool_a, &pool_b]);
     /// assert_eq!(events.len(), 1); // only one pool was used
     /// ```
-    pub fn events_from_contracts(&self, contract_ids: &[&Address]) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    pub fn events_from_contracts(
+        &self,
+        contract_ids: &[&Address],
+    ) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
         use soroban_sdk::xdr::{self, ScAddress};
         let all_events = self.inner.events().all();
         let mut result = SorobanVec::new(&self.inner);
@@ -841,7 +844,8 @@ impl MockEnv {
             if event_topics.len() < filter_topics.len() {
                 continue;
             }
-            let matches = crate::event_topic_match::topics_match(&self.inner, &filter_topics, &event_topics);
+            let matches =
+                crate::event_topic_match::topics_match(&self.inner, &filter_topics, &event_topics);
             if matches {
                 let sc_addr = ScAddress::Contract(hash.clone());
                 let contract_id = Address::from_val(&self.inner, &sc_addr);
@@ -1003,13 +1007,7 @@ impl MockEnv {
         // Clear the global auth bypass so it does not leak into later operations.
         self.inner.mock_auths(&[]);
 
-        SimulatedTx::new(
-            fee,
-            instructions,
-            auths,
-            true,
-            Some(result),
-        )
+        SimulatedTx::new(fee, instructions, auths, true, Some(result))
     }
 
     /// Creates a fully independent copy of this environment.
@@ -1070,9 +1068,15 @@ impl MockEnv {
                 } else {
                     None
                 };
-                FailedCallResult { failed: true, message }
+                FailedCallResult {
+                    failed: true,
+                    message,
+                }
             }
-            Ok(()) => FailedCallResult { failed: false, message: None },
+            Ok(()) => FailedCallResult {
+                failed: false,
+                message: None,
+            },
         }
     }
 }
@@ -1170,7 +1174,6 @@ mod tests {
     // Ensure MockEnv does NOT implement Send or Sync.
     static_assertions::assert_not_impl_any!(MockEnv: Send, Sync);
 }
-
 
 /// Builder for constructing a `MockEnv` with custom configuration.
 ///
@@ -1309,17 +1312,24 @@ mod extra_tests {
     #[contractimpl]
     impl TestContract {
         pub fn initialize(env: Env, value: u32) {
-            env.storage().instance().set(&soroban_sdk::symbol_short!("val"), &value);
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::symbol_short!("val"), &value);
         }
 
         pub fn get(env: Env) -> u32 {
-            env.storage().instance().get(&soroban_sdk::symbol_short!("val")).unwrap_or(0)
+            env.storage()
+                .instance()
+                .get(&soroban_sdk::symbol_short!("val"))
+                .unwrap_or(0)
         }
 
         pub fn increment(env: Env) -> u32 {
             let val = Self::get(env.clone());
             let new_val = val + 1;
-            env.storage().instance().set(&soroban_sdk::symbol_short!("val"), &new_val);
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::symbol_short!("val"), &new_val);
             new_val
         }
     }
@@ -1516,10 +1526,7 @@ mod time_advance_tests {
     fn advance_time_by_months_updates_ledger() {
         let env = MockEnv::builder().at_timestamp(JAN_31_2024).build();
         env.advance_time_by_months(1);
-        assert_eq!(
-            env.timestamp(),
-            datetime_to_unix(2024, 2, 29, 12, 30, 45)
-        );
+        assert_eq!(env.timestamp(), datetime_to_unix(2024, 2, 29, 12, 30, 45));
     }
 
     #[test]
@@ -1660,7 +1667,9 @@ mod missing_lookup_tests {
     use soroban_sdk::testutils::Address as _;
 
     #[test]
-    #[should_panic(expected = "Account 'missing' not found. Available accounts: [admin, alice, bob]. Ensure it was registered via MockEnvBuilder or AccountBuilder.")]
+    #[should_panic(
+        expected = "Account 'missing' not found. Available accounts: [admin, alice, bob]. Ensure it was registered via MockEnvBuilder or AccountBuilder."
+    )]
     fn missing_account_shows_available() {
         let env = MockEnv::builder()
             .with_account("admin", Stroops::xlm(10))
@@ -1671,7 +1680,9 @@ mod missing_lookup_tests {
     }
 
     #[test]
-    #[should_panic(expected = "Contract 'alloc::string::String' not registered. Available contracts: [crucible::env::MockEnv]")]
+    #[should_panic(
+        expected = "Contract 'alloc::string::String' not registered. Available contracts: [crucible::env::MockEnv]"
+    )]
     fn missing_contract_shows_available() {
         let env = MockEnv::default();
         let addr = Address::generate(&env.inner);

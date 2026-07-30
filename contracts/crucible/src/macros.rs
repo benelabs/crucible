@@ -44,7 +44,7 @@ macro_rules! assert_reverts {
              Expression : {expr}\n\
              Context    : {ctx}",
             expr = stringify!($expr),
-            ctx  = $msg,
+            ctx = $msg,
         );
     }};
 }
@@ -71,17 +71,16 @@ macro_rules! assert_reverts {
 macro_rules! assert_emitted {
     ($env:expr, $contract_id:expr, $topics:expr, $data:expr) => {{
         extern crate std;
-        use std::string::ToString as _;
         use soroban_sdk::testutils::Events as _;
         use soroban_sdk::IntoVal as _;
         use soroban_sdk::TryFromVal as _;
+        use std::string::ToString as _;
         let __env = $env.inner();
         let __all = __env.events().all();
         let __want_contract: soroban_sdk::Address = $contract_id.clone();
         let __want_topics: soroban_sdk::Vec<soroban_sdk::Val> = ($topics).into_val(__env);
         let __want_data: soroban_sdk::Val = ($data).into_val(__env);
-        let __want_data_xdr =
-            soroban_sdk::xdr::ScVal::try_from_val(__env, &__want_data).unwrap();
+        let __want_data_xdr = soroban_sdk::xdr::ScVal::try_from_val(__env, &__want_data).unwrap();
         let __want_topics_xdr: soroban_sdk::xdr::VecM<soroban_sdk::xdr::ScVal> = __want_topics
             .iter()
             .map(|v| soroban_sdk::xdr::ScVal::try_from_val(__env, &v).unwrap())
@@ -104,15 +103,24 @@ macro_rules! assert_emitted {
              Events emitted by this contract ({count}):\n\
              {actual}",
             contract = __want_contract,
-            topics   = __want_topics,
-            data     = __want_data_xdr,
-            count    = __filtered.events().len(),
-            actual   = {
-                let lines: std::vec::Vec<std::string::String> = __filtered.events().iter().enumerate().map(|(i, ev)| {
-                    let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
-                    std::format!("  [{i}] topics={:?} data={:?}", body.topics, body.data)
-                }).collect();
-                if lines.is_empty() { "  (none)".to_string() } else { lines.join("\n") }
+            topics = __want_topics,
+            data = __want_data_xdr,
+            count = __filtered.events().len(),
+            actual = {
+                let lines: std::vec::Vec<std::string::String> = __filtered
+                    .events()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ev)| {
+                        let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
+                        std::format!("  [{i}] topics={:?} data={:?}", body.topics, body.data)
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    "  (none)".to_string()
+                } else {
+                    lines.join("\n")
+                }
             },
         );
     }};
@@ -130,8 +138,8 @@ macro_rules! assert_emitted {
 macro_rules! assert_not_emitted {
     ($env:expr) => {{
         extern crate std;
-        use std::string::ToString as _;
         use soroban_sdk::testutils::Events as _;
+        use std::string::ToString as _;
         let __events = $env.inner().events().all();
         assert!(
             __events.events().is_empty(),
@@ -141,11 +149,20 @@ macro_rules! assert_not_emitted {
              {list}",
             count = __events.events().len(),
             list = {
-                let lines: std::vec::Vec<std::string::String> = __events.events().iter().enumerate().map(|(i, ev)| {
-                    let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
-                    std::format!("  [{i}] contract={:?} topics={:?} data={:?}",
-                        ev.contract_id, body.topics, body.data)
-                }).collect();
+                let lines: std::vec::Vec<std::string::String> = __events
+                    .events()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ev)| {
+                        let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
+                        std::format!(
+                            "  [{i}] contract={:?} topics={:?} data={:?}",
+                            ev.contract_id,
+                            body.topics,
+                            body.data
+                        )
+                    })
+                    .collect();
                 lines.join("\n")
             },
         );

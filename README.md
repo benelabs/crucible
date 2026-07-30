@@ -723,6 +723,8 @@ cargo test --workspace
 | **Escrow** | [`examples/escrow/src/lib.rs`](examples/escrow/src/lib.rs) | [`examples/escrow/src/test.rs`](examples/escrow/src/test.rs) |
 | **Vesting** | [`examples/vesting/src/lib.rs`](examples/vesting/src/lib.rs) | [`examples/vesting/src/test.rs`](examples/vesting/src/test.rs) |
 
+When adding a new `examples/*` crate, follow the "Adding a New Example Contract" checklist in `CONTRIBUTING.md` so workspace membership, test structure, and docs stay consistent.
+
 ---
 
 ### Testing a Token Contract

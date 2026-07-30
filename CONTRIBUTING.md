@@ -60,6 +60,26 @@ This writes (or overwrites) every snapshot that is exercised during the run. Rev
 
 **Accepting a regression** — if an intentional cost increase exceeds the 5 % default tolerance, re-run with `CRUCIBLE_UPDATE_SNAPSHOTS=1` to record the new baseline, then commit both the code and the updated snapshot.
 
+## Adding a New Example Contract
+
+Before creating a new entry in `examples/`, use the architecture ownership decision tree in `ARCHITECTURE.md` ("Where New Functionality Belongs") to confirm the work belongs in examples and not in `contracts/` or `backend/`.
+
+Use this checklist end-to-end:
+
+- [ ] Create the crate: `cargo new --lib examples/my-example`
+- [ ] Add the crate to workspace members in root `Cargo.toml`:
+      `examples/my-example`
+- [ ] Set `examples/my-example/Cargo.toml` dependencies:
+      - `[dependencies] soroban-sdk = { workspace = true }`
+      - `[dev-dependencies] crucible = { path = "../../contracts/crucible" }`
+- [ ] Set `src/lib.rs` up as a Soroban contract (follow the pattern in `examples/counter/src/lib.rs`)
+- [ ] Add `#[cfg(test)] mod test;` in `src/lib.rs`
+- [ ] Create `src/test.rs` and write tests using `crucible::prelude::*` (follow `examples/counter/src/test.rs`)
+- [ ] Run the example test target: `cargo test -p crucible-example-my-example`
+- [ ] Update the Examples table in root `README.md` with links to `examples/my-example/src/lib.rs` and `examples/my-example/src/test.rs`
+- [ ] Run `cargo fmt --all`, `cargo clippy --workspace -- -D warnings`, and `cargo test --workspace --all-features`
+- [ ] Request review from at least one maintainer before merge
+
 ## Pull Request Process
 
 1. Fork and create a feature branch

@@ -68,7 +68,8 @@ async fn register_worker_hb(conn: &mut ConnectionManager) {
         "uptime_seconds": 0,
     })
     .to_string();
-    let _: () = conn.set("worker:health-test-worker:health", &payload)
+    let _: () = conn
+        .set("worker:health-test-worker:health", &payload)
         .await
         .expect("register_worker_hb");
 }
@@ -117,11 +118,7 @@ async fn readiness_all_healthy() {
     // Register a worker heartbeat so the queue check passes
     register_worker_hb(&mut queue).await;
 
-    let state = HealthState {
-        db,
-        cache,
-        queue,
-    };
+    let state = HealthState { db, cache, queue };
 
     let app = Router::new().nest("/health", health::router().with_state(state));
     let resp = app
@@ -196,11 +193,7 @@ async fn readiness_queue_unavailable() {
     // report "down".
     let queue = cache.clone();
 
-    let state = HealthState {
-        db,
-        cache,
-        queue,
-    };
+    let state = HealthState { db, cache, queue };
 
     let app = Router::new().nest("/health", health::router().with_state(state));
     let resp = app
@@ -217,10 +210,7 @@ async fn readiness_queue_unavailable() {
     let json = body_json(resp).await;
     assert_eq!(json["status"], "degraded");
     assert_eq!(json["checks"]["queue"]["status"], "down");
-    assert_eq!(
-        json["checks"]["queue"]["message"],
-        "workers unavailable"
-    );
+    assert_eq!(json["checks"]["queue"]["message"], "workers unavailable");
 }
 
 // ---------------------------------------------------------------------------
@@ -273,10 +263,7 @@ async fn readiness_redis_unavailable() {
     let json = body_json(resp).await;
     assert_eq!(json["status"], "degraded");
     assert_eq!(json["checks"]["redis"]["status"], "down");
-    assert_eq!(
-        json["checks"]["redis"]["message"],
-        "connection unavailable"
-    );
+    assert_eq!(json["checks"]["redis"]["message"], "connection unavailable");
     assert_eq!(json["checks"]["queue"]["status"], "down");
 }
 

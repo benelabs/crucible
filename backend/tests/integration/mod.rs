@@ -6,6 +6,7 @@
 pub mod api_profile_test;
 pub mod api_status_test;
 pub mod health_test;
+pub mod idempotency_ingest_test;
 pub mod services_test;
 pub mod workers_test;
 

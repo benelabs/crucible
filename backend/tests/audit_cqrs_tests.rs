@@ -1,4 +1,4 @@
-use backend::services::audit::{AuditDomainEvent, AuditEventRequest, compute_hash};
+use backend::services::audit::{compute_hash, AuditDomainEvent, AuditEventRequest};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -18,7 +18,8 @@ fn test_audit_domain_event_serialization() {
     };
 
     let serialized = serde_json::to_string(&event).expect("Should serialize domain event");
-    let deserialized: AuditDomainEvent = serde_json::from_str(&serialized).expect("Should deserialize domain event");
+    let deserialized: AuditDomainEvent =
+        serde_json::from_str(&serialized).expect("Should deserialize domain event");
 
     assert_eq!(deserialized.event_id, event_id);
     assert_eq!(deserialized.event_type, "USER_LOGIN");

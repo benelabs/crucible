@@ -32,22 +32,24 @@ where
 // ---------------------------------------------------------------------------
 
 fn arb_rate_limit_config() -> impl Strategy<Value = RateLimitConfig> {
-    (any::<u64>(), any::<u64>(), any::<u64>()).prop_map(|(capacity, refill_rate, ttl_secs)| RateLimitConfig {
-        capacity,
-        refill_rate_per_sec: refill_rate,
-        ttl: Duration::from_secs(ttl_secs % 86400),
+    (any::<u64>(), any::<u64>(), any::<u64>()).prop_map(|(capacity, refill_rate, ttl_secs)| {
+        RateLimitConfig {
+            capacity,
+            refill_rate_per_sec: refill_rate,
+            ttl: Duration::from_secs(ttl_secs % 86400),
+        }
     })
 }
 
 fn arb_rate_limit_result() -> impl Strategy<Value = RateLimitResult> {
-    (any::<bool>(), any::<u64>(), any::<u64>(), any::<u64>()).prop_map(|(allowed, limit, remaining, reset_secs)| {
-        RateLimitResult {
+    (any::<bool>(), any::<u64>(), any::<u64>(), any::<u64>()).prop_map(
+        |(allowed, limit, remaining, reset_secs)| RateLimitResult {
             allowed,
             limit,
             remaining,
             reset_secs,
-        }
-    })
+        },
+    )
 }
 
 fn arb_compilation_result() -> impl Strategy<Value = CompilationResult> {
@@ -59,14 +61,18 @@ fn arb_compilation_result() -> impl Strategy<Value = CompilationResult> {
         any::<usize>(),
         any::<i64>(),
     )
-        .prop_map(|(build_id, status, logs, wasm_hash, wasm_size_bytes, compile_time_ms)| CompilationResult {
-            build_id,
-            status,
-            logs,
-            wasm_hash,
-            wasm_size_bytes,
-            compile_time_ms,
-        })
+        .prop_map(
+            |(build_id, status, logs, wasm_hash, wasm_size_bytes, compile_time_ms)| {
+                CompilationResult {
+                    build_id,
+                    status,
+                    logs,
+                    wasm_hash,
+                    wasm_size_bytes,
+                    compile_time_ms,
+                }
+            },
+        )
 }
 
 fn arb_metrics_report() -> impl Strategy<Value = MetricsReport> {
@@ -78,7 +84,13 @@ fn arb_metrics_report() -> impl Strategy<Value = MetricsReport> {
         any::<u32>(),
     )
         .prop_map(
-            |(uptime_secs, memory_usage_bytes, active_requests, error_rate, ledger_ingestion_latency_ms)| {
+            |(
+                uptime_secs,
+                memory_usage_bytes,
+                active_requests,
+                error_rate,
+                ledger_ingestion_latency_ms,
+            )| {
                 MetricsReport {
                     uptime_secs,
                     memory_usage_bytes,
@@ -119,13 +131,15 @@ fn arb_security_report() -> impl Strategy<Value = SecurityReport> {
         0..1800000000i64,
         any::<bool>(),
     )
-        .prop_map(|(contract_name, findings, risk_score, timestamp_sec, passed)| SecurityReport {
-            contract_name,
-            findings,
-            risk_score,
-            scanned_at: Utc.timestamp_opt(timestamp_sec, 0).unwrap(),
-            passed,
-        })
+        .prop_map(
+            |(contract_name, findings, risk_score, timestamp_sec, passed)| SecurityReport {
+                contract_name,
+                findings,
+                risk_score,
+                scanned_at: Utc.timestamp_opt(timestamp_sec, 0).unwrap(),
+                passed,
+            },
+        )
 }
 
 fn arb_dashboard_metrics() -> impl Strategy<Value = DashboardMetrics> {
@@ -137,7 +151,13 @@ fn arb_dashboard_metrics() -> impl Strategy<Value = DashboardMetrics> {
         0..1800000000i64,
     )
         .prop_map(
-            |(total_contracts, total_transactions, avg_processing_time_ms, failed_transactions_24h, ts)| {
+            |(
+                total_contracts,
+                total_transactions,
+                avg_processing_time_ms,
+                failed_transactions_24h,
+                ts,
+            )| {
                 DashboardMetrics {
                     total_contracts,
                     total_transactions,
@@ -156,12 +176,14 @@ fn arb_contract_stats() -> impl Strategy<Value = ContractStats> {
         proptest::option::of((0..1800000000i64).prop_map(|ts| Utc.timestamp_opt(ts, 0).unwrap())),
         (0..10000u64).prop_map(|n| n as f64 / 10.0),
     )
-        .prop_map(|(contract_id, invocation_count, last_invoked, avg_gas_cost)| ContractStats {
-            contract_id,
-            invocation_count,
-            last_invoked,
-            avg_gas_cost,
-        })
+        .prop_map(
+            |(contract_id, invocation_count, last_invoked, avg_gas_cost)| ContractStats {
+                contract_id,
+                invocation_count,
+                last_invoked,
+                avg_gas_cost,
+            },
+        )
 }
 
 fn arb_audit_event_request() -> impl Strategy<Value = AuditEventRequest> {
@@ -171,12 +193,14 @@ fn arb_audit_event_request() -> impl Strategy<Value = AuditEventRequest> {
         proptest::option::of("[a-zA-Z0-9_-]+".prop_map(String::from)),
         "[a-zA-Z0-9_]+".prop_map(|s| serde_json::json!({ "msg": s })),
     )
-        .prop_map(|(aggregate_id, event_type, user_id, details)| AuditEventRequest {
-            aggregate_id,
-            event_type,
-            user_id,
-            details,
-        })
+        .prop_map(
+            |(aggregate_id, event_type, user_id, details)| AuditEventRequest {
+                aggregate_id,
+                event_type,
+                user_id,
+                details,
+            },
+        )
 }
 
 fn arb_audit_event_record() -> impl Strategy<Value = AuditEventRecord> {

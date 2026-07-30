@@ -140,7 +140,9 @@ impl MockToken {
         let admin = env
             .inner()
             .register(soroban_sdk::testutils::MockAuthContract {}, ());
-        let sac = env.inner().register_stellar_asset_contract_v2(admin.clone());
+        let sac = env
+            .inner()
+            .register_stellar_asset_contract_v2(admin.clone());
         let address = sac.address();
         env.set_xlm_token_address(address.clone());
 
@@ -195,7 +197,9 @@ impl MockToken {
         let admin = env
             .inner()
             .register(soroban_sdk::testutils::MockAuthContract {}, ());
-        let sac = env.inner().register_stellar_asset_contract_v2(admin.clone());
+        let sac = env
+            .inner()
+            .register_stellar_asset_contract_v2(admin.clone());
         let address = sac.address();
 
         Self {

@@ -84,7 +84,8 @@ impl ProxyContract {
             .set(&DataKey::Implementation, &new_wasm_hash);
 
         // Execute live WASM update for canonical address
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
 
         env.events()
             .publish((Symbol::new(&env, "upgrade"),), new_wasm_hash);

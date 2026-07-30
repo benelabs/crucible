@@ -363,6 +363,10 @@ let balance = usdc.balance(&env.account("alice").address());
 // Admin operations
 usdc.set_admin(&new_admin_address);
 usdc.clawback(&target_address, &amount);
+
+// Convenience helpers for full balance operations
+usdc.clawback_all(&target_address); // Removes all tokens (no manual balance lookup)
+usdc.burn_all(&holder_address);    // Burns entire balance
 ```
 
 `MockToken` implements the full SEP-41 / SAC interface, so you can pass its `Address` directly into any contract that expects a token contract address.

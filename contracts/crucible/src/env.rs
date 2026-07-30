@@ -582,6 +582,11 @@ impl MockEnv {
     /// # Panics
     /// Panics if the timestamp overflows.
     pub fn advance_time(&self, duration: Duration) {
+        // Guard: zero duration is a no-op
+        if duration.as_seconds() == 0 {
+            return;
+        }
+
         let info = self.inner.ledger().get();
         let new_ts = info
             .timestamp
@@ -639,6 +644,11 @@ impl MockEnv {
 
     /// Advance the ledger sequence number by n.
     pub fn advance_sequence(&self, n: u32) {
+        // Guard: zero is a no-op
+        if n == 0 {
+            return;
+        }
+
         let info = self.inner.ledger().get();
         self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
             sequence_number: info.sequence_number + n,
@@ -1517,7 +1527,7 @@ mod extra_tests {
 #[cfg(test)]
 mod time_advance_tests {
     use super::*;
-    use crate::time::{add_months, datetime_to_unix};
+    use crate::time_helpers::{add_months, datetime_to_unix};
 
     const JAN_31_2024: u64 = 1_706_704_245;
     const MAR_15_2024: u64 = 1_710_489_600;
@@ -1541,6 +1551,36 @@ mod time_advance_tests {
         let env = MockEnv::builder().at_timestamp(MAR_15_2024).build();
         env.advance_time_by_months(6);
         assert_eq!(env.timestamp(), add_months(MAR_15_2024, 6));
+    }
+
+    #[test]
+    fn advance_time_zero_duration_is_noop() {
+        let env = MockEnv::builder()
+            .at_timestamp(1_700_000_000)
+            .build();
+        
+        // Verify initial state
+        assert_eq!(env.timestamp(), 1_700_000_000);
+        
+        // Advance by zero using Duration::ZERO equivalent
+        env.advance_time(Duration::days(0));
+        
+        // Timestamp should remain unchanged
+        assert_eq!(env.timestamp(), 1_700_000_000);
+        
+        // Also test with Duration::seconds(0)
+        env.advance_time(Duration::seconds(0));
+        assert_eq!(env.timestamp(), 1_700_000_000);
+    }
+
+    #[test]
+    fn advance_sequence_zero_is_noop() {
+        let env = MockEnv::builder().build();
+        let initial_seq = env.ledger_sequence();
+        
+        env.advance_sequence(0);
+        
+        assert_eq!(env.ledger_sequence(), initial_seq);
     }
 }
 

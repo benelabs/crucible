@@ -1,0 +1,97 @@
+name: Crucible Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'contracts/crucible/**'
+      - 'backend/benches/**'
+      - '.github/workflows/bench.yml'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  benchmark:
+    name: Run Criterion Benchmarks
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bench-
+
+      - name: Run benchmarks
+        run: |
+          cargo bench --workspace -- --output-format bencher | tee bench_output.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: |
+            bench_output.txt
+            target/criterion/**/*
+          retention-days: 90
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: Crucible Benchmarks
+          tool: 'cargo'
+          output-file-path: bench_output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          # Save benchmark data to gh-pages branch
+          alert-threshold: '150%'
+          comment-on-alert: true
+          fail-on-alert: false
+          alert-comment-cc-users: '@benelabs'
+
+      - name: Comment benchmark summary on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('bench_output.txt', 'utf8');
+            const lines = output.split('\n').slice(0, 50); // First 50 lines
+            const body = `## 📊 Benchmark Results\n\n\`\`\`\n${lines.join('\n')}\n\`\`\`\n\nFull results available in workflow artifacts.`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Generate benchmark report summary
+        run: |
+          echo "## Benchmark Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          head -n 30 bench_output.txt >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Full benchmark results uploaded as artifacts" >> $GITHUB_STEP_SUMMARY

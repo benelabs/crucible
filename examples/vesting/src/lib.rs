@@ -1,6 +1,8 @@
 #![no_std]
 #![allow(deprecated)]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, panic_with_error, token, Address, Env};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, panic_with_error, token, Address, Env,
+};
 
 /// Persistent state for the vesting schedule.
 #[contracttype]

@@ -6,6 +6,7 @@ description = "Backend API server for the Crucible smart contract testing platfo
 license = "MIT"
 authors = ["Crucible Contributors"]
 publish = false
+default-run = "backend"
 
 [[bin]]
 name = "backend"
@@ -100,6 +101,7 @@ http = "1"
 http-body-util = "0.1"
 toml = "0.8"
 temp-env = "0.3"
+prometheus = "0.14.0"
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
@@ -110,5 +112,7 @@ hyper = { version = "1.0", features = ["full"] }
 mime = "0.3"
 mockall = "0.15"
 criterion = { version = "0.5", features = ["async_tokio"] }
+proptest = "1.5.0"
+
 
 

@@ -1,0 +1,16 @@
+{
+  "short_name": "Crucible",
+  "name": "Crucible Smart Contract Dashboard",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0d1117",
+  "theme_color": "#1f6feb",
+  "display": "standalone",
+  "orientation": "portrait"
+}

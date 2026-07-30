@@ -135,7 +135,8 @@ fn test_router_route_transfer_moves_tokens() {
     ctx.token.mint(&ctx.alice.address(), 1_000_i128);
 
     ctx.env.mock_all_auths();
-    ctx.router().route_transfer(&ctx.alice.address(), &ctx.bob.address(), &400_i128);
+    ctx.router()
+        .route_transfer(&ctx.alice.address(), &ctx.bob.address(), &400_i128);
 
     assert_eq!(ctx.token.balance(&ctx.alice), 600_i128);
     assert_eq!(ctx.token.balance(&ctx.bob), 400_i128);
@@ -147,7 +148,8 @@ fn test_router_route_transfer_emits_event() {
     ctx.token.mint(&ctx.alice.address(), 500_i128);
 
     ctx.env.mock_all_auths();
-    ctx.router().route_transfer(&ctx.alice.address(), &ctx.bob.address(), &500_i128);
+    ctx.router()
+        .route_transfer(&ctx.alice.address(), &ctx.bob.address(), &500_i128);
 
     assert_emitted!(ctx.env, ctx.router_id, (symbol_short!("routed"),), 500_i128);
 }
@@ -294,7 +296,8 @@ fn test_transfer_insufficient_balance_reverts() {
     // Alice has no tokens — transfer must fail.
     ctx.env.mock_all_auths();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.agg().aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &1_i128);
+        ctx.agg()
+            .aggregate_transfer(&ctx.alice.address(), &ctx.bob.address(), &1_i128);
     }));
     assert!(result.is_err());
     // Total routed must remain zero.

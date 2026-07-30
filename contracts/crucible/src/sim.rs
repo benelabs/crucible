@@ -8,7 +8,6 @@
 /// without committing the state changes.
 use soroban_sdk::Address;
 
-
 pub struct SimulatedTx<T> {
     fee: i64,
     instructions: u64,
@@ -261,9 +260,7 @@ mod extra_tests {
             .with_account("alice", Stroops::xlm(10_000))
             .build();
 
-        let inspected = env.simulate_inspect(|| {
-            env.account("alice").address()
-        });
+        let inspected = env.simulate_inspect(|| env.account("alice").address());
 
         assert!(inspected.would_succeed());
         assert!(inspected.fee() >= 0);

@@ -23,6 +23,8 @@ pub mod error_recovery;
 pub mod event_indexer;
 pub mod feature_flags;
 pub mod gas_optimizer;
+pub mod grpc;
+pub mod http_metrics;
 pub mod log_aggregator;
 pub mod log_alerts;
 pub mod metrics;

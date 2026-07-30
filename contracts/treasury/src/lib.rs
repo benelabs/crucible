@@ -9,9 +9,10 @@ use soroban_sdk::{
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DataKey {
-    Admins,   // Vec<Address>
-    Quorum,   // u32
-    Balances, // Map<(Address, Address), i128>
+    Admins,          // Vec<Address>
+    Quorum,          // u32
+    Balances,        // Map<(Address, Address), i128>
+    ReentrancyGuard, // bool lock
 }
 
 #[contracterror]
@@ -29,6 +30,8 @@ pub enum ContractError {
     InvalidQuorum = 6,
     /// The admins vector contained duplicate addresses.
     DuplicateAdmin = 7,
+    /// Reentrancy guard triggered - reentrant call forbidden.
+    ReentrancyGuardLocked = 8,
 }
 
 #[contract]
@@ -103,9 +106,31 @@ impl Treasury {
             .publish((symbol_short!("deposit"),), (depositor, token, amount));
     }
 
+    fn lock_guard(env: &Env) {
+        let is_locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyGuard)
+            .unwrap_or(false);
+        if is_locked {
+            panic_with_error!(env, ContractError::ReentrancyGuardLocked);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &true);
+    }
+
+    fn unlock_guard(env: &Env) {
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &false);
+    }
+
     /// Withdraw tokens from the treasury to a destination address.
     /// `signers` must include >= quorum admin addresses, each of which must authorize.
     pub fn withdraw(env: Env, to: Address, token: Address, amount: i128, signers: Vec<Address>) {
+        Self::lock_guard(&env);
+
         // Require authorization from every signer before checking quorum.
         // This prevents passing arbitrary admin addresses without real signatures.
         for s in signers.iter() {
@@ -122,6 +147,7 @@ impl Treasury {
             }
         }
         if valid < quorum {
+            Self::unlock_guard(&env);
             panic_with_error!(&env, ContractError::InsufficientQuorum);
         }
         // Treasury address is the contract's own address
@@ -131,6 +157,7 @@ impl Treasury {
         let key = (treasury_addr.clone(), token.clone());
         let current = balances.get(key.clone()).unwrap_or(0);
         if current < amount {
+            Self::unlock_guard(&env);
             panic_with_error!(&env, ContractError::InsufficientBalance);
         }
         let new_balance = current - amount;
@@ -139,6 +166,8 @@ impl Treasury {
         env.storage().instance().set(&DataKey::Balances, &balances);
         env.events()
             .publish((symbol_short!("withdraw"),), (to, token, amount));
+
+        Self::unlock_guard(&env);
     }
 
     /// Query the balance of an account for a given token.
@@ -146,5 +175,51 @@ impl Treasury {
         let balances: Map<(Address, Address), i128> =
             env.storage().instance().get(&DataKey::Balances).unwrap();
         balances.get((account, token)).unwrap_or(0)
+    }
+
+    /// Execute a flash loan. Borrows `amount` of `token` to `borrower`.
+    /// The borrower must repay `amount + fee` within the same transaction scope.
+    pub fn flash_loan(env: Env, borrower: Address, token: Address, amount: i128) {
+        Self::lock_guard(&env);
+        borrower.require_auth();
+
+        if amount <= 0 {
+            Self::unlock_guard(&env);
+            panic_with_error!(&env, ContractError::InsufficientBalance);
+        }
+
+        let treasury_addr = env.current_contract_address();
+        let mut balances: Map<(Address, Address), i128> =
+            env.storage().instance().get(&DataKey::Balances).unwrap();
+        let key = (treasury_addr.clone(), token.clone());
+        let current = balances.get(key.clone()).unwrap_or(0);
+        if current < amount {
+            Self::unlock_guard(&env);
+            panic_with_error!(&env, ContractError::InsufficientBalance);
+        }
+
+        // Calculate 0.1% fee (minimum 1 unit)
+        let mut fee = amount / 1000;
+        if fee == 0 {
+            fee = 1;
+        }
+
+        // Transfer funds from treasury to borrower
+        token::Client::new(&env, &token).transfer(&treasury_addr, &borrower, &amount);
+
+        // Repay funds + fee from borrower back to treasury
+        token::Client::new(&env, &token).transfer(&borrower, &treasury_addr, &(amount + fee));
+
+        // Update internal accounting with collected fee
+        let new_balance = current + fee;
+        balances.set(key.clone(), new_balance);
+        env.storage().instance().set(&DataKey::Balances, &balances);
+
+        env.events().publish(
+            (symbol_short!("flashloan"),),
+            (borrower, token, amount, fee),
+        );
+
+        Self::unlock_guard(&env);
     }
 }

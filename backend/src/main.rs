@@ -14,7 +14,6 @@ use utoipa::OpenApi;
 
 use backend::{
     api::handlers::{contracts, dashboard, errors, profiling, sandbox, stellar},
-    services::audit,
     api::middleware::logging::logging_middleware,
     app_state::{build_application_states, ApplicationStates, SharedServices},
     config::{
@@ -23,6 +22,7 @@ use backend::{
     },
     jobs::{monitor_transaction, TransactionMonitorJob},
     router::build_router,
+    services::audit,
     services::{
         contract_benchmark::ContractBenchmarkService,
         error_recovery::ErrorManager,
@@ -73,6 +73,8 @@ struct ApiDoc;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    dotenvy::dotenv().ok();
+
     let env = Environment::from_env();
     let config = AppConfig::load(env).expect("Failed to load configuration");
 
@@ -139,8 +141,7 @@ async fn main() -> Result<(), anyhow::Error> {
         config_manager: config_manager.clone(),
     };
 
-    let states =
-        build_application_states(db_pool.clone(), redis_client.clone(), &shared_services);
+    let states = build_application_states(db_pool.clone(), redis_client.clone(), &shared_services);
 
     let app = build_router(
         states,
@@ -190,4 +191,3 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 }
-

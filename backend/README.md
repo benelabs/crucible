@@ -22,7 +22,7 @@ High-performance Rust backend for the Crucible smart contract testing platform, 
 ### Health & Observability
 - `GET /health/live` - Liveness probe for process health.
 - `GET /health/ready` - Readiness probe for PostgreSQL + Redis connectivity.
-- `GET /metrics` - Prometheus metrics exposition endpoint.
+- `GET /metrics` - Prometheus metrics exposition endpoint, including `http_request_duration_seconds` histogram and `http_requests_total` counter labeled by `route`, `method`, and `status`.
 
 ### Rules Management
 - `GET /api/alerts/rules` - List all alerting rules.
@@ -31,6 +31,12 @@ High-performance Rust backend for the Crucible smart contract testing platform, 
 
 ### Log Ingestion
 - `POST /api/alerts/ingest` - Ingest a log entry for pattern matching.
+  - Optional header: `Idempotency-Key: <client-generated-key>`
+  - Requests with the same key return the cached `200 OK` response for 24 hours.
+
+### Metrics Notes
+- Route labels use Axum matched route templates (for example, `/api/v1/audit/reports/:id`) and never raw URL paths, preventing cardinality explosions.
+- Use the Grafana panel definition at `docs/observability/http-latency-panel.json` for p50/p95/p99 route latency visualization.
 
 ### Security Audit Report Viewer
 - `GET /api/v1/audit/reports` — List recent audit events. Supports optional `event_type` and `limit` query parameters.

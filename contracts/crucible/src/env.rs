@@ -200,9 +200,7 @@ impl Stroops {
     )]
     pub fn xlm_frac(xlm: f64) -> Self {
         assert!(xlm >= 0.0, "XLM amount cannot be negative: {}", xlm);
-        let amount = (xlm * 10_000_000.0)
-            .round()
-            as i128;
+        let amount = (xlm * 10_000_000.0).round() as i128;
         assert!(
             amount >= 0,
             "Converted stroops amount is negative, input may have been too small: {}",
@@ -286,6 +284,182 @@ impl CapturedEvent {
     /// ```
     pub fn data_as<T: FromVal<Env, Val>>(&self) -> T {
         T::from_val(&self.env, &self.data)
+    }
+}
+
+/// Wrapper around matching events returned by `env.events_matching()` to provide
+/// ergonomic access, filtering, conversion, and testing assertions.
+#[derive(Clone)]
+pub struct EventMatches {
+    pub(crate) env: Env,
+    pub(crate) items: SorobanVec<(Address, SorobanVec<Val>, Val)>,
+}
+
+impl std::fmt::Debug for EventMatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventMatches")
+            .field("count", &self.items.len())
+            .field("events", &self.items)
+            .finish()
+    }
+}
+
+impl std::ops::Deref for EventMatches {
+    type Target = SorobanVec<(Address, SorobanVec<Val>, Val)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
+impl PartialEq for EventMatches {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items
+    }
+}
+
+impl Eq for EventMatches {}
+
+impl PartialEq<SorobanVec<(Address, SorobanVec<Val>, Val)>> for EventMatches {
+    fn eq(&self, other: &SorobanVec<(Address, SorobanVec<Val>, Val)>) -> bool {
+        &self.items == other
+    }
+}
+
+impl PartialEq<EventMatches> for SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    fn eq(&self, other: &EventMatches) -> bool {
+        self == &other.items
+    }
+}
+
+impl EventMatches {
+    /// Creates a new `EventMatches` wrapper.
+    pub fn new(env: Env, items: SorobanVec<(Address, SorobanVec<Val>, Val)>) -> Self {
+        Self { env, items }
+    }
+
+    /// Returns the underlying Soroban `Env`.
+    pub fn env(&self) -> &Env {
+        &self.env
+    }
+
+    /// Returns a reference to the inner SorobanVec.
+    pub fn inner(&self) -> &SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        &self.items
+    }
+
+    /// Consumes self and returns the inner SorobanVec.
+    pub fn into_inner(self) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        self.items
+    }
+
+    /// Returns the number of matched events.
+    pub fn len(&self) -> usize {
+        self.items.len() as usize
+    }
+
+    /// Returns true if no events matched.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Returns the event tuple at the specified index, if present.
+    pub fn get_event(&self, index: u32) -> Option<(Address, SorobanVec<Val>, Val)> {
+        if index < self.items.len() {
+            Some(self.items.get(index).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Returns the first matched event tuple, if any.
+    pub fn first_event(&self) -> Option<(Address, SorobanVec<Val>, Val)> {
+        self.get_event(0)
+    }
+
+    /// Returns the last matched event tuple, if any.
+    pub fn last_event(&self) -> Option<(Address, SorobanVec<Val>, Val)> {
+        let len = self.items.len();
+        if len > 0 {
+            Some(self.items.get(len - 1).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Filter matched events to only those emitted by the specified contract address.
+    pub fn by_contract(&self, contract: &Address) -> Self {
+        let mut filtered = SorobanVec::new(&self.env);
+        for item in self.items.iter() {
+            if item.0 == *contract {
+                filtered.push_back(item);
+            }
+        }
+        Self::new(self.env.clone(), filtered)
+    }
+
+    /// Decodes the event data at `index` into typed Rust value using `FromVal`.
+    pub fn data_as<D: FromVal<Env, Val>>(&self, index: u32) -> D {
+        let event = self.items.get(index).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::data_as index {} out of bounds (len {})",
+                index,
+                self.items.len()
+            )
+        });
+        D::from_val(&self.env, &event.2)
+    }
+
+    /// Decodes the topic at `topic_idx` of event at `event_idx` into typed Rust value using `FromVal`.
+    pub fn topic_as<T: FromVal<Env, Val>>(&self, event_idx: u32, topic_idx: u32) -> T {
+        let event = self.items.get(event_idx).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::topic_as event index {} out of bounds (len {})",
+                event_idx,
+                self.items.len()
+            )
+        });
+        let topic_val = event.1.get(topic_idx).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::topic_as topic index {} out of bounds (topics len {})",
+                topic_idx,
+                event.1.len()
+            )
+        });
+        T::from_val(&self.env, &topic_val)
+    }
+
+    /// Convert matches into a `Vec<CapturedEvent>` for typed inspection.
+    pub fn to_captured(&self) -> std::vec::Vec<CapturedEvent> {
+        let mut result = std::vec::Vec::with_capacity(self.len());
+        for item in self.items.iter() {
+            result.push(CapturedEvent {
+                env: self.env.clone(),
+                contract: item.0,
+                topics: item.1,
+                data: item.2,
+            });
+        }
+        result
+    }
+
+    /// Assert that at least one matching event was emitted.
+    pub fn assert_emitted(&self) {
+        assert!(
+            !self.is_empty(),
+            "Expected at least one matching event, but none were emitted"
+        );
+    }
+
+    /// Assert that exactly `expected` matching events were emitted.
+    pub fn assert_count(&self, expected: usize) {
+        assert_eq!(
+            self.len(),
+            expected,
+            "Expected {} matching event(s), but found {}",
+            expected,
+            self.len()
+        );
     }
 }
 
@@ -404,11 +578,23 @@ impl MockEnv {
     }
 
     /// Advance the ledger timestamp by a duration.
+    ///
+    /// # Panics
+    /// Panics if the timestamp overflows.
     pub fn advance_time(&self, duration: Duration) {
+        // Guard: zero duration is a no-op
+        if duration.as_seconds() == 0 {
+            return;
+        }
+
         let info = self.inner.ledger().get();
+        let new_ts = info
+            .timestamp
+            .checked_add(duration.as_seconds())
+            .expect("timestamp overflow in advance_time");
         self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
             sequence_number: info.sequence_number,
-            timestamp: info.timestamp + duration.as_seconds(),
+            timestamp: new_ts,
             protocol_version: info.protocol_version,
             base_reserve: info.base_reserve,
             network_id: info.network_id,
@@ -458,6 +644,11 @@ impl MockEnv {
 
     /// Advance the ledger sequence number by n.
     pub fn advance_sequence(&self, n: u32) {
+        // Guard: zero is a no-op
+        if n == 0 {
+            return;
+        }
+
         let info = self.inner.ledger().get();
         self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
             sequence_number: info.sequence_number + n,
@@ -535,7 +726,10 @@ impl MockEnv {
     /// let pool_events = env.events_from_contract(&pool_address);
     /// assert!(!pool_events.is_empty());
     /// ```
-    pub fn events_from_contract(&self, contract_id: &Address) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    pub fn events_from_contract(
+        &self,
+        contract_id: &Address,
+    ) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
         use soroban_sdk::xdr::{self, ScAddress};
         let all_events = self.inner.events().all();
         let mut result = SorobanVec::new(&self.inner);
@@ -565,7 +759,10 @@ impl MockEnv {
     /// let events = env.events_from_contracts(&[&pool_a, &pool_b]);
     /// assert_eq!(events.len(), 1); // only one pool was used
     /// ```
-    pub fn events_from_contracts(&self, contract_ids: &[&Address]) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    pub fn events_from_contracts(
+        &self,
+        contract_ids: &[&Address],
+    ) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
         use soroban_sdk::xdr::{self, ScAddress};
         let all_events = self.inner.events().all();
         let mut result = SorobanVec::new(&self.inner);
@@ -584,10 +781,10 @@ impl MockEnv {
         result
     }
 
-    /// Returns events matching the given topics.
+    /// Returns events matching the given topics wrapped in ergonomic [`EventMatches`].
     ///
-    /// Updated for Soroban SDK v25.x ContractEvents compatibility.
-    pub fn events_matching<T>(&self, topics: T) -> SorobanVec<(Address, SorobanVec<Val>, Val)>
+    /// Updated for Soroban SDK v25.x ContractEvents compatibility and programmatic inspection ergonomics.
+    pub fn events_matching<T>(&self, topics: T) -> EventMatches
     where
         T: IntoVal<Env, SorobanVec<Val>>,
     {
@@ -617,7 +814,7 @@ impl MockEnv {
                 matching.push_back((contract_id, event_topics, data));
             }
         }
-        matching
+        EventMatches::new(self.inner.clone(), matching)
     }
 
     /// Returns events matching the given topics as typed [`CapturedEvent`] wrappers.
@@ -657,7 +854,8 @@ impl MockEnv {
             if event_topics.len() < filter_topics.len() {
                 continue;
             }
-            let matches = crate::event_topic_match::topics_match(&self.inner, &filter_topics, &event_topics);
+            let matches =
+                crate::event_topic_match::topics_match(&self.inner, &filter_topics, &event_topics);
             if matches {
                 let sc_addr = ScAddress::Contract(hash.clone());
                 let contract_id = Address::from_val(&self.inner, &sc_addr);
@@ -819,13 +1017,7 @@ impl MockEnv {
         // Clear the global auth bypass so it does not leak into later operations.
         self.inner.mock_auths(&[]);
 
-        SimulatedTx::new(
-            fee,
-            instructions,
-            auths,
-            true,
-            Some(result),
-        )
+        SimulatedTx::new(fee, instructions, auths, true, Some(result))
     }
 
     /// Creates a fully independent copy of this environment.
@@ -886,9 +1078,15 @@ impl MockEnv {
                 } else {
                     None
                 };
-                FailedCallResult { failed: true, message }
+                FailedCallResult {
+                    failed: true,
+                    message,
+                }
             }
-            Ok(()) => FailedCallResult { failed: false, message: None },
+            Ok(()) => FailedCallResult {
+                failed: false,
+                message: None,
+            },
         }
     }
 }
@@ -986,7 +1184,6 @@ mod tests {
     // Ensure MockEnv does NOT implement Send or Sync.
     static_assertions::assert_not_impl_any!(MockEnv: Send, Sync);
 }
-
 
 /// Builder for constructing a `MockEnv` with custom configuration.
 ///
@@ -1125,17 +1322,24 @@ mod extra_tests {
     #[contractimpl]
     impl TestContract {
         pub fn initialize(env: Env, value: u32) {
-            env.storage().instance().set(&soroban_sdk::symbol_short!("val"), &value);
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::symbol_short!("val"), &value);
         }
 
         pub fn get(env: Env) -> u32 {
-            env.storage().instance().get(&soroban_sdk::symbol_short!("val")).unwrap_or(0)
+            env.storage()
+                .instance()
+                .get(&soroban_sdk::symbol_short!("val"))
+                .unwrap_or(0)
         }
 
         pub fn increment(env: Env) -> u32 {
             let val = Self::get(env.clone());
             let new_val = val + 1;
-            env.storage().instance().set(&soroban_sdk::symbol_short!("val"), &new_val);
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::symbol_short!("val"), &new_val);
             new_val
         }
     }
@@ -1323,7 +1527,7 @@ mod extra_tests {
 #[cfg(test)]
 mod time_advance_tests {
     use super::*;
-    use crate::time::{add_months, datetime_to_unix};
+    use crate::time_helpers::{add_months, datetime_to_unix};
 
     const JAN_31_2024: u64 = 1_706_704_245;
     const MAR_15_2024: u64 = 1_710_489_600;
@@ -1332,10 +1536,7 @@ mod time_advance_tests {
     fn advance_time_by_months_updates_ledger() {
         let env = MockEnv::builder().at_timestamp(JAN_31_2024).build();
         env.advance_time_by_months(1);
-        assert_eq!(
-            env.timestamp(),
-            datetime_to_unix(2024, 2, 29, 12, 30, 45)
-        );
+        assert_eq!(env.timestamp(), datetime_to_unix(2024, 2, 29, 12, 30, 45));
     }
 
     #[test]
@@ -1350,6 +1551,36 @@ mod time_advance_tests {
         let env = MockEnv::builder().at_timestamp(MAR_15_2024).build();
         env.advance_time_by_months(6);
         assert_eq!(env.timestamp(), add_months(MAR_15_2024, 6));
+    }
+
+    #[test]
+    fn advance_time_zero_duration_is_noop() {
+        let env = MockEnv::builder()
+            .at_timestamp(1_700_000_000)
+            .build();
+        
+        // Verify initial state
+        assert_eq!(env.timestamp(), 1_700_000_000);
+        
+        // Advance by zero using Duration::ZERO equivalent
+        env.advance_time(Duration::days(0));
+        
+        // Timestamp should remain unchanged
+        assert_eq!(env.timestamp(), 1_700_000_000);
+        
+        // Also test with Duration::seconds(0)
+        env.advance_time(Duration::seconds(0));
+        assert_eq!(env.timestamp(), 1_700_000_000);
+    }
+
+    #[test]
+    fn advance_sequence_zero_is_noop() {
+        let env = MockEnv::builder().build();
+        let initial_seq = env.ledger_sequence();
+        
+        env.advance_sequence(0);
+        
+        assert_eq!(env.ledger_sequence(), initial_seq);
     }
 }
 
@@ -1395,6 +1626,79 @@ mod auth_scope_tests {
         }
         assert!(env.inner().auths().is_empty());
     }
+
+    #[soroban_sdk::contract]
+    struct DummyProtectedContract;
+
+    #[soroban_sdk::contractimpl]
+    impl DummyProtectedContract {
+        pub fn protected_action(_env: soroban_sdk::Env, user: soroban_sdk::Address) -> u32 {
+            user.require_auth();
+            100
+        }
+    }
+
+    #[test]
+    fn protected_call_valid_auth_succeeds() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+
+        // 1. Global mock auth pattern
+        env.mock_all_auths();
+        assert_eq!(client.protected_action(&alice), 100);
+
+        // 2. Specific mock auth pattern
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &alice,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "protected_action",
+                args: (alice.clone(),).into_val(env.inner()),
+                sub_invokes: &[],
+            },
+        }]);
+        assert_eq!(client.protected_action(&alice), 100);
+    }
+
+    #[test]
+    #[should_panic]
+    fn protected_call_missing_auth_panics() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+
+        // Clear mock authorizations so require_auth fails
+        env.mock_auths(&[]);
+        client.protected_action(&alice);
+    }
+
+    #[test]
+    #[should_panic]
+    fn protected_call_wrong_signer_panics() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+
+        // Provide authorization for bob when alice is the required caller argument
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &bob,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "protected_action",
+                args: (alice.clone(),).into_val(env.inner()),
+                sub_invokes: &[],
+            },
+        }]);
+        client.protected_action(&alice);
+    }
 }
 
 #[cfg(test)]
@@ -1403,7 +1707,9 @@ mod missing_lookup_tests {
     use soroban_sdk::testutils::Address as _;
 
     #[test]
-    #[should_panic(expected = "Account 'missing' not found. Available accounts: [admin, alice, bob]. Ensure it was registered via MockEnvBuilder or AccountBuilder.")]
+    #[should_panic(
+        expected = "Account 'missing' not found. Available accounts: [admin, alice, bob]. Ensure it was registered via MockEnvBuilder or AccountBuilder."
+    )]
     fn missing_account_shows_available() {
         let env = MockEnv::builder()
             .with_account("admin", Stroops::xlm(10))
@@ -1414,7 +1720,9 @@ mod missing_lookup_tests {
     }
 
     #[test]
-    #[should_panic(expected = "Contract 'alloc::string::String' not registered. Available contracts: [crucible::env::MockEnv]")]
+    #[should_panic(
+        expected = "Contract 'alloc::string::String' not registered. Available contracts: [crucible::env::MockEnv]"
+    )]
     fn missing_contract_shows_available() {
         let env = MockEnv::default();
         let addr = Address::generate(&env.inner);

@@ -22,6 +22,31 @@ pub struct CostReport {
     instructions: u64,
     memory: u64,
     fee_stroops: Option<i128>,
+    #[cfg(feature = "std")]
+    report_cache: std::sync::OnceLock<String>,
+}
+
+use std::fmt;
+
+impl std::fmt::Display for CostReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let instructions_str = format_with_commas(self.instructions);
+        let memory_str = format_with_commas(self.memory);
+        let fee_str = format!("{} str", self.fee_stroops());
+        let source = if self.uses_sdk_fee_estimate() {
+            "SDK"
+        } else {
+            "heuristic"
+        };
+        writeln!(f, "+---------------------+-----------+")?;
+        writeln!(f, "| Metric              | Value     |")?;
+        writeln!(f, "+---------------------+-----------+")?;
+        writeln!(f, "| Instructions        | {:>9} |", instructions_str)?;
+        writeln!(f, "| Memory (bytes)      | {:>9} |", memory_str)?;
+        writeln!(f, "| Estimated fee       | {:>9} |", fee_str)?;
+        writeln!(f, "| Fee source          | {:>9} |", source)?;
+        write!(f, "+---------------------+-----------+")
+    }
 }
 
 impl CostReport {
@@ -31,6 +56,8 @@ impl CostReport {
             instructions,
             memory,
             fee_stroops: None,
+            #[cfg(feature = "std")]
+            report_cache: std::sync::OnceLock::new(),
         }
     }
 
@@ -40,6 +67,8 @@ impl CostReport {
             instructions,
             memory,
             fee_stroops: Some(fee_stroops),
+            #[cfg(feature = "std")]
+            report_cache: std::sync::OnceLock::new(),
         }
     }
 
@@ -65,28 +94,17 @@ impl CostReport {
     }
 
     /// Returns a human-readable formatted table report of the costs.
+    #[cfg(feature = "std")]
     pub fn report(&self) -> String {
-        let instructions_str = format_with_commas(self.instructions);
-        let memory_str = format_with_commas(self.memory);
-        let fee_str = format!("{} str", self.fee_stroops());
-        let source = if self.uses_sdk_fee_estimate() {
-            "SDK"
-        } else {
-            "heuristic"
-        };
-        let mut output = String::new();
-        output.push_str("+---------------------+-----------+\n");
-        output.push_str("| Metric              | Value     |\n");
-        output.push_str("+---------------------+-----------+\n");
-        output.push_str(&format!(
-            "| Instructions        | {:>9} |\n",
-            instructions_str
-        ));
-        output.push_str(&format!("| Memory (bytes)      | {:>9} |\n", memory_str));
-        output.push_str(&format!("| Estimated fee       | {:>9} |\n", fee_str));
-        output.push_str(&format!("| Fee source          | {:>9} |\n", source));
-        output.push_str("+---------------------+-----------+");
-        output
+        self.report_cache
+            .get_or_init(|| format!("{}", self))
+            .clone()
+    }
+
+    /// Returns a human-readable formatted table report of the costs.
+    #[cfg(not(feature = "std"))]
+    pub fn report(&self) -> String {
+        format!("{}", self)
     }
 
     /// Returns a CI-safe ASCII report of the costs.

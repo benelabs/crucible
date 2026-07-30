@@ -68,7 +68,7 @@ tonic = "0.14"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 config = "0.14.0"
 rust_decimal = { version = "1.35", features = ["serde", "db-postgres"] }

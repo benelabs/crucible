@@ -25,6 +25,53 @@ cargo build --package crucible --target wasm32-unknown-unknown
 
 text
 
+## Benchmarks
+
+Crucible uses [Criterion](https://github.com/bheisler/criterion.rs) for performance benchmarks. Benchmarks are located in:
+
+- `backend/benches/` — Backend API performance benchmarks
+- Contract-specific benchmark files
+
+**Running benchmarks locally:**
+
+```sh
+cargo bench --workspace
+```
+
+**Benchmark CI:**
+
+- Benchmarks run automatically on every push to `main`
+- Results are uploaded as workflow artifacts
+- Historical trends are tracked in the `gh-pages` branch
+- View trends at: `https://benelabs.github.io/crucible/dev/bench/`
+
+**Adding new benchmarks:**
+
+1. Create a benchmark file in the appropriate `benches/` directory
+2. Use stable benchmark names (avoid dynamic IDs) for trend tracking
+3. Document what the benchmark measures and why it matters
+4. Keep benchmarks fast (< 10 seconds per run)
+
+**Example benchmark:**
+
+```rust
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn bench_mock_env_builder(c: &mut Criterion) {
+    c.bench_function("MockEnv::build with 10 contracts", |b| {
+        b.iter(|| {
+            let env = MockEnv::builder()
+                .with_contracts(black_box(10))
+                .build();
+            env
+        });
+    });
+}
+
+criterion_group!(benches, bench_mock_env_builder);
+criterion_main!(benches);
+```
+
 ## Workspace Structure
 
 | Crate | Description |

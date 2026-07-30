@@ -1,0 +1,5 @@
+error: #[derive(Fixture)] requires an `env: MockEnv` field
+ --> tests/ui/fail-derive-fixture-no-env.rs:6:7
+  |
+6 | struct BadFixture {
+  |       ^^^^^^^^^^^

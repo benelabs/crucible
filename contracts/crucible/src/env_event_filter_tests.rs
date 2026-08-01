@@ -72,7 +72,9 @@ mod tests {
         assert_eq!(all_a_events.len(), 2);
         assert!(!all_a_events.is_empty());
 
-        let first = all_a_events.first_event().expect("first event should exist");
+        let first = all_a_events
+            .first_event()
+            .expect("first event should exist");
         let last = all_a_events.last_event().expect("last event should exist");
         assert_eq!(first.0, id);
         assert_eq!(last.0, id);

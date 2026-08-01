@@ -481,6 +481,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "prometheus",
+ "proptest",
  "redis",
  "regex",
  "reqwest",

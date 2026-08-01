@@ -1,8 +1,10 @@
 //! Proc-macro support for the [`crucible`](https://docs.rs/crucible) Soroban testing framework.
 //!
-//! This crate provides the [`#[fixture]`][macro@fixture] attribute macro used to reduce
-//! boilerplate in Soroban contract test setups. It is re-exported from the main `crucible`
-//! crate under the `derive` feature (enabled by default), so you normally import it as:
+//! This crate provides the [`#[fixture]`][macro@fixture] attribute macro and the
+//! [`#[derive(Fixture)]`][macro@Fixture] derive macro used to reduce boilerplate
+//! in Soroban contract test setups. They are re-exported from the main `crucible`
+//! crate under the `derive` feature (enabled by default), so you normally import
+//! them as:
 //!
 //! ```rust,ignore
 //! use crucible::fixture;
@@ -10,7 +12,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Error};
+use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Ident, Meta, Path, Type};
 
 /// Marks a struct as a reusable test fixture.
 ///
@@ -146,4 +148,139 @@ fn has_derive(attrs: &[syn::Attribute], name: &str) -> bool {
         .map(|paths| paths.iter().any(|p| p.is_ident(name)))
         .unwrap_or(false)
     })
+}
+
+/// Derive macro for generating typed contract client wrappers in test fixtures.
+///
+/// This derive macro can be applied to a struct to automatically generate a
+/// `setup()` method that initializes the fixture fields. It supports
+/// auto-wiring contract clients via the `#[contract_client(contract = T)]`
+/// field attribute.
+///
+/// # Requirements
+///
+/// The struct must have an `env: MockEnv` field. The macro will auto-derive
+/// `Debug` if not already present.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use crucible_macros::Fixture;
+/// use crucible::prelude::*;
+///
+/// #[derive(Fixture)]
+/// struct DexFixture {
+///     env: MockEnv,
+///     #[contract_client(contract = AmmPool)]
+///     pool_client: AmmPoolClient,
+/// }
+/// ```
+///
+/// This expands to a `setup()` method that creates the `MockEnv` and wires
+/// the `pool_client` using `env.contract_id::<AmmPool>()`.
+#[proc_macro_derive(Fixture, attributes(contract_client))]
+pub fn fixture_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    let mut has_debug = false;
+    for attr in &input.attrs {
+        if attr.path().is_ident("derive") {
+            let _ = attr.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+            ).map(|paths| {
+                if paths.iter().any(|p| p.is_ident("Debug")) {
+                    has_debug = true;
+                }
+            });
+        }
+    }
+
+    let mut ast = input;
+    if !has_debug {
+        let debug_attr: syn::Attribute = syn::parse_quote!(#[derive(Debug)]);
+        ast.attrs.push(debug_attr);
+    }
+
+    let mut contract_types = Vec::new();
+    let mut field_inits = Vec::new();
+    let mut has_env = false;
+
+    if let Data::Struct(data) = &ast.data {
+        if let Fields::Named(fields) = &data.fields {
+            for field in &fields.named {
+                let field_name = field.ident.as_ref().unwrap();
+                let field_ty = &field.ty;
+
+                if field_name == "env" {
+                    has_env = true;
+                    continue;
+                }
+
+                let mut is_contract_client = false;
+                let mut contract_ty = None;
+
+                for attr in &field.attrs {
+                    if attr.path().is_ident("contract_client") {
+                        is_contract_client = true;
+                        let meta = attr.parse_args_with(
+                            syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+                        );
+                        if let Ok(metas) = meta {
+                            for m in metas {
+                                if m.path().is_ident("contract") {
+                                    if let Meta::Path(path) = m.value {
+                                        contract_ty = Some(path);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if is_contract_client {
+                    if let Some(ct) = contract_ty {
+                        contract_types.push(ct.clone());
+                        field_inits.push(quote! {
+                            #field_name: <#field_ty>::new(env.inner(), &env.contract_id::<#ct>()),
+                        });
+                    }
+                } else {
+                    field_inits.push(quote! {
+                        #field_name: Default::default(),
+                    });
+                }
+            }
+        }
+    }
+
+    if !has_env {
+        return syn::Error::new_spanned(name, "#[derive(Fixture)] requires an `env: MockEnv` field")
+            .to_compile_error()
+            .into();
+    }
+
+    let with_contracts = contract_types.iter().map(|ty| quote! { .with_contract::<#ty>() });
+    let env_init = quote! { MockEnv::builder() #(#with_contracts)* .build() };
+
+    let expanded = quote! {
+        #ast
+
+        impl #name {
+            /// Creates a new instance with all fields initialized.
+            ///
+            /// This method is generated by the `#[derive(Fixture)]` macro. It creates
+            /// a fresh `MockEnv` and wires all `#[contract_client]` fields. Other
+            /// fields (besides `env`) are set to their `Default` value.
+            pub fn setup() -> Self {
+                let env = #env_init;
+                Self {
+                    env,
+                    #(#field_inits)*
+                }
+            }
+        }
+    };
+
+    expanded.into()
 }

@@ -2,7 +2,12 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{
+    extract::State,
+    http::header::CONTENT_TYPE,
+    response::IntoResponse,
+    Json,
+};
 use chrono::{DateTime, Utc};
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
@@ -103,8 +108,11 @@ pub async fn get_health(State(state): State<Arc<AppState>>) -> Result<Json<Healt
 }
 
 #[instrument(skip_all)]
-pub async fn get_prometheus_metrics() -> impl IntoResponse {
-    "backend_requests_total 1024\n".to_string()
+pub async fn get_prometheus_metrics() -> Result<impl IntoResponse, AppError> {
+    let payload = crate::services::http_metrics::http_metrics()
+        .render()
+        .map_err(AppError::InternalError)?;
+    Ok(([(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], payload))
 }
 
 #[instrument(skip_all)]

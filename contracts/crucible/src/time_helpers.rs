@@ -66,13 +66,21 @@ pub fn unix_to_datetime(ts: u64) -> (i32, u32, u32, u32, u32, u32) {
     let doe = (z - era * 146_097) as u32;
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let y = (i32::try_from(yoe).expect("year conversion overflow"))
-        .checked_add((i32::try_from(era).expect("era conversion overflow")).checked_mul(400).expect("era year overflow"))
+        .checked_add(
+            (i32::try_from(era).expect("era conversion overflow"))
+                .checked_mul(400)
+                .expect("era year overflow"),
+        )
         .expect("year arithmetic overflow");
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if mp < 10 { y } else { y.checked_add(1).expect("year increment overflow") };
+    let year = if mp < 10 {
+        y
+    } else {
+        y.checked_add(1).expect("year increment overflow")
+    };
 
     (year, m, d, hour, minute, second)
 }
@@ -82,10 +90,20 @@ pub fn unix_to_datetime(ts: u64) -> (i32, u32, u32, u32, u32, u32) {
 /// # Panics
 /// Panics if `month`, `day`, `hour`, `minute`, or `second` are out of valid range,
 /// or if timestamp calculation overflows `u64`.
-pub fn datetime_to_unix(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> u64 {
+pub fn datetime_to_unix(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+) -> u64 {
     assert!((1..=12).contains(&month), "invalid month: {month}");
     let max_day = days_in_month(year, month);
-    assert!((1..=max_day).contains(&day), "invalid day {day} for month {month} in year {year}");
+    assert!(
+        (1..=max_day).contains(&day),
+        "invalid day {day} for month {month} in year {year}"
+    );
     assert!(hour < 24, "invalid hour: {hour}");
     assert!(minute < 60, "invalid minute: {minute}");
     assert!(second < 60, "invalid second: {second}");
@@ -104,7 +122,10 @@ pub fn datetime_to_unix(year: i32, month: u32, day: u32, hour: u32, minute: u32,
         .checked_sub(719_468)
         .expect("days offset underflow");
 
-    assert!(days >= 0, "timestamp before UNIX epoch (1970-01-01) not supported");
+    assert!(
+        days >= 0,
+        "timestamp before UNIX epoch (1970-01-01) not supported"
+    );
 
     (days as u64)
         .checked_mul(86_400)
@@ -154,7 +175,9 @@ pub fn add_months(ts: u64, months: u32) -> u64 {
 pub fn add_years(ts: u64, years: u32) -> u64 {
     let (year, month, day, hour, minute, second) = unix_to_datetime(ts);
     let years_i32 = i32::try_from(years).expect("year overflow in add_years");
-    let new_year = year.checked_add(years_i32).expect("year overflow in add_years");
+    let new_year = year
+        .checked_add(years_i32)
+        .expect("year overflow in add_years");
     assert!(new_year <= 584_554, "year overflow in add_years");
     let max_day = days_in_month(new_year, month);
     let new_day = day.min(max_day);
@@ -205,42 +228,78 @@ mod tests {
     #[test]
     fn add_months_clamps_end_of_month() {
         // Jan 31 + 1 month → Feb 29 (leap year)
-        assert_eq!(add_months(JAN_31_2024, 1), datetime_to_unix(2024, 2, 29, 12, 30, 45));
+        assert_eq!(
+            add_months(JAN_31_2024, 1),
+            datetime_to_unix(2024, 2, 29, 12, 30, 45)
+        );
         // Jan 31 + 1 month → Feb 28 (non-leap year)
-        assert_eq!(add_months(JAN_31_2023, 1), datetime_to_unix(2023, 2, 28, 0, 0, 0));
+        assert_eq!(
+            add_months(JAN_31_2023, 1),
+            datetime_to_unix(2023, 2, 28, 0, 0, 0)
+        );
         // Mar 31 + 1 month → Apr 30
         let mar_31_2024 = datetime_to_unix(2024, 3, 31, 10, 0, 0);
-        assert_eq!(add_months(mar_31_2024, 1), datetime_to_unix(2024, 4, 30, 10, 0, 0));
+        assert_eq!(
+            add_months(mar_31_2024, 1),
+            datetime_to_unix(2024, 4, 30, 10, 0, 0)
+        );
         // May 31 + 1 month → Jun 30
         let may_31_2024 = datetime_to_unix(2024, 5, 31, 0, 0, 0);
-        assert_eq!(add_months(may_31_2024, 1), datetime_to_unix(2024, 6, 30, 0, 0, 0));
+        assert_eq!(
+            add_months(may_31_2024, 1),
+            datetime_to_unix(2024, 6, 30, 0, 0, 0)
+        );
         // Aug 31 + 1 month → Sep 30
         let aug_31_2024 = datetime_to_unix(2024, 8, 31, 0, 0, 0);
-        assert_eq!(add_months(aug_31_2024, 1), datetime_to_unix(2024, 9, 30, 0, 0, 0));
+        assert_eq!(
+            add_months(aug_31_2024, 1),
+            datetime_to_unix(2024, 9, 30, 0, 0, 0)
+        );
         // Oct 31 + 1 month → Nov 30
         let oct_31_2024 = datetime_to_unix(2024, 10, 31, 0, 0, 0);
-        assert_eq!(add_months(oct_31_2024, 1), datetime_to_unix(2024, 11, 30, 0, 0, 0));
+        assert_eq!(
+            add_months(oct_31_2024, 1),
+            datetime_to_unix(2024, 11, 30, 0, 0, 0)
+        );
     }
 
     #[test]
     fn add_months_handles_multiple_and_large_months() {
-        assert_eq!(add_months(MAR_15_2024, 12), datetime_to_unix(2025, 3, 15, 8, 0, 0));
+        assert_eq!(
+            add_months(MAR_15_2024, 12),
+            datetime_to_unix(2025, 3, 15, 8, 0, 0)
+        );
         // 100 years in months = 1200 months
-        assert_eq!(add_months(MAR_15_2024, 1200), datetime_to_unix(2124, 3, 15, 8, 0, 0));
+        assert_eq!(
+            add_months(MAR_15_2024, 1200),
+            datetime_to_unix(2124, 3, 15, 8, 0, 0)
+        );
     }
 
     #[test]
     fn add_years_preserves_date_and_handles_large_durations() {
-        assert_eq!(add_years(MAR_15_2024, 1), datetime_to_unix(2025, 3, 15, 8, 0, 0));
-        assert_eq!(add_years(MAR_15_2024, 100), datetime_to_unix(2124, 3, 15, 8, 0, 0));
+        assert_eq!(
+            add_years(MAR_15_2024, 1),
+            datetime_to_unix(2025, 3, 15, 8, 0, 0)
+        );
+        assert_eq!(
+            add_years(MAR_15_2024, 100),
+            datetime_to_unix(2124, 3, 15, 8, 0, 0)
+        );
     }
 
     #[test]
     fn add_years_clamps_leap_day() {
         // Feb 29, 2024 + 1 year → Feb 28, 2025
-        assert_eq!(add_years(FEB_29_2024, 1), datetime_to_unix(2025, 2, 28, 12, 30, 45));
+        assert_eq!(
+            add_years(FEB_29_2024, 1),
+            datetime_to_unix(2025, 2, 28, 12, 30, 45)
+        );
         // Feb 29, 2024 + 4 years → Feb 29, 2028
-        assert_eq!(add_years(FEB_29_2024, 4), datetime_to_unix(2028, 2, 29, 12, 30, 45));
+        assert_eq!(
+            add_years(FEB_29_2024, 4),
+            datetime_to_unix(2028, 2, 29, 12, 30, 45)
+        );
     }
 
     #[test]
@@ -288,4 +347,3 @@ mod tests {
         add_months(JAN_31_2024, u32::MAX);
     }
 }
-

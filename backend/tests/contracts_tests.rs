@@ -9,8 +9,8 @@ use backend::api::handlers::profiling::AppState;
 use backend::config::reload::ConfigManager;
 use backend::config::AppConfig;
 use backend::services::{
-    error_recovery::ErrorManager, log_aggregator::LogAggregator, sys_metrics::MetricsExporter,
-    contract_benchmark::ContractBenchmarkService,
+    contract_benchmark::ContractBenchmarkService, error_recovery::ErrorManager,
+    log_aggregator::LogAggregator, sys_metrics::MetricsExporter,
 };
 use redis::Client as RedisClient;
 use sqlx::postgres::PgPoolOptions;

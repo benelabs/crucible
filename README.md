@@ -363,6 +363,10 @@ let balance = usdc.balance(&env.account("alice").address());
 // Admin operations
 usdc.set_admin(&new_admin_address);
 usdc.clawback(&target_address, &amount);
+
+// Convenience helpers for full balance operations
+usdc.clawback_all(&target_address); // Removes all tokens (no manual balance lookup)
+usdc.burn_all(&holder_address);    // Burns entire balance
 ```
 
 `MockToken` implements the full SEP-41 / SAC interface, so you can pass its `Address` directly into any contract that expects a token contract address.
@@ -722,6 +726,8 @@ cargo test --workspace
 | **Token** | [`examples/token/src/lib.rs`](examples/token/src/lib.rs) | [`examples/token/src/test.rs`](examples/token/src/test.rs) |
 | **Escrow** | [`examples/escrow/src/lib.rs`](examples/escrow/src/lib.rs) | [`examples/escrow/src/test.rs`](examples/escrow/src/test.rs) |
 | **Vesting** | [`examples/vesting/src/lib.rs`](examples/vesting/src/lib.rs) | [`examples/vesting/src/test.rs`](examples/vesting/src/test.rs) |
+
+When adding a new `examples/*` crate, follow the "Adding a New Example Contract" checklist in `CONTRIBUTING.md` so workspace membership, test structure, and docs stay consistent.
 
 ---
 

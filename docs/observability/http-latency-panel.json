@@ -1,0 +1,29 @@
+{
+  "title": "HTTP p95 Latency by Route",
+  "type": "timeseries",
+  "description": "Prometheus histogram_quantile over http_request_duration_seconds bucket series grouped by route and method.",
+  "targets": [
+    {
+      "refId": "A",
+      "expr": "histogram_quantile(0.95, sum by (le, route, method) (rate(http_request_duration_seconds_bucket[5m])))",
+      "legendFormat": "{{method}} {{route}} p95"
+    },
+    {
+      "refId": "B",
+      "expr": "histogram_quantile(0.50, sum by (le, route, method) (rate(http_request_duration_seconds_bucket[5m])))",
+      "legendFormat": "{{method}} {{route}} p50"
+    },
+    {
+      "refId": "C",
+      "expr": "histogram_quantile(0.99, sum by (le, route, method) (rate(http_request_duration_seconds_bucket[5m])))",
+      "legendFormat": "{{method}} {{route}} p99"
+    }
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "unit": "s",
+      "min": 0
+    },
+    "overrides": []
+  }
+}

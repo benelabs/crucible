@@ -22,10 +22,14 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
     api::handlers::{
-        admin, contracts as contract_handlers, coverage, dashboard,
+        admin, alerts, contracts as contract_handlers, coverage, dashboard,
         dashboard::get_dashboard, errors, profiling, sandbox, stellar, ws::ws_dashboard_handler,
     },
-    api::middleware::logging::logging_middleware,
+    api::middleware::{
+        content_type::require_json_content_type,
+        idempotency::idempotency_middleware,
+        logging::logging_middleware,
+    },
     app_state::ApplicationStates,
     config::{
         reload::{handle_get_config, handle_reload, ConfigManager},
@@ -39,6 +43,7 @@ use crate::{
     paths(
         profiling::get_metrics,
         profiling::get_health,
+        alerts::ingest_alert,
         dashboard::get_dashboard_metrics,
         dashboard::get_contract_stats,
         audit::list_audit_reports,
@@ -47,6 +52,8 @@ use crate::{
     components(schemas(
         profiling::MetricsReport,
         profiling::HealthResponse,
+        alerts::AlertIngestRequest,
+        alerts::AlertIngestResponse,
         dashboard::DashboardMetrics,
         dashboard::ContractStats,
         audit::AuditEventRecord,
@@ -55,6 +62,7 @@ use crate::{
     tags(
         (name = "profiling", description = "Performance and health monitoring endpoints"),
         (name = "dashboard", description = "Dashboard metrics and analytics endpoints"),
+        (name = "alerts", description = "Alert ingestion endpoints"),
     )
 )]
 struct ApiDoc;
@@ -113,6 +121,7 @@ pub fn build_router(
 
     Router::new()
         .route("/", get(|| async { "Crucible Backend API" }))
+        .route("/metrics", get(profiling::get_prometheus_metrics))
         .route("/.well-known/stellar.toml", get(stellar::get_stellar_toml))
         .merge(
             Router::new()
@@ -173,6 +182,13 @@ pub fn build_router(
         )
         .route("/api/status", get(profiling::get_system_status))
         .route("/api/profile", post(profiling::trigger_profile_collection))
+        .route(
+            "/api/alerts/ingest",
+            post(alerts::ingest_alert).route_layer(middleware::from_fn_with_state(
+                profiling_state.clone(),
+                idempotency_middleware,
+            )),
+        )
         .with_state(profiling_state.clone())
         .nest(
             "/api/v1/dashboard",
@@ -219,6 +235,7 @@ pub fn build_router(
             profiling_state,
             logging_middleware,
         ))
+        .layer(middleware::from_fn(require_json_content_type))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .fallback(crate::api::errors::api_fallback)
@@ -319,5 +336,38 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn build_router_rejects_post_without_json_content_type() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/alerts/ingest")
+                    .method("POST")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    #[tokio::test]
+    async fn build_router_rejects_post_with_text_plain_content_type() {
+        let response = test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/alerts/ingest")
+                    .method("POST")
+                    .header("Content-Type", "text/plain")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 }

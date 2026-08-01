@@ -1,6 +1,13 @@
 use crate::api::handlers::profiling::AppState;
+use crate::services::http_metrics::http_metrics;
 use crate::services::tracing::TracingService;
-use axum::{body::Body, extract::State, http::Request, middleware::Next, response::IntoResponse};
+use axum::{
+    body::Body,
+    extract::{MatchedPath, State},
+    http::Request,
+    middleware::Next,
+    response::IntoResponse,
+};
 use std::{sync::Arc, time::Instant};
 use tracing::Instrument;
 
@@ -40,6 +47,12 @@ pub async fn logging_middleware(
     let method = request.method().clone();
     let uri = request.uri().clone();
     let version = request.version();
+    let metric_route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+        .unwrap_or("UNMATCHED")
+        .to_string();
 
     let path = sanitize_for_log(uri.path());
     let span = TracingService::http_request_span(method.as_str(), &path, None);
@@ -53,6 +66,7 @@ pub async fn logging_middleware(
 
         let latency = start_time.elapsed();
         let status = response.status();
+        http_metrics().observe(&metric_route, method.as_str(), status.as_u16(), latency);
         value.record("http.status_code", status.as_u16());
         if status.is_server_error() {
             TracingService::record_error(&value, status.as_str(), "http_server_error");

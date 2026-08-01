@@ -113,8 +113,11 @@ fn test_double_initialize_reverts() {
     let ctx = Ctx::setup();
     ctx.initialize();
     assert_reverts!(
-        ctx.client()
-            .initialize(&ctx.admin.address(), &ctx.token.address(), &(BASE_TIME + CLOSE_DELAY)),
+        ctx.client().initialize(
+            &ctx.admin.address(),
+            &ctx.token.address(),
+            &(BASE_TIME + CLOSE_DELAY)
+        ),
         "already initialized"
     );
 }
@@ -124,7 +127,8 @@ fn test_buy_transfers_collateral_and_tracks_position() {
     let ctx = Ctx::setup();
     ctx.initialize();
     ctx.env.mock_all_auths();
-    ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE);
+    ctx.client()
+        .buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE);
 
     assert_eq!(
         ctx.client().position(&ctx.alice.address(), &Outcome::Yes),
@@ -140,12 +144,18 @@ fn test_buy_accumulates_multiple_positions() {
     let ctx = Ctx::setup();
     ctx.initialize();
     ctx.env.mock_all_auths();
-    ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE);
-    ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &BOB_STAKE);
-    ctx.client().buy(&ctx.carol.address(), &Outcome::No, &CAROL_STAKE);
+    ctx.client()
+        .buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE);
+    ctx.client()
+        .buy(&ctx.alice.address(), &Outcome::Yes, &BOB_STAKE);
+    ctx.client()
+        .buy(&ctx.carol.address(), &Outcome::No, &CAROL_STAKE);
 
     let state = ctx.client().get_state();
-    assert_eq!(ctx.client().position(&ctx.alice.address(), &Outcome::Yes), 1_000_000);
+    assert_eq!(
+        ctx.client().position(&ctx.alice.address(), &Outcome::Yes),
+        1_000_000
+    );
     assert_eq!(state.yes_total, 1_000_000);
     assert_eq!(state.no_total, CAROL_STAKE);
 }
@@ -156,7 +166,8 @@ fn test_buy_rejects_zero_amount() {
     ctx.initialize();
     ctx.env.mock_all_auths();
     assert_reverts!(
-        ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &0_i128),
+        ctx.client()
+            .buy(&ctx.alice.address(), &Outcome::Yes, &0_i128),
         "positive"
     );
 }
@@ -168,7 +179,8 @@ fn test_buy_after_close_reverts() {
     ctx.env.advance_time(Duration::seconds(CLOSE_DELAY));
     ctx.env.mock_all_auths();
     assert_reverts!(
-        ctx.client().buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE),
+        ctx.client()
+            .buy(&ctx.alice.address(), &Outcome::Yes, &ALICE_STAKE),
         "closed"
     );
 }
@@ -248,7 +260,10 @@ fn test_winners_claim_proportional_payouts() {
         ctx.token.balance(&ctx.bob),
         2_000_000 - BOB_STAKE + bob_expected
     );
-    assert_eq!(ctx.client().position(&ctx.alice.address(), &Outcome::Yes), 0);
+    assert_eq!(
+        ctx.client().position(&ctx.alice.address(), &Outcome::Yes),
+        0
+    );
     assert_eq!(ctx.client().position(&ctx.bob.address(), &Outcome::Yes), 0);
 }
 

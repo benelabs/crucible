@@ -2,7 +2,12 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{
+    extract::State,
+    http::header::CONTENT_TYPE,
+    response::IntoResponse,
+    Json,
+};
 use chrono::{DateTime, Utc};
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};

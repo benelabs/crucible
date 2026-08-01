@@ -169,8 +169,12 @@ fn test_deposit_past_unlock_time_reverts() {
     ctx.env.mock_all_auths();
     // unlock_time in the past
     assert_reverts!(
-        ctx.client()
-            .deposit(&ctx.alice.address(), &ctx.token.address(), &AMOUNT, &(BASE_TIME - 1)),
+        ctx.client().deposit(
+            &ctx.alice.address(),
+            &ctx.token.address(),
+            &AMOUNT,
+            &(BASE_TIME - 1)
+        ),
         "future"
     );
 }
@@ -185,9 +189,12 @@ fn test_multiple_depositors_independent() {
         &AMOUNT,
         &ctx.unlock_time(),
     );
-    let id_b = ctx
-        .client()
-        .deposit(&ctx.bob.address(), &ctx.token.address(), &AMOUNT, &ctx.unlock_time());
+    let id_b = ctx.client().deposit(
+        &ctx.bob.address(),
+        &ctx.token.address(),
+        &AMOUNT,
+        &ctx.unlock_time(),
+    );
 
     ctx.env.advance_time(Duration::seconds(LOCK_DURATION + 1));
     ctx.client().withdraw(&id_a);

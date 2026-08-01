@@ -10,6 +10,7 @@
 use crate::account::AccountHandle;
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
+use crate::token::MockToken;
 use soroban_sdk::{
     testutils::{ContractEvents, Events, Ledger, Register},
     Address, Env, FromVal, IntoVal, Val, Vec as SorobanVec,
@@ -231,6 +232,7 @@ pub struct MockEnv {
     inner: Env,
     accounts: Rc<RefCell<HashMap<String, Address>>>,
     contract_ids: Rc<RefCell<HashMap<String, Address>>>,
+    tokens: Rc<RefCell<HashMap<String, MockToken>>>,
     xlm_token_address: Rc<RefCell<Option<Address>>>,
     track_costs: bool,
 }
@@ -491,6 +493,35 @@ impl MockEnv {
             });
 
         AccountHandle::new(self.clone(), name.to_string(), address)
+    }
+
+    /// Get a registered mock token by symbol.
+    ///
+    /// # Panics
+    /// Panics with a clear error message if the symbol was not registered via
+    /// [`MockEnvBuilder::with_token`].
+    pub fn token(&self, symbol: &str) -> MockToken {
+        self.token_opt(symbol).unwrap_or_else(|| {
+            let mut available: Vec<_> = self.tokens.borrow().keys().cloned().collect();
+            available.sort();
+            panic!(
+                "Token '{}' not found in MockEnv. Available tokens: [{}]. Ensure it was registered via MockEnvBuilder.",
+                symbol,
+                available.join(", ")
+            )
+        })
+    }
+
+    /// Get a registered mock token by symbol, returning `None` if not registered.
+    pub fn token_opt(&self, symbol: &str) -> Option<MockToken> {
+        self.tokens.borrow().get(symbol).cloned()
+    }
+
+    /// Registers a [`MockToken`] by symbol into this environment's token registry.
+    pub fn register_token(&self, symbol: &str, token: MockToken) {
+        self.tokens
+            .borrow_mut()
+            .insert(symbol.to_string(), token);
     }
 
     /// Get a contract ID by type.
@@ -1036,6 +1067,7 @@ impl MockEnv {
             inner: self.inner.clone(),
             accounts: Rc::new(RefCell::new(self.accounts.borrow().clone())),
             contract_ids: Rc::new(RefCell::new(self.contract_ids.borrow().clone())),
+            tokens: Rc::new(RefCell::new(self.tokens.borrow().clone())),
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
             track_costs: self.track_costs,
         }
@@ -1146,6 +1178,7 @@ impl Default for MockEnv {
             inner: Env::default(),
             accounts: Rc::new(RefCell::new(HashMap::new())),
             contract_ids: Rc::new(RefCell::new(HashMap::new())),
+            tokens: Rc::new(RefCell::new(HashMap::new())),
             xlm_token_address: Rc::new(RefCell::new(None)),
             track_costs: false,
         }
@@ -1191,6 +1224,7 @@ mod tests {
 pub struct MockEnvBuilder {
     env: MockEnv,
     account_configs: Vec<(String, Stroops)>,
+    token_configs: Vec<(String, u32)>,
 }
 
 impl MockEnvBuilder {
@@ -1198,6 +1232,7 @@ impl MockEnvBuilder {
         Self {
             env: MockEnv::default(),
             account_configs: Vec::new(),
+            token_configs: Vec::new(),
         }
     }
 
@@ -1289,6 +1324,12 @@ impl MockEnvBuilder {
         self
     }
 
+    /// Add a named mock token with decimals.
+    pub fn with_token(mut self, symbol: &str, decimals: u32) -> Self {
+        self.token_configs.push((symbol.to_string(), decimals));
+        self
+    }
+
     /// Enable cost tracking for instruction counting.
     pub fn track_costs(mut self) -> Self {
         self.env.track_costs = true;
@@ -1302,6 +1343,14 @@ impl MockEnvBuilder {
                 .name(&name)
                 .fund_xlm(balance)
                 .build();
+        }
+        for (symbol, decimals) in self.token_configs {
+            let token = if symbol.eq_ignore_ascii_case("xlm") {
+                MockToken::xlm(&self.env)
+            } else {
+                MockToken::new(&self.env, &symbol, decimals)
+            };
+            self.env.register_token(&symbol, token);
         }
         self.env
     }
@@ -1729,4 +1778,41 @@ mod missing_lookup_tests {
         env.register_contract::<MockEnv>(addr);
         env.contract_id::<String>();
     }
+
+    #[test]
+    fn test_with_token_and_token_accessors() {
+        let env = MockEnv::builder()
+            .with_token("USDC", 6)
+            .with_token("XLM", 7)
+            .build();
+
+        let usdc = env.token("USDC");
+        assert_eq!(usdc.decimals(), 6);
+
+        let usdc_opt = env.token_opt("USDC");
+        assert!(usdc_opt.is_some());
+        assert_eq!(usdc_opt.unwrap().decimals(), 6);
+
+        assert!(env.token_opt("UNKNOWN").is_none());
+
+        let xlm = env.token("XLM");
+        assert_eq!(xlm.decimals(), 7);
+
+        // Manually created MockToken works alongside registered tokens
+        let manual_usdc = MockToken::new(&env, "USDC_MANUAL", 6);
+        assert_eq!(manual_usdc.decimals(), 6);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Token 'MISSING' not found in MockEnv. Available tokens: [USDC, XLM]. Ensure it was registered via MockEnvBuilder."
+    )]
+    fn test_missing_token_panics() {
+        let env = MockEnv::builder()
+            .with_token("USDC", 6)
+            .with_token("XLM", 7)
+            .build();
+        env.token("MISSING");
+    }
 }
+

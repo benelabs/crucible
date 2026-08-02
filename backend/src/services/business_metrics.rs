@@ -8,12 +8,11 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use tokio::sync::RwLock;
 use tracing::{error, info, instrument};
 use uuid::Uuid;
 use utoipa::ToSchema;
-use sqlx::FromRow;
 
 use crate::error::AppError;
 

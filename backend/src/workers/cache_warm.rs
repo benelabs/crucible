@@ -1,8 +1,7 @@
-use redis::{AsyncCommands, Client};
+use redis::Client;
 use sqlx::PgPool;
-use std::sync::Arc;
 use tokio::time::{sleep, Duration};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Cache warming worker that pre-loads frequently accessed data into Redis
 #[derive(Debug, Clone)]

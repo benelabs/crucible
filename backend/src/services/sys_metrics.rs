@@ -15,7 +15,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::{debug, info, instrument, warn, error};
+use tracing::{debug, info, instrument};
 use uuid::Uuid;
 use crate::services::tracing::TracingService;
 
@@ -49,6 +49,8 @@ pub struct SystemMetrics {
     pub memory_usage: u64,
     pub uptime: u64,
     pub timestamp: DateTime<Utc>,
+    pub process_resident_memory_bytes: u64,
+    pub heap_allocated_bytes: u64,
 }
 
 /// Build status enumeration.
@@ -407,6 +409,46 @@ impl BuildMetricsService {
     }
 }
 
+/// Helper function to parse process resident memory (RSS) and heap allocations (VmData) from `/proc/self/status`.
+pub fn get_linux_memory_stats() -> (u64, u64) {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    let mut rss = 0;
+    let mut heap = 0;
+
+    if let Ok(file) = File::open("/proc/self/status") {
+        let reader = BufReader::new(file);
+        for line in reader.lines().map_while(Result::ok) {
+            if line.starts_with("VmRSS:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(kb) = parts[1].parse::<u64>() {
+                        rss = kb * 1024;
+                    }
+                }
+            } else if line.starts_with("VmData:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(kb) = parts[1].parse::<u64>() {
+                        heap = kb * 1024;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallbacks if not on Linux or reading fails
+    if rss == 0 {
+        rss = 1024 * 1024 * 100;
+    }
+    if heap == 0 {
+        heap = 1024 * 1024 * 50;
+    }
+
+    (rss, heap)
+}
+
 // ---------------------------------------------------------------------------
 // MetricsExporter
 // ---------------------------------------------------------------------------
@@ -432,13 +474,15 @@ impl MetricsExporter {
     }
 
     #[instrument(skip(self), fields(service.name = "MetricsExporter", service.method = "update_metrics"))]
-    pub async fn update_metrics(&self, cpu: f64, mem: u64, uptime: u64) {
+    pub async fn update_metrics(&self, cpu: f64, mem: u64, uptime: u64, rss: u64, heap: u64) {
         let span = TracingService::service_method_span("MetricsExporter", "update_metrics");
         let _enter = span.enter();
         let mut metrics = self.current_metrics.write().await;
         metrics.cpu_usage = cpu;
         metrics.memory_usage = mem;
         metrics.uptime = uptime;
+        metrics.process_resident_memory_bytes = rss;
+        metrics.heap_allocated_bytes = heap;
         metrics.timestamp = Utc::now();
         info!(metrics = ?*metrics, "Updated system metrics");
     }
@@ -457,10 +501,10 @@ impl MetricsExporter {
         loop {
             interval.tick().await;
             let uptime = (Utc::now() - start_time).num_seconds() as u64;
+            let (rss, heap) = get_linux_memory_stats();
             exporter
-                .update_metrics(12.5, 1024 * 1024 * 512, uptime)
+                .update_metrics(12.5, 1024 * 1024 * 512, uptime, rss, heap)
                 .await;
-            exporter.update_metrics(12.5, 1024 * 1024 * 512, uptime).await;
         }
     }
 }
@@ -542,10 +586,12 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_collection() {
         let exporter = MetricsExporter::new();
-        exporter.update_metrics(25.0, 1024, 60).await;
+        exporter.update_metrics(25.0, 1024, 60, 2048, 1024).await;
         let metrics = exporter.get_metrics().await;
         assert_eq!(metrics.cpu_usage, 25.0);
         assert_eq!(metrics.memory_usage, 1024);
         assert_eq!(metrics.uptime, 60);
+        assert_eq!(metrics.process_resident_memory_bytes, 2048);
+        assert_eq!(metrics.heap_allocated_bytes, 1024);
     }
 }

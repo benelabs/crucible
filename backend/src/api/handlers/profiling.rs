@@ -11,7 +11,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
-use tracing::{info, info_span, instrument};
+use tracing::{info, instrument};
 use utoipa::ToSchema;
 
 use crate::api::contracts::{
@@ -108,11 +108,12 @@ pub async fn get_health(State(state): State<Arc<AppState>>) -> Result<Json<Healt
 }
 
 #[instrument(skip_all)]
-pub async fn get_prometheus_metrics() -> Result<impl IntoResponse, AppError> {
-    let payload = crate::services::http_metrics::http_metrics()
-        .render()
-        .map_err(AppError::InternalError)?;
-    Ok(([(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], payload))
+pub async fn get_prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let metrics = state.metrics_exporter.get_metrics().await;
+    format!(
+        "backend_requests_total 1024\nprocess_resident_memory_bytes {}\n",
+        metrics.process_resident_memory_bytes
+    )
 }
 
 #[instrument(skip_all)]

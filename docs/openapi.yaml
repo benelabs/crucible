@@ -1,0 +1,873 @@
+openapi: 3.0.3
+info:
+  title: Crucible Backend API
+  description: "High-performance Rust API server for the Crucible smart contract testing platform. Provides performance profiling, analytics dashboards, audit logging, contract sandbox execution, and more."
+  version: 0.1.0
+  contact:
+    name: Crucible Contributors
+    url: https://github.com/anumukul/crucible
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://api.crucible.dev
+    description: Production server
+tags:
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Profiling
+    description: Performance and system health monitoring
+  - name: Dashboard
+    description: Aggregated system and contract metrics
+  - name: Audit
+    description: Event-sourced audit logging
+  - name: Contracts
+    description: Contract compilation, analysis, and management
+  - name: Admin
+    description: Administrative operations
+  - name: Sandbox
+    description: Bounded Soroban contract execution
+  - name: Coverage
+    description: Test coverage reporting
+  - name: Errors
+    description: Build error analytics
+  - name: Metrics
+    description: Business and Prometheus metrics
+  - name: Config
+    description: Dynamic configuration management
+  - name: Stellar
+    description: Stellar network discovery (SEP-1)
+  - name: GraphQL
+    description: Federated GraphQL gateway
+  - name: WebSocket
+    description: Real-time dashboard updates
+paths:
+  /:
+    get:
+      operationId: root
+      summary: Root endpoint
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Service identifier
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Crucible Backend API"
+  /.well-known/stellar.toml:
+    get:
+      operationId: getStellarToml
+      summary: Stellar network configuration (SEP-1)
+      tags:
+        - Stellar
+      responses:
+        "200":
+          description: Stellar TOML file content
+          content:
+            text/plain:
+              schema:
+                type: string
+  /health/live:
+    get:
+      operationId: livenessProbe
+      summary: Kubernetes liveness probe
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 0.1.0
+  /health/ready:
+    get:
+      operationId: readinessProbe
+      summary: Kubernetes readiness probe
+      tags:
+        - Health
+      responses:
+        "200":
+          description: All dependencies healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReport"
+        "503":
+          description: One or more dependencies unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReport"
+  /api/config:
+    get:
+      operationId: getConfig
+      summary: Get current application configuration
+      tags:
+        - Config
+      responses:
+        "200":
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/config/reload:
+    post:
+      operationId: reloadConfig
+      summary: Reload application configuration
+      tags:
+        - Config
+      responses:
+        "200":
+          description: Configuration reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/profiling/metrics:
+    get:
+      operationId: getProfilingMetrics
+      summary: Get performance metrics
+      tags:
+        - Profiling
+      responses:
+        "200":
+          description: Performance metrics report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsReport"
+  /api/v1/profiling/health:
+    get:
+      operationId: getProfilingHealth
+      summary: Get system health status
+      tags:
+        - Profiling
+      responses:
+        "200":
+          description: System health response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/v1/profiling/prometheus:
+    get:
+      operationId: getPrometheusMetrics
+      summary: Get Prometheus-formatted metrics
+      tags:
+        - Metrics
+      responses:
+        "200":
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/profiling/status:
+    get:
+      operationId: getSystemStatus
+      summary: Get detailed system status
+      tags:
+        - Profiling
+      responses:
+        "200":
+          description: System status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStatus"
+  /api/v1/profiling/profile:
+    post:
+      operationId: triggerProfileCollection
+      summary: Trigger a profile collection
+      tags:
+        - Profiling
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileTriggerRequest"
+      responses:
+        "200":
+          description: Profile collection triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileTriggerResponse"
+  /api/v1/profiling/contracts/benchmark:
+    post:
+      operationId: runContractBenchmark
+      summary: Run a contract benchmark
+      tags:
+        - Profiling
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContractBenchmarkRequest"
+      responses:
+        "200":
+          description: Benchmark results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractBenchmarkReport"
+  /api/dashboard:
+    get:
+      operationId: getDashboard
+      summary: Get aggregated dashboard data
+      tags:
+        - Dashboard
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardData"
+  /api/v1/dashboard/metrics:
+    get:
+      operationId: getDashboardMetrics
+      summary: Get aggregate contract and pipeline metrics
+      tags:
+        - Dashboard
+      responses:
+        "200":
+          description: Dashboard metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardMetrics"
+  /api/v1/dashboard/contracts/{contract_id}/stats:
+    get:
+      operationId: getContractStats
+      summary: Get per-contract usage statistics
+      tags:
+        - Dashboard
+      parameters:
+        - name: contract_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Contract identifier
+      responses:
+        "200":
+          description: Contract stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractStats"
+        "404":
+          description: Contract not found
+  /api/v1/audit/log:
+    post:
+      operationId: logAuditEvent
+      summary: Record a new audit event
+      tags:
+        - Audit
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuditEventRequest"
+      responses:
+        "201":
+          description: Event recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event_id:
+                    type: string
+                    format: uuid
+  /api/v1/audit/reports:
+    get:
+      operationId: listAuditReports
+      summary: List audit reports
+      tags:
+        - Audit
+      parameters:
+        - name: event_type
+          in: query
+          schema:
+            type: string
+          description: Filter by event type
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+          description: Maximum number of reports to return
+      responses:
+        "200":
+          description: List of audit reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEventRecord"
+  /api/v1/audit/reports/{id}:
+    get:
+      operationId: getAuditReport
+      summary: Get a specific audit report
+      tags:
+        - Audit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Report ID
+      responses:
+        "200":
+          description: Audit report details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventRecord"
+        "404":
+          description: Audit report not found
+  /api/v1/metrics/metrics:
+    get:
+      operationId: getBusinessMetrics
+      summary: Get business metrics in Prometheus format
+      tags:
+        - Metrics
+      responses:
+        "200":
+          description: Prometheus-encoded business metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/contracts/compile:
+    post:
+      operationId: compileContract
+      summary: Compile a Soroban contract
+      tags:
+        - Contracts
+      responses:
+        "200":
+          description: Compilation result
+  /api/v1/contracts/analyze-dependencies:
+    post:
+      operationId: analyzeDependencies
+      summary: Analyze contract dependencies
+      tags:
+        - Contracts
+      responses:
+        "200":
+          description: Dependency analysis
+  /api/v1/contracts/compliance-check:
+    post:
+      operationId: checkCompliance
+      summary: Check contract compliance
+      tags:
+        - Contracts
+      responses:
+        "200":
+          description: Compliance check result
+  /api/v1/contracts/logs:
+    post:
+      operationId: logContractCall
+      summary: Log a contract call
+      tags:
+        - Contracts
+      responses:
+        "200":
+          description: Call logged
+    get:
+      operationId: getContractLogs
+      summary: Get contract call logs
+      tags:
+        - Contracts
+      responses:
+        "200":
+          description: Contract call logs
+  /api/v1/contracts/upgrade-plan:
+    post:
+      operationId: createUpgradePlan
+      summary: Create a contract upgrade plan
+      tags:
+        - Contracts
+      responses:
+        "200":
+          description: Upgrade plan created
+  /api/v1/contracts/templates:
+    get:
+      operationId: getTemplates
+      summary: Get contract templates
+      tags:
+        - Contracts
+      responses:
+        "200":
+          description: List of contract templates
+  /api/v1/networks:
+    get:
+      operationId: getNetworks
+      summary: Get available Stellar networks
+      tags:
+        - Contracts
+      responses:
+        "200":
+          description: List of networks
+  /api/v1/admin/system-stats:
+    get:
+      operationId: getSystemStats
+      summary: Get system statistics
+      tags:
+        - Admin
+      responses:
+        "200":
+          description: System statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStatsResponse"
+  /api/v1/admin/maintenance:
+    post:
+      operationId: setMaintenanceMode
+      summary: Enable or disable maintenance mode
+      tags:
+        - Admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenanceRequest"
+      responses:
+        "200":
+          description: Maintenance mode updated
+  /api/v1/admin/logs:
+    get:
+      operationId: getAdminLogs
+      summary: Get administrative logs
+      tags:
+        - Admin
+      responses:
+        "200":
+          description: Admin log entries
+  /api/v1/errors/dashboard/build-errors:
+    get:
+      operationId: getBuildErrorAnalytics
+      summary: Get build error analytics
+      tags:
+        - Errors
+      responses:
+        "200":
+          description: Build error analytics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildErrorAnalytics"
+  /api/v1/sandbox/execute:
+    post:
+      operationId: executeContract
+      summary: Execute a Soroban contract in a bounded sandbox
+      tags:
+        - Sandbox
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContractExecutionRequest"
+      responses:
+        "200":
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractExecutionResponse"
+        "422":
+          description: Validation error
+  /api/v1/coverage:
+    post:
+      operationId: submitCoverage
+      summary: Submit a coverage snapshot
+      tags:
+        - Coverage
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewTestCoverage"
+      responses:
+        "201":
+          description: Coverage recorded
+  /api/v1/coverage/{project}:
+    get:
+      operationId: getLatestCoverage
+      summary: Get the latest coverage snapshot for a project
+      tags:
+        - Coverage
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Project name
+      responses:
+        "200":
+          description: Latest coverage data
+        "404":
+          description: No coverage data found
+  /api/v1/graphql:
+    post:
+      operationId: graphqlQuery
+      summary: Execute a federated GraphQL query
+      tags:
+        - GraphQL
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GraphQLRequest"
+      responses:
+        "200":
+          description: GraphQL response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GraphQLResponse"
+  /api/v1/ws/dashboard:
+    get:
+      operationId: wsDashboard
+      summary: WebSocket endpoint for real-time dashboard updates
+      tags:
+        - WebSocket
+      responses:
+        "101":
+          description: WebSocket upgrade successful
+components:
+  schemas:
+    HealthReport:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]
+        checks:
+          type: object
+          properties:
+            database:
+              $ref: "#/components/schemas/CheckResult"
+            redis:
+              $ref: "#/components/schemas/CheckResult"
+            queue:
+              $ref: "#/components/schemas/CheckResult"
+        version:
+          type: string
+    CheckResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [up, down]
+        message:
+          type: string
+    MetricsReport:
+      type: object
+      properties:
+        uptime_secs:
+          type: integer
+        memory_usage_bytes:
+          type: integer
+        active_requests:
+          type: integer
+        error_rate:
+          type: number
+          format: float
+        ledger_ingestion_latency_ms:
+          type: integer
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        database_connected:
+          type: boolean
+        redis_connected:
+          type: boolean
+    SystemStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        metrics:
+          $ref: "#/components/schemas/MetricsReport"
+    ProfileTriggerRequest:
+      type: object
+      properties:
+        label:
+          type: string
+        duration_secs:
+          type: integer
+        sample_rate_hz:
+          type: integer
+          default: 100
+    ProfileTriggerResponse:
+      type: object
+      properties:
+        profile_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+    ContractBenchmarkRequest:
+      type: object
+      properties:
+        contract_id:
+          type: string
+        benchmark_name:
+          type: string
+        samples:
+          type: array
+          items:
+            type: object
+        baseline:
+          type: string
+          nullable: true
+        thresholds:
+          type: object
+          nullable: true
+    ContractBenchmarkReport:
+      type: object
+      properties:
+        contract_id:
+          type: string
+        benchmark_name:
+          type: string
+        summary:
+          type: object
+    DashboardData:
+      type: object
+      properties:
+        metrics:
+          $ref: "#/components/schemas/SystemMetrics"
+        active_recovery_tasks:
+          type: array
+          items:
+            type: object
+        active_alerts:
+          type: array
+          items:
+            type: object
+    SystemMetrics:
+      type: object
+      properties:
+        uptime:
+          type: integer
+        memory_usage:
+          type: integer
+        cpu_usage:
+          type: number
+          format: float
+    DashboardMetrics:
+      type: object
+      properties:
+        total_contracts:
+          type: integer
+        total_transactions:
+          type: integer
+        avg_processing_time_ms:
+          type: number
+          format: float
+        failed_transactions_24h:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+    ContractStats:
+      type: object
+      properties:
+        contract_id:
+          type: string
+        invocation_count:
+          type: integer
+        last_invoked:
+          type: string
+          format: date-time
+          nullable: true
+        avg_gas_cost:
+          type: number
+          format: float
+    AuditEventRequest:
+      type: object
+      properties:
+        aggregate_id:
+          type: string
+        event_type:
+          type: string
+        user_id:
+          type: string
+        details:
+          type: object
+    AuditEventRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        event_type:
+          type: string
+        user_id:
+          type: string
+          nullable: true
+        details:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+    NewTestCoverage:
+      type: object
+      properties:
+        project:
+          type: string
+        coverage_data:
+          type: object
+    SystemStatsResponse:
+      type: object
+      properties:
+        database_connected:
+          type: boolean
+        redis_connected:
+          type: boolean
+        total_contract_calls:
+          type: integer
+          format: int64
+        system_uptime_secs:
+          type: integer
+        maintenance_mode:
+          type: boolean
+    MaintenanceRequest:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+    BuildErrorAnalytics:
+      type: object
+      properties:
+        total_errors:
+          type: integer
+          format: int64
+        error_types:
+          type: array
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              - type: string
+              - type: integer
+        recent_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/BuildErrorDetail"
+    BuildErrorDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        error_type:
+          type: string
+        message:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+    ContractExecutionRequest:
+      type: object
+      required:
+        - wasm_base64
+        - function
+      properties:
+        wasm_base64:
+          type: string
+          description: Base64-encoded WASM binary
+        function:
+          type: string
+          description: Contract function to invoke
+        args:
+          type: array
+          items:
+            type: object
+          description: Function arguments
+    ContractExecutionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        result:
+          type: object
+        gas_used:
+          type: integer
+        events:
+          type: array
+          items:
+            type: object
+    GraphQLRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+        operation_name:
+          type: string
+        variables:
+          type: object
+    GraphQLResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          nullable: true
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphQLError"
+    GraphQLError:
+      type: object
+      properties:
+        message:
+          type: string
+        path:
+          type: array
+          items:
+            type: string
+x-webhooks:
+  dashboard-updates:
+    post:
+      summary: Real-time dashboard push via WebSocket
+      operationId: dashboardUpdateWebhook
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DashboardMetrics"

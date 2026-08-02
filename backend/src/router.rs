@@ -29,6 +29,7 @@ use crate::{
         content_type::require_json_content_type,
         idempotency::idempotency_middleware,
         logging::logging_middleware,
+        request_id::request_id_middleware,
     },
     app_state::ApplicationStates,
     config::{
@@ -235,9 +236,11 @@ pub fn build_router(
             profiling_state,
             logging_middleware,
         ))
+        .layer(middleware::from_fn(request_id_middleware))
         .layer(middleware::from_fn(require_json_content_type))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
+        .fallback(crate::api::errors::api_fallback)
 }
 
 fn build_cors_layer(config: &AppConfig) -> CorsLayer {

@@ -1,0 +1,42 @@
+{
+  "branches": ["main"],
+  "plugins": [
+    [
+      "@semantic-release/commit-analyzer",
+      {
+        "preset": "conventionalcommits"
+      }
+    ],
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "preset": "conventionalcommits"
+      }
+    ],
+    [
+      "@semantic-release/changelog",
+      {
+        "changelogFile": "CHANGELOG.md"
+      }
+    ],
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "NEXT_RELEASE_VERSION=${nextRelease.version} python3 - <<'PY'\nimport os, re\nfrom pathlib import Path\nversion = os.environ['NEXT_RELEASE_VERSION']\nfor rel_path in ['Cargo.toml', 'backend/Cargo.toml']:\n    path = Path(rel_path)\n    if not path.exists():\n        continue\n    text = path.read_text()\n    pattern = re.compile(r'^(version\\s*=\\s*\")([^\"]+)(\")', re.M)\n    new_text, count = pattern.subn(lambda match: f'{match.group(1)}{version}{match.group(3)}', text, count=1)\n    if count:\n        path.write_text(new_text)\nPY"
+      }
+    ],
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["CHANGELOG.md", "Cargo.toml", "backend/Cargo.toml"],
+        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+      }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "assets": []
+      }
+    ]
+  ]
+}

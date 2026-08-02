@@ -967,6 +967,7 @@ fn test_aggregator_calls_multiple_pools() {
 | `std` | No | Enable `std` support (required for snapshot testing) |
 | `snapshots` | No | Snapshot-based cost regression testing |
 | `derive` | Yes | Enable `#[fixture]` and related derive macros |
+| `full` | No | Enable all optional crucible features (`snapshots`, `derive`) |
 | `token-mocks` | Yes | Include the `MockToken` / SAC helpers |
 | `serde` | No | Serialize/deserialize fixtures and cost reports |
 
@@ -974,7 +975,7 @@ Enable optional features in `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-crucible = { version = "0.1", features = ["snapshots", "serde"] }
+crucible = { version = "0.1", features = ["full"] }
 ```
 
 ---

@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/benelabs/crucible/compare/v1.1.0...v1.2.0) (2026-08-02)
+
+### Features
+
+* implement request id propagation and mock testing utilities ([4b8e1fa](https://github.com/benelabs/crucible/commit/4b8e1fa18d6d4c0dab64776c46c7d973c9caf46d))
+
 ## [1.1.0](https://github.com/benelabs/crucible/compare/v1.0.0...v1.1.0) (2026-08-02)
 
 ### Features

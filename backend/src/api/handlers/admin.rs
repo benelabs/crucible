@@ -3,7 +3,7 @@ use crate::api::handlers::profiling::AppState;
 use crate::config::reload::ConfigManager;
 use crate::config::sanitize;
 use crate::error::AppError;
-use crate::services::contract_call_logger::{ContractCallLog, ContractCallLogger};
+use crate::services::contract_call_logger::ContractCallLogger;
 use axum::{extract::State, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};

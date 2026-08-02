@@ -19,6 +19,8 @@ pub struct ErrorResponse {
     pub code: String,
     /// Human-readable error message.
     pub message: String,
+    /// Timestamp of when the error occurred.
+    pub timestamp: String,
 }
 
 /// Application-level error type that unifies all possible error sources.
@@ -64,6 +66,10 @@ pub enum AppError {
     /// 422 — The request body was well-formed but semantically invalid.
     #[error("Validation error: {0}")]
     ValidationError(String),
+
+    /// 415 — The request Content-Type is not supported.
+    #[error("Unsupported media type: {0}")]
+    UnsupportedMediaType(String),
 
     /// 500 — An internal database error occurred.
     #[error("Database error: {0}")]
@@ -127,6 +133,11 @@ impl IntoResponse for AppError {
             AppError::ValidationError(msg) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "validation_error",
+                msg.clone(),
+            ),
+            AppError::UnsupportedMediaType(msg) => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_media_type",
                 msg.clone(),
             ),
             AppError::Database(e) => {
@@ -201,6 +212,7 @@ impl IntoResponse for AppError {
             Json(ErrorResponse {
                 code: code.to_string(),
                 message,
+                timestamp: chrono::Utc::now().to_rfc3339(),
             }),
         )
             .into_response()
@@ -246,9 +258,11 @@ mod tests {
         let resp = ErrorResponse {
             code: "not_found".into(),
             message: "Resource not found".into(),
+            timestamp: "2026-07-29T16:00:00Z".into(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"code\":\"not_found\""));
         assert!(json.contains("\"message\":\"Resource not found\""));
+        assert!(json.contains("\"timestamp\":\"2026-07-29T16:00:00Z\""));
     }
 }

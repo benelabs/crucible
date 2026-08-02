@@ -1,9 +1,7 @@
 #![cfg(test)]
 
 use proptest::prelude::*;
-use soroban_sdk::{
-    testutils::Address as _, token, Address, Env, Vec,
-};
+use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
 use treasury::Treasury;
 
 fn create_token(env: &Env) -> (Address, Address) {

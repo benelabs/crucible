@@ -1,5 +1,5 @@
 use axum::{body::Body, http::Request, http::StatusCode};
-use backend::services::audit::{AuditDomainEvent, AuditEventRequest, AuditService, routes};
+use backend::services::audit::{routes, AuditDomainEvent, AuditEvent, AuditEventRequest, AuditService};
 use redis::AsyncCommands;
 use serde_json::json;
 use sqlx::{Executor, PgPool, Row};
@@ -21,9 +21,7 @@ async fn setup() -> (AuditService, PgPool, Arc<redis::Client>) {
 }
 
 async fn cleanup_audit_logs(db: &PgPool) {
-    let _ = sqlx::query("DELETE FROM audit_logs")
-        .execute(db)
-        .await;
+    let _ = sqlx::query("DELETE FROM audit_logs").execute(db).await;
 }
 
 #[tokio::test]
@@ -54,7 +52,10 @@ async fn test_log_event_success() {
         let user_id: Option<String> = row.get("user_id");
         Some((event_type, user_id))
     });
-    assert_eq!(row.as_ref().map(|(_, user_id)| user_id.clone()), Some(Some("user123".to_string())));
+    assert_eq!(
+        row.as_ref().map(|(_, user_id)| user_id.clone()),
+        Some(Some("user123".to_string()))
+    );
 
     let mut conn = redis.get_async_connection().await.unwrap();
     let val: String = conn.lpop("audit_event_stream", None).await.unwrap();
@@ -83,8 +84,9 @@ async fn test_log_audit_event_handler() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let _ = tokio::time::timeout(
         std::time::Duration::from_millis(100),
-        axum::serve(listener, app.clone())
-    ).await;
+        axum::serve(listener, app.clone()),
+    )
+    .await;
 
     let resp = app.oneshot(response).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);

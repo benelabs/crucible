@@ -97,24 +97,21 @@ mod tests {
 
     #[test]
     fn test_config_dump_produces_valid_json() {
-        let config = AppConfig::load(Environment::Development)
-            .expect("Failed to load test config");
+        let config = AppConfig::load(Environment::Development).expect("Failed to load test config");
         let sanitized = sanitize(&config);
-        let json_str = serde_json::to_string_pretty(&sanitized)
-            .expect("Failed to serialize config");
+        let json_str =
+            serde_json::to_string_pretty(&sanitized).expect("Failed to serialize config");
 
         // Verify it can be parsed back
-        let _: serde_json::Value =
-            serde_json::from_str(&json_str).expect("Invalid JSON produced");
+        let _: serde_json::Value = serde_json::from_str(&json_str).expect("Invalid JSON produced");
     }
 
     #[test]
     fn test_config_dump_redacts_secrets() {
-        let config = AppConfig::load(Environment::Development)
-            .expect("Failed to load test config");
+        let config = AppConfig::load(Environment::Development).expect("Failed to load test config");
         let sanitized = sanitize(&config);
-        let json_str = serde_json::to_string_pretty(&sanitized)
-            .expect("Failed to serialize config");
+        let json_str =
+            serde_json::to_string_pretty(&sanitized).expect("Failed to serialize config");
 
         // Ensure no real secrets in output
         assert!(!json_str.contains(&config.database.url));
@@ -126,11 +123,10 @@ mod tests {
 
     #[test]
     fn test_config_dump_preserves_non_secrets() {
-        let config = AppConfig::load(Environment::Development)
-            .expect("Failed to load test config");
+        let config = AppConfig::load(Environment::Development).expect("Failed to load test config");
         let sanitized = sanitize(&config);
-        let json_str = serde_json::to_string_pretty(&sanitized)
-            .expect("Failed to serialize config");
+        let json_str =
+            serde_json::to_string_pretty(&sanitized).expect("Failed to serialize config");
 
         // Ensure non-sensitive values are preserved in JSON
         assert!(json_str.contains(&config.server.host.to_string()));

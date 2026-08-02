@@ -15,7 +15,8 @@ fn test_dead_letter_job_serialization() {
     };
 
     let json_str = serde_json::to_string(&job).expect("Should serialize DeadLetterJob");
-    let deserialized: DeadLetterJob = serde_json::from_str(&json_str).expect("Should deserialize DeadLetterJob");
+    let deserialized: DeadLetterJob =
+        serde_json::from_str(&json_str).expect("Should deserialize DeadLetterJob");
 
     assert_eq!(deserialized.id, "job-999");
     assert_eq!(deserialized.attempts, 5);

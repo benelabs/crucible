@@ -140,7 +140,9 @@ impl MockToken {
         let admin = env
             .inner()
             .register(soroban_sdk::testutils::MockAuthContract {}, ());
-        let sac = env.inner().register_stellar_asset_contract_v2(admin.clone());
+        let sac = env
+            .inner()
+            .register_stellar_asset_contract_v2(admin.clone());
         let address = sac.address();
         env.set_xlm_token_address(address.clone());
 
@@ -195,7 +197,9 @@ impl MockToken {
         let admin = env
             .inner()
             .register(soroban_sdk::testutils::MockAuthContract {}, ());
-        let sac = env.inner().register_stellar_asset_contract_v2(admin.clone());
+        let sac = env
+            .inner()
+            .register_stellar_asset_contract_v2(admin.clone());
         let address = sac.address();
 
         Self {
@@ -449,6 +453,66 @@ impl MockToken {
         let client = StellarAssetClient::new(&self.env, &self.address);
         client.clawback(from, &amount);
     }
+
+    /// Claws back all tokens from an account (admin operation).
+    ///
+    /// This is a convenience method that automatically retrieves the account's
+    /// balance and claws back the entire amount. If the account has zero balance,
+    /// this is a no-op.
+    ///
+    /// # Arguments
+    ///
+    /// * `from` - The address to claw back all tokens from
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use crucible::prelude::*;
+    /// let env = MockEnv::builder().build();
+    /// let token = MockToken::xlm(&env);
+    /// let alice = env.account("alice");
+    /// 
+    /// token.mint(&alice.address(), 1_000_000);
+    /// token.clawback_all(&alice.address());
+    /// assert_eq!(token.balance(&alice.address()), 0);
+    /// ```
+    pub fn clawback_all(&self, from: &Address) {
+        let balance = self.balance(from);
+        if balance == 0 {
+            return; // No-op for zero balance
+        }
+        self.clawback(from, balance);
+    }
+
+    /// Burns all tokens from the specified account.
+    ///
+    /// This is a convenience method that automatically retrieves the account's
+    /// balance and burns the entire amount. If the account has zero balance,
+    /// this is a no-op.
+    ///
+    /// # Arguments
+    ///
+    /// * `from` - The address to burn all tokens from
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use crucible::prelude::*;
+    /// let env = MockEnv::builder().build();
+    /// let token = MockToken::xlm(&env);
+    /// let alice = env.account("alice");
+    /// 
+    /// token.mint(&alice.address(), 1_000_000);
+    /// token.burn_all(&alice.address());
+    /// assert_eq!(token.balance(&alice.address()), 0);
+    /// ```
+    pub fn burn_all(&self, from: &Address) {
+        let balance = self.balance(from);
+        if balance == 0 {
+            return; // No-op for zero balance
+        }
+        self.burn(from, balance);
+    }
 }
 
 /// Converts a human-readable display amount to base units.
@@ -592,6 +656,60 @@ mod tests {
             token.allowance(&alice.address(), &spender.address()),
             500_000
         );
+    }
+
+    #[test]
+    fn test_transfer_from_consumes_allowance_and_updates_balances() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .with_account("spender", Stroops::from(0))
+            .with_account("bob", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        let spender = env.account("spender");
+        let bob = env.account("bob");
+
+        token.mint(&alice.address(), 1_000_000);
+        token.approve(&alice.address(), &spender.address(), 500_000, 1000);
+        token.transfer_from(
+            &spender.address(),
+            &alice.address(),
+            &bob.address(),
+            300_000,
+        );
+
+        assert_eq!(token.balance(&alice.address()), 700_000);
+        assert_eq!(token.balance(&bob.address()), 300_000);
+        assert_eq!(
+            token.allowance(&alice.address(), &spender.address()),
+            200_000
+        );
+    }
+
+    #[test]
+    fn test_transfer_from_exceeds_allowance_reverts() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .with_account("spender", Stroops::from(0))
+            .with_account("bob", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        let spender = env.account("spender");
+        let bob = env.account("bob");
+
+        token.mint(&alice.address(), 1_000_000);
+        token.approve(&alice.address(), &spender.address(), 200_000, 1000);
+
+        crate::assert_reverts!(token.transfer_from(
+            &spender.address(),
+            &alice.address(),
+            &bob.address(),
+            300_000
+        ));
     }
 
     #[test]
@@ -972,5 +1090,112 @@ mod tests {
 
         // Admin should be different from token address
         assert_ne!(admin, token.address());
+    }
+
+    // ── clawback_all and burn_all helpers ────────────────────────────────────
+
+    #[test]
+    fn test_clawback_all_removes_entire_balance() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+
+        // Mint tokens to alice
+        token.mint(&alice.address(), 1_000_000);
+        assert_eq!(token.balance(&alice.address()), 1_000_000);
+
+        // Claw back all tokens
+        token.clawback_all(&alice.address());
+
+        // Balance should be zero
+        assert_eq!(token.balance(&alice.address()), 0);
+    }
+
+    #[test]
+    fn test_clawback_all_with_zero_balance_is_noop() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+
+        // Alice has no tokens
+        assert_eq!(token.balance(&alice.address()), 0);
+
+        // Clawback all should be a no-op (not panic)
+        token.clawback_all(&alice.address());
+
+        // Balance should still be zero
+        assert_eq!(token.balance(&alice.address()), 0);
+    }
+
+    #[test]
+    fn test_burn_all_removes_entire_balance() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+
+        // Mint tokens to alice
+        token.mint(&alice.address(), 2_500_000);
+        assert_eq!(token.balance(&alice.address()), 2_500_000);
+
+        // Burn all tokens
+        token.burn_all(&alice.address());
+
+        // Balance should be zero
+        assert_eq!(token.balance(&alice.address()), 0);
+    }
+
+    #[test]
+    fn test_burn_all_with_zero_balance_is_noop() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+
+        // Alice has no tokens
+        assert_eq!(token.balance(&alice.address()), 0);
+
+        // Burn all should be a no-op (not panic)
+        token.burn_all(&alice.address());
+
+        // Balance should still be zero
+        assert_eq!(token.balance(&alice.address()), 0);
+    }
+
+    #[test]
+    fn test_clawback_all_vs_manual_balance_lookup() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .with_account("bob", Stroops::from(0))
+            .build();
+
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        let bob = env.account("bob");
+
+        // Set up: mint tokens to both
+        token.mint(&alice.address(), 1_000_000);
+        token.mint(&bob.address(), 1_000_000);
+
+        // Old way: manual balance lookup
+        let balance = token.balance(&alice.address());
+        token.clawback(&alice.address(), balance);
+
+        // New way: helper
+        token.clawback_all(&bob.address());
+
+        // Both should have zero balance
+        assert_eq!(token.balance(&alice.address()), 0);
+        assert_eq!(token.balance(&bob.address()), 0);
     }
 }

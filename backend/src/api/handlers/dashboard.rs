@@ -17,12 +17,9 @@
 //! ```
 
 use axum::{
-    body::Body,
     extract::{Path, State},
-    http::{Request, StatusCode},
     response::IntoResponse,
-    routing::get,
-    Json, Router,
+    Json,
 };
 use chrono::{DateTime, Utc};
 use redis::{AsyncCommands, Client as RedisClient};
@@ -33,7 +30,6 @@ use thiserror::Error;
 use tracing::{debug, error, warn};
 use utoipa::ToSchema;
 
-use crate::error::AppError;
 use crate::services::{
     error_recovery::{ErrorManager, RecoveryTask},
     log_alerts::{Alert, AlertManager},
@@ -386,7 +382,7 @@ mod tests {
     #[tokio::test]
     async fn test_dashboard_metrics_fields() {
         let state = make_state();
-        state.metrics_exporter.update_metrics(42.0, 2048, 120).await;
+        state.metrics_exporter.update_metrics(42.0, 2048, 120, 4096, 2048).await;
 
         let app = make_app(state);
         let response = app

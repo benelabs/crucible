@@ -4,6 +4,7 @@
 //! - `assert_reverts!` — assert a contract call panics (reverts)
 //! - `assert_emitted!` — assert a specific event was emitted
 //! - `assert_not_emitted!` — assert no events were emitted
+//! - `assert_approx_eq!` — assert approximate numeric equality within tolerance
 
 /// Asserts that a contract invocation panics (reverts).
 ///
@@ -44,7 +45,7 @@ macro_rules! assert_reverts {
              Expression : {expr}\n\
              Context    : {ctx}",
             expr = stringify!($expr),
-            ctx  = $msg,
+            ctx = $msg,
         );
     }};
 }
@@ -71,17 +72,16 @@ macro_rules! assert_reverts {
 macro_rules! assert_emitted {
     ($env:expr, $contract_id:expr, $topics:expr, $data:expr) => {{
         extern crate std;
-        use std::string::ToString as _;
         use soroban_sdk::testutils::Events as _;
         use soroban_sdk::IntoVal as _;
         use soroban_sdk::TryFromVal as _;
+        use std::string::ToString as _;
         let __env = $env.inner();
         let __all = __env.events().all();
         let __want_contract: soroban_sdk::Address = $contract_id.clone();
         let __want_topics: soroban_sdk::Vec<soroban_sdk::Val> = ($topics).into_val(__env);
         let __want_data: soroban_sdk::Val = ($data).into_val(__env);
-        let __want_data_xdr =
-            soroban_sdk::xdr::ScVal::try_from_val(__env, &__want_data).unwrap();
+        let __want_data_xdr = soroban_sdk::xdr::ScVal::try_from_val(__env, &__want_data).unwrap();
         let __want_topics_xdr: soroban_sdk::xdr::VecM<soroban_sdk::xdr::ScVal> = __want_topics
             .iter()
             .map(|v| soroban_sdk::xdr::ScVal::try_from_val(__env, &v).unwrap())
@@ -104,15 +104,24 @@ macro_rules! assert_emitted {
              Events emitted by this contract ({count}):\n\
              {actual}",
             contract = __want_contract,
-            topics   = __want_topics,
-            data     = __want_data_xdr,
-            count    = __filtered.events().len(),
-            actual   = {
-                let lines: std::vec::Vec<std::string::String> = __filtered.events().iter().enumerate().map(|(i, ev)| {
-                    let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
-                    std::format!("  [{i}] topics={:?} data={:?}", body.topics, body.data)
-                }).collect();
-                if lines.is_empty() { "  (none)".to_string() } else { lines.join("\n") }
+            topics = __want_topics,
+            data = __want_data_xdr,
+            count = __filtered.events().len(),
+            actual = {
+                let lines: std::vec::Vec<std::string::String> = __filtered
+                    .events()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ev)| {
+                        let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
+                        std::format!("  [{i}] topics={:?} data={:?}", body.topics, body.data)
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    "  (none)".to_string()
+                } else {
+                    lines.join("\n")
+                }
             },
         );
     }};
@@ -130,8 +139,8 @@ macro_rules! assert_emitted {
 macro_rules! assert_not_emitted {
     ($env:expr) => {{
         extern crate std;
-        use std::string::ToString as _;
         use soroban_sdk::testutils::Events as _;
+        use std::string::ToString as _;
         let __events = $env.inner().events().all();
         assert!(
             __events.events().is_empty(),
@@ -141,13 +150,75 @@ macro_rules! assert_not_emitted {
              {list}",
             count = __events.events().len(),
             list = {
-                let lines: std::vec::Vec<std::string::String> = __events.events().iter().enumerate().map(|(i, ev)| {
-                    let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
-                    std::format!("  [{i}] contract={:?} topics={:?} data={:?}",
-                        ev.contract_id, body.topics, body.data)
-                }).collect();
+                let lines: std::vec::Vec<std::string::String> = __events
+                    .events()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ev)| {
+                        let soroban_sdk::xdr::ContractEventBody::V0(ref body) = ev.body;
+                        std::format!(
+                            "  [{i}] contract={:?} topics={:?} data={:?}",
+                            ev.contract_id,
+                            body.topics,
+                            body.data
+                        )
+                    })
+                    .collect();
                 lines.join("\n")
             },
+        );
+    }};
+}
+
+/// Asserts two numeric values are approximately equal within a tolerance.
+///
+/// This is useful for fee and reward calculations where rounding can produce
+/// small expected deltas.
+///
+/// # Example
+///
+/// ```ignore
+/// crate::assert_approx_eq!(100_i128, 101_i128, 1_i128);
+/// crate::assert_approx_eq!(10.0_f64, 10.01_f64, 0.02_f64);
+/// ```
+#[macro_export]
+macro_rules! assert_approx_eq {
+    ($actual:expr, $expected:expr, $tolerance:expr) => {{
+        let __actual = $actual;
+        let __expected = $expected;
+        let __tolerance = $tolerance;
+        let __zero = __tolerance - __tolerance;
+
+        assert!(
+            __tolerance >= __zero,
+            "assert_approx_eq! failed: tolerance must be non-negative.\n\
+             \n\
+             actual    = {:?}\n\
+             expected  = {:?}\n\
+             tolerance = {:?}",
+            __actual,
+            __expected,
+            __tolerance,
+        );
+
+        let __diff = if __actual >= __expected {
+            __actual - __expected
+        } else {
+            __expected - __actual
+        };
+
+        assert!(
+            __diff <= __tolerance,
+            "assert_approx_eq! failed: difference exceeds tolerance.\n\
+             \n\
+             actual     = {:?}\n\
+             expected   = {:?}\n\
+             difference = {:?}\n\
+             tolerance  = {:?}",
+            __actual,
+            __expected,
+            __diff,
+            __tolerance,
         );
     }};
 }
@@ -183,5 +254,19 @@ mod tests {
         // Each event should be found even though two events are present.
         crate::assert_emitted!(env, id, (symbol_short!("first"),), 1_u32);
         crate::assert_emitted!(env, id, (symbol_short!("second"),), 2_u32);
+    }
+
+    #[test]
+    fn test_assert_approx_eq_accepts_values_within_tolerance() {
+        crate::assert_approx_eq!(100_i128, 102_i128, 2_i128);
+        crate::assert_approx_eq!(10.0_f64, 10.01_f64, 0.02_f64);
+    }
+
+    #[test]
+    fn test_assert_approx_eq_panics_when_outside_tolerance() {
+        let result = std::panic::catch_unwind(|| {
+            crate::assert_approx_eq!(100_i128, 105_i128, 2_i128);
+        });
+        assert!(result.is_err());
     }
 }

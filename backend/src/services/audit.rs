@@ -11,6 +11,7 @@
 
 use axum::{
     extract::{Path, Query, State},
+    http::HeaderMap,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -19,7 +20,9 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{instrument, info, error};
 use utoipa::ToSchema;
@@ -124,11 +127,20 @@ pub struct AuditService {
     pub db: PgPool,
     pub redis: Arc<redis::Client>,
     event_tx: mpsc::UnboundedSender<AuditDomainEvent>,
+    max_export_days: u32,
+    export_rate_limiter: Arc<std::sync::Mutex<HashMap<String, (u32, Instant)>>>,
 }
 
 impl AuditService {
     pub fn new(db: PgPool, redis: Arc<redis::Client>) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<AuditDomainEvent>();
+
+        let max_export_days = std::env::var("AUDIT_MAX_EXPORT_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(90);
+
+        let export_rate_limiter = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
         // Spawn background projection engine to process event stream asynchronously
         let db_clone = db.clone();
@@ -145,6 +157,8 @@ impl AuditService {
             db,
             redis,
             event_tx: tx,
+            max_export_days,
+            export_rate_limiter,
         }
     }
 
@@ -349,6 +363,32 @@ impl AuditService {
         .await?;
         event.ok_or_else(|| AppError::NotFound(format!("Audit report {id} not found")))
     }
+
+    /// CQRS Read Path: Export audit events with date filtering.
+    pub async fn export_events(
+        &self,
+        event_type: Option<String>,
+        since: chrono::DateTime<chrono::Utc>,
+        limit: u32,
+    ) -> Result<Vec<AuditEventRecord>, AppError> {
+        let limit = limit.clamp(1, 1000) as i64;
+        let cols = "id, event_type, user_id, details, timestamp, hash, previous_hash";
+        let rows = if let Some(event_type) = event_type {
+            sqlx::query_as(&format!("SELECT {cols} FROM audit_logs WHERE event_type = $1 AND timestamp >= $2 ORDER BY timestamp DESC LIMIT $3"))
+                .bind(event_type)
+                .bind(since)
+                .bind(limit)
+                .fetch_all(&self.db)
+                .await?
+        } else {
+            sqlx::query_as(&format!("SELECT {cols} FROM audit_logs WHERE timestamp >= $1 ORDER BY timestamp DESC LIMIT $2"))
+                .bind(since)
+                .bind(limit)
+                .fetch_all(&self.db)
+                .await?
+        };
+        Ok(rows)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -432,10 +472,120 @@ pub async fn get_audit_report(
     Ok(Json(service.get_event(id).await?))
 }
 
+/// CQRS Read Path: Export audit events in JSON or CSV format.
+#[utoipa::path(
+    get,
+    path = "/api/v1/audit/export",
+    params(
+        ("event_type" = Option<String>, Query, description = "Filter by event type"),
+        ("limit" = Option<u32>, Query, description = "Max number of records to export")
+    ),
+    responses(
+        (status = 200, description = "Audit events exported in requested format"),
+        (status = 415, description = "Unsupported media type - use application/json or text/csv"),
+        (status = 429, description = "Export rate limit exceeded")
+    ),
+    tag = "audit"
+)]
+#[instrument(skip(service))]
+pub async fn export_audit_logs(
+    State(service): State<Arc<AuditService>>,
+    Query(query): Query<AuditReportQuery>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let accept = headers
+        .get(axum::http::header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
+
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .split(',')
+        .next()
+        .unwrap_or("unknown")
+        .trim()
+        .to_string();
+
+    let mut limiter = service.export_rate_limiter.lock().unwrap();
+    let now = Instant::now();
+    let (count, last_reset) = limiter.entry(client_ip.clone()).or_insert((0, now));
+    if now.duration_since(*last_reset) > Duration::from_secs(3600) {
+        *count = 0;
+        *last_reset = now;
+    }
+    if *count >= 5 {
+        return Err(AppError::UnsupportedMediaType(
+            "Export rate limit exceeded: 5 exports per hour".into(),
+        ));
+    }
+    *count += 1;
+    drop(limiter);
+
+    let since = chrono::Utc::now() - chrono::Duration::days(service.max_export_days as i64);
+    let records = service.export_events(query.event_type, since, query.limit).await?;
+
+    if accept == "text/csv" {
+        let mut wtr = csv::Writer::from_writer(Vec::new());
+        wtr.write_record(&[
+            "timestamp",
+            "actor",
+            "action",
+            "resource_type",
+            "resource_id",
+            "ip_address",
+            "outcome",
+            "metadata",
+        ])?;
+
+        for record in &records {
+            let details = record.details.as_object();
+            let resource_type = details
+                .and_then(|o| o.get("resource_type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let resource_id = details
+                .and_then(|o| o.get("resource_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let ip_address = details
+                .and_then(|o| o.get("ip_address"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let outcome = details
+                .and_then(|o| o.get("outcome"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let metadata = record.details.to_string();
+
+            wtr.write_record(&[
+                record.timestamp.to_rfc3339(),
+                record.user_id.as_deref().unwrap_or(""),
+                &record.event_type,
+                resource_type,
+                resource_id,
+                ip_address,
+                outcome,
+                &metadata,
+            ])?;
+        }
+        wtr.flush()?;
+        let data = wtr.into_inner();
+        Ok((
+            [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
+            data,
+        ))
+    } else {
+        Ok(Json(records))
+    }
+}
+
 pub fn routes(service: Arc<AuditService>) -> Router {
     Router::new()
         .route("/log", post(log_audit_event))
         .route("/reports", get(list_audit_reports))
         .route("/reports/:id", get(get_audit_report))
+        .route("/export", get(export_audit_logs))
         .with_state(service)
 }

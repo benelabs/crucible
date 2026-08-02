@@ -140,7 +140,7 @@ fn bearer_token(request: &Request) -> Option<String> {
 }
 
 fn reject(status: StatusCode, code: &str, message: &str) -> Response {
-    (status, Json(json!({ "code": code, "message": message }))).into_response()
+    crate::api::errors::make_error_response(status, code, message)
 }
 
 /// Axum middleware enforcing authentication **and** admin authorization on the

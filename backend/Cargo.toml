@@ -1,6 +1,6 @@
 [package]
 name = "backend"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Backend API server for the Crucible smart contract testing platform"
 license = "MIT"
@@ -83,7 +83,7 @@ url = { version = "2", features = ["serde"] }
 
 # API documentation
 utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid", "decimal"] }
-utoipa-swagger-ui = { version = "7.1", features = ["axum"] }
+utoipa-swagger-ui = { version = "7.1", features = ["axum", "vendored"] }
 
 # Background jobs
 apalis = { version = "0.6" }
@@ -92,6 +92,9 @@ apalis-redis = "0.6"
 # Scheduler
 tokio-util = "0.7"
 cron = "0.12"
+
+# CSV serialization
+csv = { version = "1.3", features = ["serde"] }
 
 # Optional mock support for tests
 mockall = { version = "0.15", optional = true }

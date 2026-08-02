@@ -113,14 +113,14 @@ impl TokenBucketRateLimiter {
                     "#,
                 );
 
-                let result: Result<(i32, u64, u64), _> = script
+                if let Ok((allowed_int, remaining, capacity)) = script
                     .key(&key_name)
                     .arg(self.config.capacity)
                     .arg(self.config.refill_rate_per_sec)
                     .arg(now)
-                    .invoke_async(&mut conn)
-                    .await;
-                if let Ok((allowed_int, remaining, capacity)) = result {
+                    .invoke_async::<(i32, u64, u64)>(&mut conn)
+                    .await
+                {
                     return Ok(RateLimitResult {
                         allowed: allowed_int == 1,
                         limit: capacity,
@@ -231,18 +231,17 @@ pub async fn rate_limit_middleware(
     match limiter.check_and_consume(&key).await {
         Ok(result) => {
             if !result.allowed {
-                let mut headers = HeaderMap::new();
-                headers.insert("X-RateLimit-Limit", HeaderValue::from(result.limit));
-                headers.insert("X-RateLimit-Remaining", HeaderValue::from(result.remaining));
-                headers.insert("X-RateLimit-Reset", HeaderValue::from(result.reset_secs));
-                headers.insert("Retry-After", HeaderValue::from(result.reset_secs));
-
-                return (
+                let mut response = crate::api::errors::make_error_response(
                     StatusCode::TOO_MANY_REQUESTS,
-                    headers,
+                    "too_many_requests",
                     "429 Too Many Requests: Rate limit exceeded",
-                )
-                    .into_response();
+                );
+                let response_headers = response.headers_mut();
+                response_headers.insert("X-RateLimit-Limit", HeaderValue::from(result.limit));
+                response_headers.insert("X-RateLimit-Remaining", HeaderValue::from(result.remaining));
+                response_headers.insert("X-RateLimit-Reset", HeaderValue::from(result.reset_secs));
+                response_headers.insert("Retry-After", HeaderValue::from(result.reset_secs));
+                return response;
             }
 
             let mut response = next.run(request).await;

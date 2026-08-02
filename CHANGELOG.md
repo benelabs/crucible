@@ -1,3 +1,10 @@
+## [1.1.0](https://github.com/benelabs/crucible/compare/v1.0.0...v1.1.0) (2026-08-02)
+
+### Features
+
+* add assert_approx_eq macro and allowance-flow mock tests ([f0035fc](https://github.com/benelabs/crucible/commit/f0035fc760133bfde6015834d5a7be55eff72178)), closes [#631](https://github.com/benelabs/crucible/issues/631) [#632](https://github.com/benelabs/crucible/issues/632)
+* improve backend error responses, redis retry strategy, sys metrics, and worker shutdown ([53c94e0](https://github.com/benelabs/crucible/commit/53c94e0579d2a651743f5feacd4810cf3fa461af))
+
 ## 1.0.0 (2026-08-02)
 
 ### Features

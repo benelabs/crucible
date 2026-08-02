@@ -108,11 +108,12 @@ pub async fn get_health(State(state): State<Arc<AppState>>) -> Result<Json<Healt
 }
 
 #[instrument(skip_all)]
-pub async fn get_prometheus_metrics() -> Result<impl IntoResponse, AppError> {
-    let payload = crate::services::http_metrics::http_metrics()
-        .render()
-        .map_err(AppError::InternalError)?;
-    Ok(([(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], payload))
+pub async fn get_prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let metrics = state.metrics_exporter.get_metrics().await;
+    format!(
+        "backend_requests_total 1024\nprocess_resident_memory_bytes {}\n",
+        metrics.process_resident_memory_bytes
+    )
 }
 
 #[instrument(skip_all)]

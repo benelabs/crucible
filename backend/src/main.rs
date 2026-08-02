@@ -115,7 +115,7 @@ async fn main() -> Result<(), anyhow::Error> {
     tokio::spawn(MetricsExporter::run_collector(metrics_exporter.clone()));
     tokio::spawn(LogAggregator::run_worker(log_receiver));
 
-    let conn = ConnectionManager::new(redis_client.clone()).await?;
+    let conn = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
     let storage: RedisStorage<TransactionMonitorJob> = RedisStorage::new(conn);
     tracing::info!("Redis connection established");
 
@@ -123,8 +123,8 @@ async fn main() -> Result<(), anyhow::Error> {
         .backend(storage)
         .build_fn(monitor_transaction);
 
-    let health_cache = ConnectionManager::new(redis_client.clone()).await?;
-    let health_queue = ConnectionManager::new(redis_client.clone()).await?;
+    let health_cache = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
+    let health_queue = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
 
     let health_state = backend::api::handlers::health::HealthState {
         db: db_pool.clone(),

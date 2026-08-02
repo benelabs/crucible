@@ -1,3 +1,13 @@
+## [1.3.0](https://github.com/benelabs/crucible/compare/v1.2.0...v1.3.0) (2026-08-02)
+
+### Features
+
+* **crucible:** add 'full' feature flag ([#788](https://github.com/benelabs/crucible/issues/788)) and MockEnv token accessors ([#786](https://github.com/benelabs/crucible/issues/786)) ([2469c30](https://github.com/benelabs/crucible/commit/2469c300a5fec35179db105fe5bcfbb2d1d87fe1))
+
+### Bug Fixes
+
+* **backend,contracts:** resolve [#787](https://github.com/benelabs/crucible/issues/787) 503 pool timeout and [#789](https://github.com/benelabs/crucible/issues/789) property fuzz tests ([25ec017](https://github.com/benelabs/crucible/commit/25ec01791ce0f30f4a5485d491b0d5dfdc166e98))
+
 ## [1.2.0](https://github.com/benelabs/crucible/compare/v1.1.0...v1.2.0) (2026-08-02)
 
 ### Features

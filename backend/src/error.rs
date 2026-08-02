@@ -65,6 +65,10 @@ pub enum AppError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
+    /// 415 — The request Content-Type is not supported.
+    #[error("Unsupported media type: {0}")]
+    UnsupportedMediaType(String),
+
     /// 500 — An internal database error occurred.
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
@@ -127,6 +131,11 @@ impl IntoResponse for AppError {
             AppError::ValidationError(msg) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "validation_error",
+                msg.clone(),
+            ),
+            AppError::UnsupportedMediaType(msg) => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_media_type",
                 msg.clone(),
             ),
             AppError::Database(e) => {

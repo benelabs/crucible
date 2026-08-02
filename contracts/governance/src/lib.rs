@@ -129,6 +129,11 @@ impl Governance {
             return Err("Insufficient voting power");
         }
 
+        // Check if voter already cast a vote for this proposal (Issue #680)
+        if storage.has(&DataKey::Vote(voter.clone(), proposal_id)) {
+            return Err("Already voted");
+        }
+
         // Record vote
         let vote = Vote {
             voter: voter.clone(),
@@ -259,5 +264,44 @@ impl PackedState {
 
     pub fn large_int(&self) -> u32 {
         ((self.packed >> 10) & 0xFFFFFFFF) as u32
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn test_double_voting_prevention() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, Governance);
+        let client = GovernanceClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let voter = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        client.initialize(&admin, &1_000_000);
+
+        // Grant voting power
+        let storage = env.storage().instance();
+        // Register proposal
+        let deadline = env.ledger().timestamp() + 1000;
+        let prop_id = client.create_proposal(&admin, &soroban_sdk::String::from_str(&env, "Test Proposal"), &soroban_sdk::String::from_str(&env, "Desc"), &deadline);
+
+        // Set voting power
+        env.as_contract(&contract_id, || {
+            env.storage().instance().set(&DataKey::VotingPower(voter.clone()), &500i128);
+        });
+
+        // First vote should succeed
+        let res1 = client.try_vote(&voter, &prop_id, &100i128, &true);
+        assert!(res1.is_ok());
+
+        // Second vote should fail with Already voted
+        let res2 = client.try_vote(&voter, &prop_id, &100i128, &true);
+        assert!(res2.is_err());
     }
 }

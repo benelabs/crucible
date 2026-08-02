@@ -9,9 +9,9 @@ use soroban_sdk::{
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DataKey {
-    Admins,   // Vec<Address>
-    Quorum,   // u32
-    Balances, // Map<(Address, Address), i128>
+    Admins,          // Vec<Address>
+    Quorum,          // u32
+    Balances,        // Map<(Address, Address), i128>
     ReentrancyGuard, // bool lock
 }
 
@@ -115,11 +115,15 @@ impl Treasury {
         if is_locked {
             panic_with_error!(env, ContractError::ReentrancyGuardLocked);
         }
-        env.storage().instance().set(&DataKey::ReentrancyGuard, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &true);
     }
 
     fn unlock_guard(env: &Env) {
-        env.storage().instance().set(&DataKey::ReentrancyGuard, &false);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &false);
     }
 
     /// Withdraw tokens from the treasury to a destination address.
@@ -211,10 +215,11 @@ impl Treasury {
         balances.set(key.clone(), new_balance);
         env.storage().instance().set(&DataKey::Balances, &balances);
 
-        env.events()
-            .publish((symbol_short!("flashloan"),), (borrower, token, amount, fee));
+        env.events().publish(
+            (symbol_short!("flashloan"),),
+            (borrower, token, amount, fee),
+        );
 
         Self::unlock_guard(&env);
     }
 }
-

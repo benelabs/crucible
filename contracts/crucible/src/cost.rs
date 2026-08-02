@@ -22,6 +22,31 @@ pub struct CostReport {
     instructions: u64,
     memory: u64,
     fee_stroops: Option<i128>,
+    #[cfg(feature = "std")]
+    report_cache: std::sync::OnceLock<String>,
+}
+
+use std::fmt;
+
+impl std::fmt::Display for CostReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let instructions_str = format_with_commas(self.instructions);
+        let memory_str = format_with_commas(self.memory);
+        let fee_str = format!("{} str", self.fee_stroops());
+        let source = if self.uses_sdk_fee_estimate() {
+            "SDK"
+        } else {
+            "heuristic"
+        };
+        writeln!(f, "+---------------------+-----------+")?;
+        writeln!(f, "| Metric              | Value     |")?;
+        writeln!(f, "+---------------------+-----------+")?;
+        writeln!(f, "| Instructions        | {:>9} |", instructions_str)?;
+        writeln!(f, "| Memory (bytes)      | {:>9} |", memory_str)?;
+        writeln!(f, "| Estimated fee       | {:>9} |", fee_str)?;
+        writeln!(f, "| Fee source          | {:>9} |", source)?;
+        write!(f, "+---------------------+-----------+")
+    }
 }
 
 impl CostReport {
@@ -31,19 +56,19 @@ impl CostReport {
             instructions,
             memory,
             fee_stroops: None,
+            #[cfg(feature = "std")]
+            report_cache: std::sync::OnceLock::new(),
         }
     }
 
     /// Creates a new cost report with an SDK-derived fee estimate.
-    pub fn new_with_fee_estimate(
-        instructions: u64,
-        memory: u64,
-        fee_stroops: i128,
-    ) -> Self {
+    pub fn new_with_fee_estimate(instructions: u64, memory: u64, fee_stroops: i128) -> Self {
         Self {
             instructions,
             memory,
             fee_stroops: Some(fee_stroops),
+            #[cfg(feature = "std")]
+            report_cache: std::sync::OnceLock::new(),
         }
     }
 
@@ -69,24 +94,17 @@ impl CostReport {
     }
 
     /// Returns a human-readable formatted table report of the costs.
+    #[cfg(feature = "std")]
     pub fn report(&self) -> String {
-        let instructions_str = format_with_commas(self.instructions);
-        let memory_str = format_with_commas(self.memory);
-        let fee_str = format!("{} str", self.fee_stroops());
-        let source = if self.uses_sdk_fee_estimate() { "SDK" } else { "heuristic" };
-        let mut output = String::new();
-        output.push_str("+---------------------+-----------+\n");
-        output.push_str("| Metric              | Value     |\n");
-        output.push_str("+---------------------+-----------+\n");
-        output.push_str(&format!(
-            "| Instructions        | {:>9} |\n",
-            instructions_str
-        ));
-        output.push_str(&format!("| Memory (bytes)      | {:>9} |\n", memory_str));
-        output.push_str(&format!("| Estimated fee       | {:>9} |\n", fee_str));
-        output.push_str(&format!("| Fee source          | {:>9} |\n", source));
-        output.push_str("+---------------------+-----------+");
-        output
+        self.report_cache
+            .get_or_init(|| format!("{}", self))
+            .clone()
+    }
+
+    /// Returns a human-readable formatted table report of the costs.
+    #[cfg(not(feature = "std"))]
+    pub fn report(&self) -> String {
+        format!("{}", self)
     }
 
     /// Returns a CI-safe ASCII report of the costs.
@@ -223,13 +241,7 @@ impl CostReport {
         );
 
         if let Some(fee) = self.fee_stroops {
-            check_i128_within_tolerance(
-                "fee_stroops",
-                saved.fee_stroops,
-                fee,
-                tolerance,
-                name,
-            );
+            check_i128_within_tolerance("fee_stroops", saved.fee_stroops, fee, tolerance, name);
         }
     }
 }
@@ -249,7 +261,13 @@ fn check_within_tolerance(metric: &str, saved: u64, current: u64, tolerance: f64
 }
 
 #[cfg(feature = "snapshots")]
-fn check_i128_within_tolerance(metric: &str, saved: i128, current: i128, tolerance: f64, name: &str) {
+fn check_i128_within_tolerance(
+    metric: &str,
+    saved: i128,
+    current: i128,
+    tolerance: f64,
+    name: &str,
+) {
     if saved == 0 {
         if current != 0 {
             panic!(
@@ -384,17 +402,9 @@ mod tests {
             memory_bytes: 5_000,
             fee_stroops: 42,
         };
-        fs::write(
-            &snap_path,
-            serde_json::to_string_pretty(&snapshot).unwrap(),
-        )
-        .unwrap();
+        fs::write(&snap_path, serde_json::to_string_pretty(&snapshot).unwrap()).unwrap();
 
-        let report = CostReport::new_with_fee_estimate(
-            10_000,
-            5_000,
-            42,
-        );
+        let report = CostReport::new_with_fee_estimate(10_000, 5_000, 42);
         report.assert_snapshot_with_tolerance(snap_name, 0.05);
 
         fs::remove_file(snap_path).unwrap();
@@ -419,17 +429,9 @@ mod tests {
             memory_bytes: 5_000,
             fee_stroops: 100,
         };
-        fs::write(
-            &snap_path,
-            serde_json::to_string_pretty(&snapshot).unwrap(),
-        )
-        .unwrap();
+        fs::write(&snap_path, serde_json::to_string_pretty(&snapshot).unwrap()).unwrap();
 
-        let report = CostReport::new_with_fee_estimate(
-            10_000,
-            5_000,
-            200,
-        );
+        let report = CostReport::new_with_fee_estimate(10_000, 5_000, 200);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             report.assert_snapshot_with_tolerance(snap_name, 0.05);
         }));

@@ -145,7 +145,10 @@ impl<'env> AccountBuilder<'env> {
         }
 
         let name = if self.name.is_empty() {
-            format!("unnamed_{}", UNNAMED_COUNTER.fetch_add(1, Ordering::Relaxed))
+            format!(
+                "unnamed_{}",
+                UNNAMED_COUNTER.fetch_add(1, Ordering::Relaxed)
+            )
         } else {
             self.name.clone()
         };
@@ -296,7 +299,10 @@ mod fixture_tests {
 
         let alice_addr = account_address(fixture.alice.clone());
         assert_eq!(alice_addr, fixture.alice.address());
-        assert_eq!(fixture.env.account("alice").address(), fixture.alice.address());
+        assert_eq!(
+            fixture.env.account("alice").address(),
+            fixture.alice.address()
+        );
 
         let debug = format!("{fixture:?}");
         assert!(debug.contains("alice"));

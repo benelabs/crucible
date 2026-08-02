@@ -4,7 +4,7 @@ extern crate std;
 use crucible::assert_reverts;
 use crucible::prelude::*;
 
-use crate::{Vesting, VestingClient, ContractError};
+use crate::{ContractError, Vesting, VestingClient};
 use soroban_sdk::testutils::Ledger;
 
 // ---------------------------------------------------------------------------
@@ -207,12 +207,12 @@ fn test_initialize_overflow_start_plus_cliff() {
     token.mint(&admin, TOTAL);
 
     env.mock_all_auths();
-    
+
     // start + cliff overflows (u64::MAX + 1)
     let start = u64::MAX;
     let cliff = 1;
     let duration = 100;
-    
+
     let res = VestingClient::new(env.inner(), &id).try_initialize(
         &admin,
         &beneficiary,
@@ -222,7 +222,7 @@ fn test_initialize_overflow_start_plus_cliff() {
         &cliff,
         &duration,
     );
-    
+
     assert!(res.is_err());
     let err = res.err().unwrap();
     match err {
@@ -253,12 +253,12 @@ fn test_initialize_overflow_cliff_end_plus_duration() {
     token.mint(&admin, TOTAL);
 
     env.mock_all_auths();
-    
+
     // cliff_end + duration overflows (u64::MAX - 100 + 50 + 51 = u64::MAX + 1)
     let start = u64::MAX - 100;
     let cliff = 50;
     let duration = 51;
-    
+
     let res = VestingClient::new(env.inner(), &id).try_initialize(
         &admin,
         &beneficiary,
@@ -268,7 +268,7 @@ fn test_initialize_overflow_cliff_end_plus_duration() {
         &cliff,
         &duration,
     );
-    
+
     assert!(res.is_err());
     let err = res.err().unwrap();
     match err {
@@ -299,12 +299,12 @@ fn test_initialize_near_max_valid_schedule() {
     token.mint(&admin, TOTAL);
 
     env.mock_all_auths();
-    
+
     // Valid near-max (u64::MAX - 100 + 50 + 50 = u64::MAX, no overflow)
     let start = u64::MAX - 100;
     let cliff = 50;
     let duration = 50;
-    
+
     let client = VestingClient::new(env.inner(), &id);
     client.initialize(
         &admin,
@@ -315,17 +315,19 @@ fn test_initialize_near_max_valid_schedule() {
         &cliff,
         &duration,
     );
-    
+
     // Check vested amounts at boundaries
     env.inner().ledger().set_timestamp(start + cliff - 1);
     assert_eq!(client.vested(), 0);
-    
+
     env.inner().ledger().set_timestamp(start + cliff);
     assert_eq!(client.vested(), 0);
-    
-    env.inner().ledger().set_timestamp(start + cliff + duration / 2);
+
+    env.inner()
+        .ledger()
+        .set_timestamp(start + cliff + duration / 2);
     assert_eq!(client.vested(), TOTAL / 2);
-    
+
     env.inner().ledger().set_timestamp(start + cliff + duration);
     assert_eq!(client.vested(), TOTAL);
 }

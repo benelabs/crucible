@@ -192,7 +192,8 @@ impl MockToken {
     /// let env = MockEnv::builder().build();
     /// let usdc = MockToken::new(&env, "USDC", 6);
     /// ```
-    pub fn new(env: &MockEnv, _symbol: &str, decimals: u32) -> Self {
+    pub fn new(env: &MockEnv, symbol: &str, decimals: u32) -> Self {
+        assert!(!symbol.trim().is_empty(), "Token symbol cannot be empty");
         // Create an admin for the token
         let admin = env
             .inner()

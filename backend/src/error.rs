@@ -71,6 +71,10 @@ pub enum AppError {
     #[error("Unsupported media type: {0}")]
     UnsupportedMediaType(String),
 
+    /// 503 — Service temporarily unavailable (e.g. database pool exhaustion).
+    #[error("Service unavailable")]
+    ServiceUnavailable { retry_after: u64 },
+
     /// 500 — An internal database error occurred.
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
@@ -108,7 +112,10 @@ pub enum AppError {
 impl AppError {
     /// Wrap a database error.
     pub fn db(e: sqlx::Error) -> Self {
-        AppError::Database(e)
+        match e {
+            sqlx::Error::PoolTimedOut => AppError::ServiceUnavailable { retry_after: 5 },
+            other => AppError::Database(other),
+        }
     }
 
     /// Wrap a Redis error.
@@ -124,6 +131,43 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        match self {
+            AppError::ServiceUnavailable { retry_after } => {
+                crate::services::metrics::inc_pool_exhaustion_metric();
+                let mut resp = (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "error": "service temporarily unavailable",
+                        "retry_after_seconds": retry_after
+                    })),
+                )
+                    .into_response();
+                resp.headers_mut().insert(
+                    axum::http::header::RETRY_AFTER,
+                    axum::http::HeaderValue::from(retry_after),
+                );
+                return resp;
+            }
+            AppError::Database(sqlx::Error::PoolTimedOut) => {
+                crate::services::metrics::inc_pool_exhaustion_metric();
+                let retry_after = 5;
+                let mut resp = (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "error": "service temporarily unavailable",
+                        "retry_after_seconds": retry_after
+                    })),
+                )
+                    .into_response();
+                resp.headers_mut().insert(
+                    axum::http::header::RETRY_AFTER,
+                    axum::http::HeaderValue::from(retry_after),
+                );
+                return resp;
+            }
+            _ => {}
+        }
+
         let (status, code, message) = match &self {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg.clone()),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, "bad_request", msg.clone()),
@@ -264,5 +308,31 @@ mod tests {
         assert!(json.contains("\"code\":\"not_found\""));
         assert!(json.contains("\"message\":\"Resource not found\""));
         assert!(json.contains("\"timestamp\":\"2026-07-29T16:00:00Z\""));
+    }
+
+    #[tokio::test]
+    async fn test_pool_timed_out_response() {
+        let err = AppError::Database(sqlx::Error::PoolTimedOut);
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(resp.headers().get("retry-after").unwrap(), "5");
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "service temporarily unavailable");
+        assert_eq!(json["retry_after_seconds"], 5);
+    }
+
+    #[tokio::test]
+    async fn test_service_unavailable_response() {
+        let err = AppError::ServiceUnavailable { retry_after: 10 };
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(resp.headers().get("retry-after").unwrap(), "10");
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "service temporarily unavailable");
+        assert_eq!(json["retry_after_seconds"], 10);
     }
 }

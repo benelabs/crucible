@@ -11,7 +11,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
-use tracing::{info, info_span, instrument};
+use tracing::{info, instrument};
 use utoipa::ToSchema;
 
 use crate::api::contracts::{

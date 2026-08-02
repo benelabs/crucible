@@ -4,11 +4,10 @@
 //! to ensure data consistency between the database and cache layers.
 
 use std::collections::HashMap;
-use redis::AsyncCommands;
 use serde::{Serialize, Deserialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Cache invalidation strategy
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

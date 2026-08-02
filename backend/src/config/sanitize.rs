@@ -6,7 +6,6 @@
 
 use crate::config::{CorsConfig, DatabaseConfig, ObservabilityConfig, RedisConfig, ServerConfig};
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// A sanitized, secret-redacted version of the application configuration.
 ///

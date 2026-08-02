@@ -1,10 +1,8 @@
 //! Dead Letter Queue (DLQ) implementation for failed background worker tasks.
 
-use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{error, info, warn};
-use utoipa::ToSchema;
+use tracing::{info, warn};
 use chrono::{DateTime, Utc};
 
 use crate::error::AppError;

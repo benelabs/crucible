@@ -1,9 +1,8 @@
-use redis::{AsyncCommands, Client};
+use redis::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Worker health monitor that tracks and reports worker status
 #[derive(Debug, Clone)]

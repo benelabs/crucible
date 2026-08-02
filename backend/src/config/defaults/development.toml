@@ -4,12 +4,14 @@ port = 3000
 max_connections = 100
 
 [database]
+url = "postgres://crucible:crucible_secret@localhost:5432/crucible_db"
 max_connections = 5
 min_connections = 1
 connect_timeout_secs = 5
 idle_timeout_secs = 3600 # Longer for easier local debugging
 
 [redis]
+url = "redis://localhost:6379"
 pool_size = 5
 
 [cors]

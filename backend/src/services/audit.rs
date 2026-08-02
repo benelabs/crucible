@@ -54,7 +54,7 @@ pub struct AuditDomainEvent {
 }
 
 /// Command payload for recording a new audit event.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct AuditEventRequest {
     pub aggregate_id: Option<String>,
     pub event_type: String,
@@ -66,7 +66,7 @@ pub struct AuditEventRequest {
 /// Only fields that define the audit entry are included — metadata
 /// like `event_id` and `sequence_number` is excluded so that
 /// re-computation across replicas yields the same hash.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 struct CanonicalAuditData<'a> {
     previous_hash: &'a str,
     event_type: &'a str,
@@ -87,7 +87,7 @@ pub fn compute_hash(previous_hash: &str, event: &AuditDomainEvent) -> String {
     let mut hasher = Sha256::new();
     hasher.update(json.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    result.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -244,26 +244,70 @@ impl AuditService {
     pub async fn list_events(
         &self,
         event_type: Option<String>,
+        tenant_id: Option<String>,
+        start_date: Option<chrono::DateTime<chrono::Utc>>,
+        end_date: Option<chrono::DateTime<chrono::Utc>>,
+        offset: Option<u32>,
         limit: u32,
     ) -> Result<Vec<AuditEventRecord>, AppError> {
+        let mut query_builder = sqlx::QueryBuilder::new(
+            "SELECT id, event_type, user_id, details, timestamp, hash, previous_hash FROM audit_logs"
+        );
+
+        let mut has_where = false;
+
+        if let Some(ref et) = event_type {
+            query_builder.push(" WHERE event_type = ");
+            query_builder.push_bind(et);
+            has_where = true;
+        }
+
+        if let Some(ref t_id) = tenant_id {
+            if has_where {
+                query_builder.push(" AND ");
+            } else {
+                query_builder.push(" WHERE ");
+                has_where = true;
+            }
+            query_builder.push("details->>'tenant_id' = ");
+            query_builder.push_bind(t_id);
+        }
+
+        if let Some(start) = start_date {
+            if has_where {
+                query_builder.push(" AND ");
+            } else {
+                query_builder.push(" WHERE ");
+                has_where = true;
+            }
+            query_builder.push("timestamp >= ");
+            query_builder.push_bind(start);
+        }
+
+        if let Some(end) = end_date {
+            if has_where {
+                query_builder.push(" AND ");
+            } else {
+                query_builder.push(" WHERE ");
+                has_where = true;
+            }
+            query_builder.push("timestamp <= ");
+            query_builder.push_bind(end);
+        }
+
+        query_builder.push(" ORDER BY timestamp DESC");
+
         let limit = limit.clamp(1, 200) as i64;
-        let cols = "id, event_type, user_id, details, timestamp, hash, previous_hash";
-        let rows = if let Some(event_type) = event_type {
-            sqlx::query_as(
-                &format!("SELECT {cols} FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT $2"),
-            )
-            .bind(event_type)
-            .bind(limit)
-            .fetch_all(&self.db)
-            .await?
-        } else {
-            sqlx::query_as(
-                &format!("SELECT {cols} FROM audit_logs ORDER BY timestamp DESC LIMIT $1"),
-            )
-            .bind(limit)
-            .fetch_all(&self.db)
-            .await?
-        };
+        query_builder.push(" LIMIT ");
+        query_builder.push_bind(limit);
+
+        if let Some(off) = offset {
+            query_builder.push(" OFFSET ");
+            query_builder.push_bind(off as i64);
+        }
+
+        let query = query_builder.build_query_as::<AuditEventRecord>();
+        let rows = query.fetch_all(&self.db).await?;
         Ok(rows)
     }
 
@@ -296,7 +340,7 @@ impl AuditService {
             let json = serde_json::to_string(&canonical).unwrap_or_default();
             let mut hasher = Sha256::new();
             hasher.update(json.as_bytes());
-            let computed = format!("{:x}", hasher.finalize());
+            let computed: String = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect();
 
             // Verify previous_hash link.
             if row.previous_hash != expected_prev || row.hash != computed {
@@ -354,6 +398,10 @@ impl AuditService {
 #[derive(Debug, Deserialize)]
 pub struct AuditReportQuery {
     pub event_type: Option<String>,
+    pub tenant_id: Option<String>,
+    pub start_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub end_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub offset: Option<u32>,
     #[serde(default = "default_limit")]
     pub limit: u32,
 }
@@ -374,6 +422,14 @@ pub async fn log_audit_event(
 #[utoipa::path(
     get,
     path = "/api/v1/audit/reports",
+    params(
+        ("event_type" = Option<String>, Query, description = "Filter by event type"),
+        ("tenant_id" = Option<String>, Query, description = "Filter by tenant ID"),
+        ("start_date" = Option<DateTime<Utc>>, Query, description = "Start of date range filter"),
+        ("end_date" = Option<DateTime<Utc>>, Query, description = "End of date range filter"),
+        ("offset" = Option<u32>, Query, description = "Pagination offset"),
+        ("limit" = Option<u32>, Query, description = "Pagination limit"),
+    ),
     responses((status = 200, description = "List audit reports", body = [AuditEventRecord])),
     tag = "audit"
 )]
@@ -384,7 +440,14 @@ pub async fn list_audit_reports(
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(
         service
-            .list_events(query.event_type, query.limit)
+            .list_events(
+                query.event_type,
+                query.tenant_id,
+                query.start_date,
+                query.end_date,
+                query.offset,
+                query.limit,
+            )
             .await?,
     ))
 }

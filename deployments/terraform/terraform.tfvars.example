@@ -1,0 +1,11 @@
+cloudflare_zone_id         = "REPLACE_WITH_ZONE_ID"
+cloudflare_account_id      = "REPLACE_WITH_ACCOUNT_ID"
+cloudflare_api_token       = "REPLACE_WITH_API_TOKEN"
+origin_vpc_id              = ""
+route53_zone_id            = ""
+primary_origin_ip          = ""
+secondary_origin_ip        = ""
+dns_name                   = "api.crucible.dev"
+aws_region                 = "us-east-1"
+aws_secondary_region       = "us-west-2"
+api_rate_limit_per_minute  = 100

@@ -1,0 +1,70 @@
+name: Load Test (k6)
+
+# Production requirement: Automated Performance Regression & Load Generation Harness
+# Weekly scheduled job executing k6 load tests against the staging cluster.
+# Enforces p95 latency < 200ms and 0% error rate on all core API endpoints.
+
+on:
+  schedule:
+    # Every Sunday at 03:17 UTC — off-peak for the staging cluster.
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "k6 scenario profile (default | soak | spike)"
+        required: false
+        default: "default"
+      base_url:
+        description: "Target base URL (overrides STAGING_API_URL secret)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  k6-load-test:
+    name: k6 load generation (2,000 concurrent developers)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install k6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnupg ca-certificates
+          curl -fsSL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Resolve target base URL
+        id: target
+        run: |
+          BASE_URL="${{ github.event.inputs.base_url }}"
+          if [ -z "$BASE_URL" ]; then
+            BASE_URL="${STAGING_API_URL:-http://localhost:8080}"
+          fi
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "Targeting: $BASE_URL"
+        env:
+          STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+
+      - name: Run k6 load test
+        # Thresholds are defined in the script; k6 exits non-zero if any
+        # threshold (p95 < 200ms, 0% error rate) is violated.
+        run: |
+          k6 run \
+            --env BASE_URL="${{ steps.target.outputs.base_url }}" \
+            --env SCENARIO="${{ github.event.inputs.scenario || 'default' }}" \
+            --out json=load-test-results.json \
+            tests/load/k6_load_test.js
+
+      - name: Upload load-test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-load-test-results
+          path: load-test-results.json
+          retention-days: 30

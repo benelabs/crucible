@@ -1,0 +1,22 @@
+# Managed by Ansible - Crucible time_sync role
+# High-precision microsecond NTP synchronization via chrony.
+#
+# Multiple reliable Stratum-1/Stratum-2 servers provide redundancy so a
+# single upstream outage cannot cause a node to drift.
+
+{% for server in ntp_servers %}
+server {{ server.address }} iburst maxpoll 10
+{% endfor %}
+
+# Step the clock if the offset is larger than 1 second during the first
+# three updates after start (helps a freshly-provisioned node converge fast).
+makestep 1.0 3
+
+# Synchronize the real-time clock (RTC) from the system clock.
+rtcsync
+
+driftfile /var/lib/chrony/chrony.drift
+logdir /var/log/chrony
+
+# Serve time to the local subnet if needed (bounded client count).
+# bindcmdaddress 127.0.0.1

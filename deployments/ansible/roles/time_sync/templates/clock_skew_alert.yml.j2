@@ -1,0 +1,17 @@
+groups:
+  - name: crucible_clock_skew
+    rules:
+      - alert: ClockSkewTooHigh
+        # Compare the node's reported time against Prometheus' own clock.
+        # 0.010 == 10ms tolerance budget for consensus simulation.
+        expr: abs(node_time_seconds - time()) > 0.010
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host clock skew exceeds 10ms on {{ inventory_hostname }}"
+          description: >-
+            The system clock on {{ inventory_hostname }} has drifted more than
+            10ms from the expected time for over two minutes. This causes
+            inconsistent transaction-timeout simulations and false timestamp
+            assertions in the Crucible backend. Investigate chrony synchronization.

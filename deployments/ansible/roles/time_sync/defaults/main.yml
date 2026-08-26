@@ -1,0 +1,23 @@
+---
+# Defaults for the time_sync role.
+# Multiple reliable Stratum-1 / Stratum-2 sources provide redundancy so a
+# single upstream outage cannot cause a node to drift.
+ntp_servers:
+  - address: "time.cloudflare.com"
+    iburst: true
+  - address: "ntp1.crucible.example.com"
+    iburst: true
+  - address: "0.pool.ntp.org"
+    iburst: true
+  - address: "1.pool.ntp.org"
+    iburst: true
+
+chrony_conf_path: /etc/chrony/chrony.conf
+chrony_service_name: chrony
+
+# Clock skew tolerance for consensus / transaction-timeout simulation (ms).
+max_allowed_offset_ms: 10
+
+# Where Prometheus loads rule files from, and the alert rule filename.
+prometheus_rules_dir: /etc/prometheus/rules
+prometheus_alert_file: clock_skew_alert.rules.yml

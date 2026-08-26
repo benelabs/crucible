@@ -129,4 +129,38 @@ describe('App Component', () => {
       expect(screen.queryByText(/Load cargo descriptor file/)).not.toBeInTheDocument();
     });
   });
+
+  it('opens the Dependency Graph tab and renders the visualizer', () => {
+    render(<App />);
+    const graphBtn = screen.getByTestId('tab-graph');
+    fireEvent.click(graphBtn);
+    expect(graphBtn).toHaveClass('active');
+    expect(screen.getByText('Contract Dependency Tree Visualizer')).toBeInTheDocument();
+  });
+
+  it('triggers compile via the Cmd/Ctrl+Enter shortcut', async () => {
+    (global.fetch as any).mockResolvedValueOnce({
+      json: async () => ({ status: 'success', data: { status: 'success', wasmSizeBytes: 10, compileTimeMs: 1, wasmHash: 'x', logs: 'ok' } }),
+    });
+    render(<App />);
+    fireEvent.click(screen.getByTestId('tab-compiler'));
+    fireEvent.keyDown(document, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByText('Size: 10 B')).toBeInTheDocument();
+    });
+  });
+
+  it('saves a draft via the Cmd/Ctrl+S shortcut', () => {
+    render(<App />);
+    fireEvent.keyDown(document, { key: 's', metaKey: true });
+    expect(localStorage.getItem('crucible:compile-draft')).not.toBeNull();
+    expect(localStorage.getItem('crucible:draft-saved-at')).not.toBeNull();
+  });
+
+  it('opens the command palette via the Cmd/Ctrl+K shortcut', () => {
+    render(<App />);
+    expect(screen.queryByTestId('command-palette-modal')).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+    expect(screen.getByTestId('command-palette-modal')).toBeInTheDocument();
+  });
 });

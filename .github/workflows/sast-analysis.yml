@@ -1,0 +1,165 @@
+name: SAST Analysis
+
+# Location: .github/workflows/sast-analysis.yml
+# Production requirement: Automated Static Application Security Testing (SAST) Pipeline
+#
+# Semgrep (custom Soroban deserialization rules), CodeQL (Rust + JS/TS), and
+# Clippy pedantic security lints. The "SAST" job is the merge gate — mark it
+# as a required status check so PRs cannot merge on a dirty scan.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sast-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Scan custom Soroban deserialization rules
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep semgrep scan \
+            --config .github/semgrep \
+            --error \
+            --metrics off \
+            --exclude examples-copy \
+            --exclude frontend/coverage \
+            --sarif --output semgrep.sarif
+
+      - name: Scan language packs (Rust / TypeScript / OWASP)
+        # Advisory: pack findings are reported in logs and SARIF but do not
+        # fail the merge gate. Custom Soroban rules above are enforcing.
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep semgrep scan \
+            --config p/rust \
+            --config p/typescript \
+            --config p/owasp-top-ten \
+            --severity ERROR \
+            --metrics off \
+            --exclude examples-copy \
+            --exclude frontend/coverage \
+            --sarif --output semgrep-packs.sarif
+
+      - name: Upload Semgrep SARIF
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      - name: Upload Semgrep pack SARIF
+        if: always() && hashFiles('semgrep-packs.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep-packs.sarif
+          category: semgrep-packs
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: rust
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        if: matrix.language == 'rust'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: .github/codeql/codeql-config.yml
+          queries: security-extended
+
+      - name: Build workspace (CodeQL extract)
+        if: matrix.language == 'rust'
+        run: cargo build --workspace --all-targets --all-features
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  clippy-security:
+    name: Clippy pedantic (security)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain with Clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy security lints
+        # Pedantic is enabled at warn so the full set is visible on every PR.
+        # Security-relevant lints are denied and fail the SAST gate.
+        run: |
+          cargo clippy --workspace --all-targets --all-features -- \
+            -W clippy::pedantic \
+            -D clippy::undocumented_unsafe_blocks \
+            -D clippy::transmute_ptr_to_ptr
+
+  sast-gate:
+    name: SAST
+    if: always()
+    needs: [semgrep, codeql, clippy-security]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce clean SAST scan status
+        run: |
+          echo "semgrep=${{ needs.semgrep.result }}"
+          echo "codeql=${{ needs.codeql.result }}"
+          echo "clippy=${{ needs.clippy-security.result }}"
+          failed=0
+          test "${{ needs.semgrep.result }}" = "success" || failed=1
+          test "${{ needs.codeql.result }}" = "success" || failed=1
+          test "${{ needs.clippy-security.result }}" = "success" || failed=1
+          if [ "$failed" -ne 0 ]; then
+            echo "SAST gate failed — clean scan status is required to merge"
+            exit 1
+          fi
+          echo "SAST gate passed"

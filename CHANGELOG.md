@@ -1,3 +1,9 @@
+## [1.5.0](https://github.com/benelabs/crucible/compare/v1.4.0...v1.5.0) (2026-08-28)
+
+### Features
+
+* **examples:** add bounty escrow with milestone payouts and nft rental protocol (closes [#886](https://github.com/benelabs/crucible/issues/886), closes [#885](https://github.com/benelabs/crucible/issues/885)) ([2eafda2](https://github.com/benelabs/crucible/commit/2eafda2fc4f1dee8f615c3ef585fdd0a2046e65f))
+
 ## [1.4.0](https://github.com/benelabs/crucible/compare/v1.3.0...v1.4.0) (2026-08-28)
 
 ### Features

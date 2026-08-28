@@ -1,0 +1,63 @@
+{
+  "app": {
+    "title": "Crucible",
+    "subtitle": "Soroban スマートコントラクト開発者ツールキット",
+    "nav": {
+      "dashboard": "ダッシュボード",
+      "simulator": "トランザクションシミュレーター",
+      "abiExplorer": "ABIエクスプローラー",
+      "events": "イベントリスナー",
+      "gas": "ガス見積もり",
+      "onboarding": "開発者チュートリアル"
+    },
+    "language": "言語",
+    "footer": "Stellar と Soroban 開発者のために構築"
+  },
+  "dashboard": {
+    "title": "マルチチェーン開発者ダッシュボード",
+    "networkStatus": "ネットワーク状態",
+    "activeContracts": "アクティブなコントラクト",
+    "totalTransactions": "総トランザクション数",
+    "avgGasFee": "平均ガス料金",
+    "recentActivity": "最近のアクティビティ"
+  },
+  "simulator": {
+    "title": "トランザクションシミュレーター",
+    "contractId": "コントラクト ID",
+    "functionName": "関数名",
+    "simulate": "トランザクションをシミュレート",
+    "result": "シミュレーション結果",
+    "success": "シミュレーション成功",
+    "failed": "シミュレーション失敗"
+  },
+  "abi": {
+    "title": "コントラクト ABI エクスプローラー",
+    "search": "関数を検索...",
+    "functions": "関数",
+    "types": "データ型"
+  },
+  "events": {
+    "title": "イベントリスナーダッシュボード",
+    "liveFeed": "ライブイベントフィード",
+    "filterTopics": "トピックでフィルター",
+    "clearFeed": "フィードをクリア"
+  },
+  "gas": {
+    "title": "ガスコスト見積もりツール",
+    "estimateBtn": "ガスを見積もる",
+    "instructions": "命令カウント",
+    "memory": "メモリバイト数"
+  },
+  "onboarding": {
+    "title": "開発者オンボーディングチュートリアル",
+    "welcome": "Crucible へようこそ",
+    "getStarted": "始める",
+    "nextStep": "次のステップ",
+    "prevStep": "前のステップ"
+  },
+  "wallet": {
+    "connect": "ウォレットを接続",
+    "disconnect": "切断",
+    "connected": "接続済み"
+  }
+}

@@ -1,3 +1,10 @@
+## [1.4.0](https://github.com/benelabs/crucible/compare/v1.3.0...v1.4.0) (2026-08-28)
+
+### Features
+
+* add load harness, security disclosure, semantic release, chrony time sync ([8e0cbff](https://github.com/benelabs/crucible/commit/8e0cbff7473159d3bf49ac71d4800ed9bf310267)), closes [#927](https://github.com/benelabs/crucible/issues/927) [#926](https://github.com/benelabs/crucible/issues/926) [#924](https://github.com/benelabs/crucible/issues/924) [#925](https://github.com/benelabs/crucible/issues/925)
+* **frontend:** implement Multi-Language i18n localization engine and micro-animation motion design optimization ([#906](https://github.com/benelabs/crucible/issues/906), [#907](https://github.com/benelabs/crucible/issues/907)) ([5a8f410](https://github.com/benelabs/crucible/commit/5a8f4105dbb5669540649eb8119c132553f07b8e))
+
 ## [1.3.0](https://github.com/benelabs/crucible/compare/v1.2.0...v1.3.0) (2026-08-02)
 
 ### Features

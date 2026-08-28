@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  sandbox:
+    build:
+      context: ../../
+      dockerfile: deployments/docker/sandbox.Dockerfile
+    container_name: crucible-sandbox
+    image: crucible-sandbox:latest
+    ports:
+      - "9090:9090"
+    environment:
+      RUST_LOG: info
+      SANDBOX_MODE: "true"
+      SANDBOX_LIMITS_MAX_WASM_BYTES: 2097152
+      SANDBOX_LIMITS_MAX_ARGS: 32
+      SANDBOX_LIMITS_MAX_ARG_XDR_BYTES: 65536
+      SANDBOX_LIMITS_MAX_CPU_INSTRUCTIONS: 25000000
+      SANDBOX_LIMITS_MAX_MEMORY_BYTES: 268435456
+      SANDBOX_LIMITS_TIMEOUT_MS: 2000
+    # Security constraints
+    security_opt:
+      - seccomp=deployments/docker/sandbox-seccomp.json
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    # Network isolation
+    networks:
+      - sandbox-network
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+networks:
+  sandbox-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

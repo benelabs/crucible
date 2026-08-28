@@ -1,15 +1,27 @@
-import { useState } from 'react';
+import { useState, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
-import { EventListenerDashboard } from './components/EventListenerDashboard';
-import { TransactionSimulator } from './components/TransactionSimulator';
-import { GasCostEstimator } from './components/GasCostEstimator';
-import { MultiChainDashboard } from './components/MultiChainDashboard';
-import { ContractAbiExplorer } from './components/ContractAbiExplorer';
-import { DeveloperOnboardingTutorial } from './components/DeveloperOnboardingTutorial';
-import { WalletConnector } from './components/WalletConnector';
 import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet, Activity, Layers } from 'lucide-react';
 import './App.css';
+
+// Lazy-loaded components for better bundle splitting
+const EventListenerDashboard = lazy(() => import('./components/EventListenerDashboard'));
+const TransactionSimulator = lazy(() => import('./components/TransactionSimulator'));
+const GasCostEstimator = lazy(() => import('./components/GasCostEstimator'));
+const MultiChainDashboard = lazy(() => import('./components/MultiChainDashboard'));
+const ContractAbiExplorer = lazy(() => import('./components/ContractAbiExplorer'));
+const DeveloperOnboardingTutorial = lazy(() => import('./components/DeveloperOnboardingTutorial'));
+const WalletConnector = lazy(() => import('./components/WalletConnector'));
+
+// Loading fallback component
+function LoadingFallback() {
+  return (
+    <div className="loading-fallback">
+      <div className="spinner"></div>
+      <p>Loading component...</p>
+    </div>
+  );
+}
 
 type Tab = 'tutorial' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'wallet';
 
@@ -167,14 +179,15 @@ function App() {
       </header>
       
       <main className="app-main">
-        {activeTab === 'events' && <EventListenerDashboard />}
-        {activeTab === 'tutorial' && <DeveloperOnboardingTutorial />}
-        {activeTab === 'events' && <EventListenerDashboard />}
-        {activeTab === 'simulator' && <TransactionSimulator />}
-        {activeTab === 'metrics' && <GasCostEstimator />}
-        {activeTab === 'multichain' && <MultiChainDashboard />}
-        {activeTab === 'abi' && <ContractAbiExplorer />}
-        {activeTab === 'wallet' && <WalletConnector />}
+        <Suspense fallback={<LoadingFallback />}>
+          {activeTab === 'events' && <EventListenerDashboard />}
+          {activeTab === 'tutorial' && <DeveloperOnboardingTutorial />}
+          {activeTab === 'simulator' && <TransactionSimulator />}
+          {activeTab === 'metrics' && <GasCostEstimator />}
+          {activeTab === 'multichain' && <MultiChainDashboard />}
+          {activeTab === 'abi' && <ContractAbiExplorer />}
+          {activeTab === 'wallet' && <WalletConnector />}
+        </Suspense>
         
         {activeTab === 'compiler' && (
           <div className="compiler-tab-panel container-panel">

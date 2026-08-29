@@ -11,6 +11,9 @@ use crate::account::AccountHandle;
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use crate::token::MockToken;
+use crate::zk::{
+    self, G1, G2, Groth16Proof, Groth16VerifyingKey, PairingCurve, PlonkProof,
+};
 use soroban_sdk::{
     testutils::{ContractEvents, Events, Ledger, Register},
     Address, Env, FromVal, IntoVal, Val, Vec as SorobanVec,
@@ -723,6 +726,11 @@ impl MockEnv {
         });
     }
 
+    /// Returns the current ledger sequence number.
+    pub fn ledger_sequence(&self) -> u32 {
+        self.inner.ledger().get().sequence_number
+    }
+
     /// Register an account with a name.
     pub fn register_account(&self, name: &str, address: Address) {
         if self.accounts.borrow().contains_key(name) {
@@ -1071,6 +1079,118 @@ impl MockEnv {
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
             track_costs: self.track_costs,
         }
+    }
+
+    // Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
+
+    /// Mock BN254 G1 addition (`bn254_g1_add` host function stand-in).
+    pub fn bn254_g1_add(&self, p: G1, q: G1) -> G1 {
+        let _ = self;
+        zk::g1_add(p, q)
+    }
+
+    /// Mock BN254 G1 scalar multiplication (`bn254_g1_mul` host function stand-in).
+    pub fn bn254_g1_mul(&self, p: G1, scalar: u64) -> G1 {
+        let _ = self;
+        zk::g1_mul(p, scalar)
+    }
+
+    /// Mock BN254 G2 addition (`bn254_g2_add` host function stand-in).
+    pub fn bn254_g2_add(&self, p: G2, q: G2) -> G2 {
+        let _ = self;
+        zk::g2_add(p, q)
+    }
+
+    /// Mock BN254 G2 scalar multiplication (`bn254_g2_mul` host function stand-in).
+    pub fn bn254_g2_mul(&self, p: G2, scalar: u64) -> G2 {
+        let _ = self;
+        zk::g2_mul(p, scalar)
+    }
+
+    /// Mock BN254 multi-pairing check (`bn254_pairing_check` host function stand-in).
+    pub fn bn254_pairing_check(&self, pairs: &[(G1, G2)]) -> bool {
+        let _ = self;
+        zk::pairing_check(pairs)
+    }
+
+    /// Mock BLS12-381 G1 addition (`bls12_381_g1_add` host function stand-in).
+    pub fn bls12_381_g1_add(&self, p: G1, q: G1) -> G1 {
+        let _ = self;
+        zk::g1_add(p, q)
+    }
+
+    /// Mock BLS12-381 G1 scalar multiplication (`bls12_381_g1_mul` host function stand-in).
+    pub fn bls12_381_g1_mul(&self, p: G1, scalar: u64) -> G1 {
+        let _ = self;
+        zk::g1_mul(p, scalar)
+    }
+
+    /// Mock BLS12-381 G2 addition (`bls12_381_g2_add` host function stand-in).
+    pub fn bls12_381_g2_add(&self, p: G2, q: G2) -> G2 {
+        let _ = self;
+        zk::g2_add(p, q)
+    }
+
+    /// Mock BLS12-381 G2 scalar multiplication (`bls12_381_g2_mul` host function stand-in).
+    pub fn bls12_381_g2_mul(&self, p: G2, scalar: u64) -> G2 {
+        let _ = self;
+        zk::g2_mul(p, scalar)
+    }
+
+    /// Mock BLS12-381 multi-pairing check (`bls12_381_pairing_check` host function stand-in).
+    pub fn bls12_381_pairing_check(&self, pairs: &[(G1, G2)]) -> bool {
+        let _ = self;
+        zk::pairing_check(pairs)
+    }
+
+    /// Sample a Groth16 verifying key for `n_public` public inputs on `curve`.
+    pub fn groth16_verifying_key(
+        &self,
+        curve: PairingCurve,
+        n_public: usize,
+    ) -> Groth16VerifyingKey {
+        let _ = self;
+        zk::sample_verifying_key(curve, n_public)
+    }
+
+    /// Generate a valid Groth16 proof for `vk` and `public_inputs`.
+    pub fn generate_groth16_proof(
+        &self,
+        vk: &Groth16VerifyingKey,
+        public_inputs: &[u64],
+    ) -> Groth16Proof {
+        let _ = self;
+        zk::generate_groth16_proof(vk, public_inputs)
+            .expect("public input count must match verifying key IC length")
+    }
+
+    /// Verify a Groth16 proof against `vk` using the mock pairing check.
+    pub fn verify_groth16(
+        &self,
+        vk: &Groth16VerifyingKey,
+        proof: &Groth16Proof,
+        public_inputs: &[u64],
+    ) -> bool {
+        let _ = self;
+        zk::verify_groth16(vk, proof, public_inputs)
+    }
+
+    /// Produce a structurally valid but algebraically invalid Groth16 proof.
+    pub fn tamper_groth16_proof(&self, proof: Groth16Proof) -> Groth16Proof {
+        let _ = self;
+        zk::tamper_groth16_proof(proof)
+    }
+
+    /// Generate a valid Plonk proof for a single public input.
+    pub fn generate_plonk_proof(&self, curve: PairingCurve, public_input: u64) -> PlonkProof {
+        let _ = self;
+        zk::generate_plonk_proof(curve, public_input)
+    }
+
+    /// Verify a Plonk proof using the mock pairing check.
+    pub fn verify_plonk(&self, curve: PairingCurve, proof: &PlonkProof, public_input: u64) -> bool {
+        let _ = self;
+        zk::verify_plonk(curve, proof, public_input)
     }
 
     /// Simulate a contract call that is expected to fail (panic/revert).
@@ -1576,7 +1696,7 @@ mod extra_tests {
 #[cfg(test)]
 mod time_advance_tests {
     use super::*;
-    use crate::time_helpers::{add_months, datetime_to_unix};
+    use crate::time::{add_months, datetime_to_unix};
 
     const JAN_31_2024: u64 = 1_706_704_245;
     const MAR_15_2024: u64 = 1_710_489_600;
@@ -1813,6 +1933,197 @@ mod missing_lookup_tests {
             .with_token("XLM", 7)
             .build();
         env.token("MISSING");
+    }
+}
+
+// Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
+#[cfg(test)]
+mod zk_pairing_harness_tests {
+    use super::*;
+    use crate::zk::{self, encode_scalar, G1, G2, PairingCurve};
+    use soroban_sdk::{contract, contractimpl, Bytes};
+
+    #[test]
+    fn bn254_host_mocks_add_and_mul() {
+        let env = MockEnv::default();
+        let p = G1::generator();
+        let q = env.bn254_g1_mul(p, 3);
+        let sum = env.bn254_g1_add(p, q);
+        assert_eq!(sum, zk::g1_add(p, q));
+
+        let g2 = G2::generator();
+        let g2s = env.bn254_g2_mul(g2, 5);
+        assert_eq!(env.bn254_g2_add(g2, g2s), zk::g2_add(g2, g2s));
+    }
+
+    #[test]
+    fn bls12_381_host_mocks_pairing_check() {
+        let env = MockEnv::default();
+        let p = env.bls12_381_g1_mul(G1::generator(), 2);
+        let q = env.bls12_381_g2_mul(G2::generator(), 3);
+        // e(2G, 3H) * e(-6G, H) = 1
+        let neg = zk::g1_neg(env.bls12_381_g1_mul(G1::generator(), 6));
+        assert!(env.bls12_381_pairing_check(&[(p, q), (neg, G2::generator())]));
+    }
+
+    #[test]
+    fn generate_and_verify_valid_groth16_on_bn254() {
+        let env = MockEnv::default();
+        let vk = env.groth16_verifying_key(PairingCurve::Bn254, 2);
+        let inputs = [4u64, 9];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+        assert!(env.verify_groth16(&vk, &proof, &inputs));
+    }
+
+    #[test]
+    fn negative_groth16_proof_is_rejected() {
+        let env = MockEnv::default();
+        let vk = env.groth16_verifying_key(PairingCurve::Bls12_381, 1);
+        let inputs = [12u64];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+        let bad = env.tamper_groth16_proof(proof);
+        assert!(!env.verify_groth16(&vk, &bad, &inputs));
+        assert!(!env.verify_groth16(&vk, &proof, &[99]));
+    }
+
+    #[test]
+    fn plonk_valid_and_negative_via_mock_env() {
+        let env = MockEnv::default();
+        let proof = env.generate_plonk_proof(PairingCurve::Bn254, 7);
+        assert!(env.verify_plonk(PairingCurve::Bn254, &proof, 7));
+        assert!(!env.verify_plonk(
+            PairingCurve::Bn254,
+            &zk::tamper_plonk_proof(proof),
+            7
+        ));
+    }
+
+    /// On-chain Groth16 verifier that consumes harness-encoded proof bytes
+    /// for a single public input (IC[0] + pub·IC[1]).
+    #[contract]
+    struct OnChainGroth16Verifier;
+
+    #[contractimpl]
+    impl OnChainGroth16Verifier {
+        pub fn verify_proof(
+            env: soroban_sdk::Env,
+            a: Bytes,
+            b: Bytes,
+            c: Bytes,
+            alpha: Bytes,
+            beta: Bytes,
+            gamma: Bytes,
+            delta: Bytes,
+            ic0: Bytes,
+            ic1: Bytes,
+            public_input: Bytes,
+        ) -> bool {
+            let _ = env;
+            groth16_pairing_equation(
+                &a,
+                &b,
+                &c,
+                &alpha,
+                &beta,
+                &gamma,
+                &delta,
+                &ic0,
+                &ic1,
+                &public_input,
+            )
+        }
+    }
+
+    fn groth16_pairing_equation(
+        a: &Bytes,
+        b: &Bytes,
+        c: &Bytes,
+        alpha: &Bytes,
+        beta: &Bytes,
+        gamma: &Bytes,
+        delta: &Bytes,
+        ic0: &Bytes,
+        ic1: &Bytes,
+        public_input: &Bytes,
+    ) -> bool {
+        let a_x = read_u64(a, 0);
+        let b_x0 = read_u64(b, 0);
+        let c_x = read_u64(c, 0);
+        let alpha_x = read_u64(alpha, 0);
+        let beta_x0 = read_u64(beta, 0);
+        let gamma_x0 = read_u64(gamma, 0);
+        let delta_x0 = read_u64(delta, 0);
+        let input = read_u64(public_input, 0);
+        let l_x = read_u64(ic0, 0).wrapping_add(input.wrapping_mul(read_u64(ic1, 0)));
+
+        let lhs = a_x.wrapping_mul(b_x0);
+        let rhs = alpha_x
+            .wrapping_mul(beta_x0)
+            .wrapping_add(l_x.wrapping_mul(gamma_x0))
+            .wrapping_add(c_x.wrapping_mul(delta_x0));
+        lhs == rhs
+    }
+
+    fn read_u64(bytes: &Bytes, offset: u32) -> u64 {
+        let mut out = [0u8; 8];
+        for i in 0..8u32 {
+            out[i as usize] = bytes.get(offset + i).unwrap_or(0);
+        }
+        u64::from_le_bytes(out)
+    }
+
+    #[test]
+    fn groth16_proof_verifies_on_chain() {
+        let env = MockEnv::default();
+        env.mock_all_auths();
+        let inner = env.inner();
+        let contract_id = inner.register(OnChainGroth16Verifier, ());
+        let client = OnChainGroth16VerifierClient::new(inner, &contract_id);
+
+        let vk = env.groth16_verifying_key(PairingCurve::Bn254, 1);
+        let inputs = [5u64];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+
+        let ok = client.verify_proof(
+            &proof.a.to_bytes(inner, proof.curve),
+            &proof.b.to_bytes(inner, proof.curve),
+            &proof.c.to_bytes(inner, proof.curve),
+            &vk.alpha_g1.to_bytes(inner, vk.curve),
+            &vk.beta_g2.to_bytes(inner, vk.curve),
+            &vk.gamma_g2.to_bytes(inner, vk.curve),
+            &vk.delta_g2.to_bytes(inner, vk.curve),
+            &vk.ic[0].to_bytes(inner, vk.curve),
+            &vk.ic[1].to_bytes(inner, vk.curve),
+            &encode_scalar(inner, inputs[0]),
+        );
+        assert!(ok, "valid Groth16 proof must verify on-chain");
+    }
+
+    #[test]
+    fn groth16_negative_proof_fails_on_chain() {
+        let env = MockEnv::default();
+        env.mock_all_auths();
+        let inner = env.inner();
+        let contract_id = inner.register(OnChainGroth16Verifier, ());
+        let client = OnChainGroth16VerifierClient::new(inner, &contract_id);
+
+        let vk = env.groth16_verifying_key(PairingCurve::Bls12_381, 1);
+        let inputs = [5u64];
+        let proof = env.tamper_groth16_proof(env.generate_groth16_proof(&vk, &inputs));
+
+        let ok = client.verify_proof(
+            &proof.a.to_bytes(inner, proof.curve),
+            &proof.b.to_bytes(inner, proof.curve),
+            &proof.c.to_bytes(inner, proof.curve),
+            &vk.alpha_g1.to_bytes(inner, vk.curve),
+            &vk.beta_g2.to_bytes(inner, vk.curve),
+            &vk.gamma_g2.to_bytes(inner, vk.curve),
+            &vk.delta_g2.to_bytes(inner, vk.curve),
+            &vk.ic[0].to_bytes(inner, vk.curve),
+            &vk.ic[1].to_bytes(inner, vk.curve),
+            &encode_scalar(inner, inputs[0]),
+        );
+        assert!(!ok, "tampered Groth16 proof must fail on-chain");
     }
 }
 

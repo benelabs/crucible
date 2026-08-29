@@ -43,5 +43,6 @@ strip = true
 
 [workspace.dependencies]
 soroban-sdk = { version = "26", features = ["testutils"] }
+crucible-macros = { path = "crucible-macros", version = "1.6.0" }
 crucible-macros = { path = "crucible-macros", version = "1.7.0" }
 crucible-macros = { path = "crucible-macros", version = "1.5.0" }

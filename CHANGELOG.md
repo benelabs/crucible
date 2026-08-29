@@ -1,3 +1,9 @@
+## [1.10.0](https://github.com/benelabs/crucible/compare/v1.9.0...v1.10.0) (2026-08-29)
+
+### Features
+
+* **frontend:** ABI form generator, state machine visualizer, mobile nav, time-travel debugger ([ca08c94](https://github.com/benelabs/crucible/commit/ca08c9468d2679d7f41968d24156b93ffe7f374b)), closes [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903)
+
 ## [1.9.0](https://github.com/benelabs/crucible/compare/v1.8.0...v1.9.0) (2026-08-29)
 
 ### Features

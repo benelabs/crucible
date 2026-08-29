@@ -1,3 +1,9 @@
+## [1.9.0](https://github.com/benelabs/crucible/compare/v1.8.0...v1.9.0) (2026-08-29)
+
+### Features
+
+* contract decompiler & source verification, testnet faucet dispenser, bytecode optimizer, and vulnerability scanner ([8d8af5b](https://github.com/benelabs/crucible/commit/8d8af5b4768429bb7bf34e59e2d3931ae94aee81))
+
 ## [1.8.0](https://github.com/benelabs/crucible/compare/v1.7.0...v1.8.0) (2026-08-29)
 
 ### Features

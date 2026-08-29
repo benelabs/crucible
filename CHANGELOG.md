@@ -1,3 +1,9 @@
+## [1.8.0](https://github.com/benelabs/crucible/compare/v1.7.0...v1.8.0) (2026-08-29)
+
+### Features
+
+* resolve issues [#856](https://github.com/benelabs/crucible/issues/856), [#849](https://github.com/benelabs/crucible/issues/849), [#864](https://github.com/benelabs/crucible/issues/864), and [#858](https://github.com/benelabs/crucible/issues/858) ([bdd6a65](https://github.com/benelabs/crucible/commit/bdd6a655ba2db70f23fe281e0dd8458e36e848dc))
+
 ## [1.7.0](https://github.com/benelabs/crucible/compare/v1.6.0...v1.7.0) (2026-08-29)
 
 ### Features

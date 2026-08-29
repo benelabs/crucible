@@ -18,6 +18,7 @@ members = [
     "examples/prediction-market",
     "examples/escrow-multi-arbiter",
     "examples/amm-pool",
+    "examples/yield-vault",
     "examples/bounty-escrow",
     "examples/nft-rental",
 ]

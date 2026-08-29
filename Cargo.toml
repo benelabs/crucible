@@ -16,6 +16,7 @@ members = [
     "examples/lending",
     "examples/prediction-market",
     "examples/escrow-multi-arbiter",
+    "examples/amm-pool",
 ]
 resolver = "2"
 

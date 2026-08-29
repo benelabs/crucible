@@ -1127,6 +1127,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-example-amm-pool"
+version = "0.1.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "crucible-example-counter"
 version = "0.1.0"
 dependencies = [
@@ -7000,6 +7008,13 @@ dependencies = [
  "indexmap 2.14.0",
  "num_enum",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "zk_verifier"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]

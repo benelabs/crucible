@@ -1,3 +1,9 @@
+## [1.12.0](https://github.com/benelabs/crucible/compare/v1.11.0...v1.12.0) (2026-08-29)
+
+### Features
+
+* implement issues [#824](https://github.com/benelabs/crucible/issues/824), [#825](https://github.com/benelabs/crucible/issues/825), [#826](https://github.com/benelabs/crucible/issues/826), [#827](https://github.com/benelabs/crucible/issues/827) ([4da2f0e](https://github.com/benelabs/crucible/commit/4da2f0ed56c04506e5771d658e8c5ae155d3815e))
+
 ## [1.11.0](https://github.com/benelabs/crucible/compare/v1.10.0...v1.11.0) (2026-08-29)
 
 ### Features

@@ -1,0 +1,183 @@
+name: Docker Publish
+
+# Location: .github/workflows/docker-publish.yml
+# Production requirement: Automated Multi-Architecture Container Image Builds (x86_64 & arm64)
+#
+# Builds linux/amd64 + linux/arm64 with Buildx, pushes to GHCR, signs with
+# Cosign (keyless OIDC), attaches SLSA provenance + SBOM attestations, then
+# pulls the published image back and verifies the binary boots.
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - "v*"
+    paths:
+      - "backend/**"
+      - "contracts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "infra/Dockerfile"
+      - ".github/workflows/docker-publish.yml"
+  pull_request:
+    paths:
+      - "infra/Dockerfile"
+      - ".github/workflows/docker-publish.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  COSIGN_YES: "true"
+
+jobs:
+  publish:
+    name: Build, sign, attest, boot-verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Normalize image name
+        run: echo "IMAGE=${REGISTRY}/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        if: github.event_name != 'pull_request'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+      - name: Build linux/amd64 for boot verification (PR)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./infra/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: crucible:boot-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push multi-arch image
+        if: github.event_name != 'pull_request'
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./infra/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless)
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          echo "Signing ${IMAGE}@${DIGEST}"
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Attest SLSA provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Verify Cosign signature
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.github/workflows/docker-publish.yml@.*" \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Pull published amd64 image for boot verification
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker pull --platform linux/amd64 "${IMAGE}@${DIGEST}"
+          docker tag "${IMAGE}@${DIGEST}" crucible:boot-test
+
+      - name: Verify image boots
+        run: |
+          set -euo pipefail
+          docker inspect crucible:boot-test >/dev/null
+          cid="$(docker create crucible:boot-test)"
+          docker cp "${cid}:/app/backend" /tmp/crucible-backend
+          docker rm "${cid}" >/dev/null
+          file /tmp/crucible-backend
+          file /tmp/crucible-backend | grep -E "ELF 64-bit"
+
+          set +e
+          output="$(timeout 8 docker run --rm --network none \
+            -e DATABASE_URL=postgres://boot:boot@127.0.0.1:1/boot \
+            -e REDIS_URL=redis://127.0.0.1:1 \
+            -e JWT_SECRET=boot-test-secret-not-for-production \
+            -e APP_ENV=development \
+            crucible:boot-test 2>&1)"
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          if printf '%s' "$output" | grep -qiE 'exec format error|not found|permission denied'; then
+            echo "Image failed to execute"
+            exit 1
+          fi
+          if [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
+            echo "Image entrypoint is not executable (exit ${rc})"
+            exit 1
+          fi
+          echo "Boot verification passed (process executed, exit ${rc})"
+
+      - name: Confirm multi-arch index
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}"
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" | grep -q 'linux/amd64'
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" | grep -q 'linux/arm64'

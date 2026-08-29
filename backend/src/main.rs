@@ -14,7 +14,6 @@ use utoipa::OpenApi;
 
 use backend::{
     api::handlers::{contracts, dashboard, errors, profiling, sandbox, stellar},
-    services::audit,
     api::middleware::logging::logging_middleware,
     app_state::{build_application_states, ApplicationStates, SharedServices},
     config::{
@@ -23,6 +22,7 @@ use backend::{
     },
     jobs::{monitor_transaction, TransactionMonitorJob},
     router::build_router,
+    services::audit,
     services::{
         contract_benchmark::ContractBenchmarkService,
         error_recovery::ErrorManager,
@@ -74,7 +74,7 @@ struct ApiDoc;
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     dotenvy::dotenv().ok();
-    
+
     let env = Environment::from_env();
     let config = AppConfig::load(env).expect("Failed to load configuration");
 
@@ -115,7 +115,7 @@ async fn main() -> Result<(), anyhow::Error> {
     tokio::spawn(MetricsExporter::run_collector(metrics_exporter.clone()));
     tokio::spawn(LogAggregator::run_worker(log_receiver));
 
-    let conn = ConnectionManager::new(redis_client.clone()).await?;
+    let conn = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
     let storage: RedisStorage<TransactionMonitorJob> = RedisStorage::new(conn);
     tracing::info!("Redis connection established");
 
@@ -123,8 +123,8 @@ async fn main() -> Result<(), anyhow::Error> {
         .backend(storage)
         .build_fn(monitor_transaction);
 
-    let health_cache = ConnectionManager::new(redis_client.clone()).await?;
-    let health_queue = ConnectionManager::new(redis_client.clone()).await?;
+    let health_cache = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
+    let health_queue = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
 
     let health_state = backend::api::handlers::health::HealthState {
         db: db_pool.clone(),
@@ -141,8 +141,7 @@ async fn main() -> Result<(), anyhow::Error> {
         config_manager: config_manager.clone(),
     };
 
-    let states =
-        build_application_states(db_pool.clone(), redis_client.clone(), &shared_services);
+    let states = build_application_states(db_pool.clone(), redis_client.clone(), &shared_services);
 
     let app = build_router(
         states,
@@ -192,4 +191,3 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 }
-

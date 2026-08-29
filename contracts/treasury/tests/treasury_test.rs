@@ -208,5 +208,3 @@ fn test_reentrancy_guard_protection() {
     client.withdraw(&admin1, &token_addr, &1_000, &signers);
     assert_eq!(client.balance_of(&treasury_id, &token_addr), 4_000);
 }
-
-

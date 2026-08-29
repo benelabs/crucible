@@ -8,15 +8,24 @@ pub use crate::account::AccountHandle;
 pub use crate::cost::CostReport;
 pub use crate::env::CapturedEvent;
 pub use crate::env::Duration;
+pub use crate::env::EventMatches;
 pub use crate::env::FailedCallResult;
 pub use crate::env::MockAuthGuard;
 pub use crate::env::MockEnv;
 pub use crate::env::MockEnvBuilder;
 pub use crate::env::Stroops;
+pub use crate::sim::ContractError;
+pub use crate::sim::IngressLock;
+pub use crate::sim::IngressLockValidator;
 pub use crate::sim::PreparedTx;
+pub use crate::sim::ReentrancyProbe;
+pub use crate::sim::ReentrancyProbeResult;
 pub use crate::sim::SimulatedTx;
 pub use crate::time::{add_months, add_years};
 pub use crate::token::MockToken;
+pub use crate::zk::{
+    G1, G2, Groth16Proof, Groth16VerifyingKey, Gt, PairingCurve, PlonkProof,
+};
 
 #[cfg(feature = "derive")]
 pub use crucible_macros::fixture;

@@ -1,0 +1,63 @@
+{
+  "app": {
+    "title": "Crucible",
+    "subtitle": "Soroban Smart Contract Developer Toolkit",
+    "nav": {
+      "dashboard": "Dashboard",
+      "simulator": "Transaction Simulator",
+      "abiExplorer": "ABI Explorer",
+      "events": "Event Listener",
+      "gas": "Gas Estimator",
+      "onboarding": "Developer Tutorial"
+    },
+    "language": "Language",
+    "footer": "Built for Stellar & Soroban developers"
+  },
+  "dashboard": {
+    "title": "Multi-Chain Developer Dashboard",
+    "networkStatus": "Network Status",
+    "activeContracts": "Active Contracts",
+    "totalTransactions": "Total Transactions",
+    "avgGasFee": "Avg Gas Fee",
+    "recentActivity": "Recent Activity"
+  },
+  "simulator": {
+    "title": "Transaction Simulator",
+    "contractId": "Contract ID",
+    "functionName": "Function Name",
+    "simulate": "Simulate Transaction",
+    "result": "Simulation Result",
+    "success": "Simulation Succeeded",
+    "failed": "Simulation Failed"
+  },
+  "abi": {
+    "title": "Contract ABI Explorer",
+    "search": "Search functions...",
+    "functions": "Functions",
+    "types": "Data Types"
+  },
+  "events": {
+    "title": "Event Listener Dashboard",
+    "liveFeed": "Live Event Feed",
+    "filterTopics": "Filter by Topics",
+    "clearFeed": "Clear Feed"
+  },
+  "gas": {
+    "title": "Gas Cost Estimator",
+    "estimateBtn": "Estimate Gas",
+    "instructions": "Instruction Count",
+    "memory": "Memory Bytes"
+  },
+  "onboarding": {
+    "title": "Developer Onboarding Tutorial",
+    "welcome": "Welcome to Crucible",
+    "getStarted": "Get Started",
+    "nextStep": "Next Step",
+    "prevStep": "Previous Step"
+  },
+  "wallet": {
+    "connect": "Connect Wallet",
+    "disconnect": "Disconnect",
+    "connected": "Connected"
+  }
+}

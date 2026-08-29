@@ -40,6 +40,38 @@ pub fn format_structured_log(
 }
 
 /// Middleware to log HTTP requests and responses with PII sanitization and structured JSON output.
+use crate::api::handlers::profiling::AppState;
+use crate::services::http_metrics::http_metrics;
+use crate::services::tracing::TracingService;
+use axum::{
+    body::Body,
+    extract::{MatchedPath, State},
+    http::Request,
+    middleware::Next,
+    response::IntoResponse,
+};
+use std::{sync::Arc, time::Instant};
+use tracing::Instrument;
+
+/// Sanitize a string for safe log output by stripping newlines and control characters.
+///
+/// Replaces:
+/// - `\n` (newline) → space
+/// - `\r` (carriage return) → space
+/// - `\t` (tab) → space
+/// - All other ASCII control characters (0x00–0x1F, 0x7F) → empty string
+///
+/// This prevents log injection attacks where user-controlled input
+/// contains fake log entries via embedded newlines.
+pub fn sanitize_for_log(input: &str) -> String {
+    input.chars().filter_map(|c| match c {
+        '\n' | '\r' | '\t' => Some(' '),
+        c if c.is_ascii_control() => None,
+        c => Some(c),
+    }).collect()
+}
+
+/// Middleware to log HTTP requests and responses.
 ///
 /// This middleware captures:
 /// - Request method, URI, and HTTP version
@@ -57,8 +89,14 @@ pub async fn logging_middleware(
     let method = request.method().clone();
     let uri = request.uri().clone();
     let version = request.version();
+    let metric_route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+        .unwrap_or("UNMATCHED")
+        .to_string();
 
-    let path = uri.path().to_string();
+    let path = sanitize_for_log(uri.path());
     let span = TracingService::http_request_span(method.as_str(), &path, None);
 
     let value = span.clone();
@@ -70,6 +108,7 @@ pub async fn logging_middleware(
 
         let latency = start_time.elapsed();
         let status = response.status();
+        http_metrics().observe(&metric_route, method.as_str(), status.as_u16(), latency);
         value.record("http.status_code", status.as_u16());
         if status.is_server_error() {
             TracingService::record_error(&value, status.as_str(), "http_server_error");
@@ -86,7 +125,10 @@ pub async fn logging_middleware(
         // Format structured log message with secret key sanitization
         let raw_log = format!(
             "{} {} finished with {} in {:?}",
-            method, uri, status, latency
+            sanitize_for_log(method.as_str()),
+            path,
+            status,
+            latency
         );
         let sanitized_message = sanitize_log_message(&raw_log);
 
@@ -107,6 +149,66 @@ pub async fn logging_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_for_log_preserves_normal_text() {
+        let input = "GET /api/v1/users";
+        assert_eq!(sanitize_for_log(input), "GET /api/v1/users");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_replaces_newline_with_space() {
+        let input = "POST /api\nX-Injected: true";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\n'));
+        assert!(result.contains("true"));
+    }
+
+    #[test]
+    fn test_sanitize_for_log_replaces_carriage_return() {
+        let input = "data\r\nInjected";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\r'));
+        assert!(result.contains("Injected"));
+    }
+
+    #[test]
+    fn test_sanitize_for_log_replaces_tab() {
+        let input = "GET\t/path";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\t'));
+        assert_eq!(result, "GET /path");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_strips_control_characters() {
+        let input = format!("GET{} /path\x00null", '\x1b');
+        let result = sanitize_for_log(&input);
+        assert!(!result.contains('\x1b'));
+        assert!(!result.contains('\x00'));
+        assert_eq!(result, "GET  /pathnull");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_handles_empty_string() {
+        assert_eq!(sanitize_for_log(""), "");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_preserves_unicode() {
+        let input = "GET /café/🚀";
+        assert_eq!(sanitize_for_log(input), input);
+    }
+
+    #[test]
+    fn test_sanitize_for_log_mixed_injection_attempt() {
+        let input = "GET /\nHTTP/1.1\r\nX-User: admin\r\n";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\n'));
+        assert!(!result.contains('\r'));
+        assert!(result.contains("HTTP/1.1"));
+        assert!(result.contains("X-User"));
+    }
     use crate::config::{reload::ConfigManager, AppConfig};
     use crate::services::{
         contract_benchmark::ContractBenchmarkService, error_recovery::ErrorManager,

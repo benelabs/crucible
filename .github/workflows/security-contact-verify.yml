@@ -1,0 +1,39 @@
+name: Security Contact Verification
+
+# Automated PGP key verification test. Ensures the fingerprint documented in
+# SECURITY.md stays in sync with the committed public key.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "SECURITY.md"
+      - "tests/security/security_contact.pub.asc"
+      - "tests/security/verify_pgp_key.sh"
+      - ".github/workflows/security-contact-verify.yml"
+  pull_request:
+    paths:
+      - "SECURITY.md"
+      - "tests/security/security_contact.pub.asc"
+      - "tests/security/verify_pgp_key.sh"
+      - ".github/workflows/security-contact-verify.yml"
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-pgp-key:
+    name: Verify security contact PGP key
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Make verification script executable
+        run: chmod +x tests/security/verify_pgp_key.sh
+
+      - name: Verify PGP fingerprint matches published key
+        run: tests/security/verify_pgp_key.sh

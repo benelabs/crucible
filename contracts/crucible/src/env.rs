@@ -10,6 +10,10 @@
 use crate::account::AccountHandle;
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
+use crate::token::MockToken;
+use crate::zk::{
+    self, G1, G2, Groth16Proof, Groth16VerifyingKey, PairingCurve, PlonkProof,
+};
 use soroban_sdk::{
     testutils::{ContractEvents, Events, Ledger, Register},
     Address, Env, FromVal, IntoVal, Val, Vec as SorobanVec,
@@ -200,9 +204,7 @@ impl Stroops {
     )]
     pub fn xlm_frac(xlm: f64) -> Self {
         assert!(xlm >= 0.0, "XLM amount cannot be negative: {}", xlm);
-        let amount = (xlm * 10_000_000.0)
-            .round()
-            as i128;
+        let amount = (xlm * 10_000_000.0).round() as i128;
         assert!(
             amount >= 0,
             "Converted stroops amount is negative, input may have been too small: {}",
@@ -233,6 +235,7 @@ pub struct MockEnv {
     inner: Env,
     accounts: Rc<RefCell<HashMap<String, Address>>>,
     contract_ids: Rc<RefCell<HashMap<String, Address>>>,
+    tokens: Rc<RefCell<HashMap<String, MockToken>>>,
     xlm_token_address: Rc<RefCell<Option<Address>>>,
     track_costs: bool,
 }
@@ -289,6 +292,182 @@ impl CapturedEvent {
     }
 }
 
+/// Wrapper around matching events returned by `env.events_matching()` to provide
+/// ergonomic access, filtering, conversion, and testing assertions.
+#[derive(Clone)]
+pub struct EventMatches {
+    pub(crate) env: Env,
+    pub(crate) items: SorobanVec<(Address, SorobanVec<Val>, Val)>,
+}
+
+impl std::fmt::Debug for EventMatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventMatches")
+            .field("count", &self.items.len())
+            .field("events", &self.items)
+            .finish()
+    }
+}
+
+impl std::ops::Deref for EventMatches {
+    type Target = SorobanVec<(Address, SorobanVec<Val>, Val)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+
+impl PartialEq for EventMatches {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items
+    }
+}
+
+impl Eq for EventMatches {}
+
+impl PartialEq<SorobanVec<(Address, SorobanVec<Val>, Val)>> for EventMatches {
+    fn eq(&self, other: &SorobanVec<(Address, SorobanVec<Val>, Val)>) -> bool {
+        &self.items == other
+    }
+}
+
+impl PartialEq<EventMatches> for SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    fn eq(&self, other: &EventMatches) -> bool {
+        self == &other.items
+    }
+}
+
+impl EventMatches {
+    /// Creates a new `EventMatches` wrapper.
+    pub fn new(env: Env, items: SorobanVec<(Address, SorobanVec<Val>, Val)>) -> Self {
+        Self { env, items }
+    }
+
+    /// Returns the underlying Soroban `Env`.
+    pub fn env(&self) -> &Env {
+        &self.env
+    }
+
+    /// Returns a reference to the inner SorobanVec.
+    pub fn inner(&self) -> &SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        &self.items
+    }
+
+    /// Consumes self and returns the inner SorobanVec.
+    pub fn into_inner(self) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+        self.items
+    }
+
+    /// Returns the number of matched events.
+    pub fn len(&self) -> usize {
+        self.items.len() as usize
+    }
+
+    /// Returns true if no events matched.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Returns the event tuple at the specified index, if present.
+    pub fn get_event(&self, index: u32) -> Option<(Address, SorobanVec<Val>, Val)> {
+        if index < self.items.len() {
+            Some(self.items.get(index).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Returns the first matched event tuple, if any.
+    pub fn first_event(&self) -> Option<(Address, SorobanVec<Val>, Val)> {
+        self.get_event(0)
+    }
+
+    /// Returns the last matched event tuple, if any.
+    pub fn last_event(&self) -> Option<(Address, SorobanVec<Val>, Val)> {
+        let len = self.items.len();
+        if len > 0 {
+            Some(self.items.get(len - 1).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Filter matched events to only those emitted by the specified contract address.
+    pub fn by_contract(&self, contract: &Address) -> Self {
+        let mut filtered = SorobanVec::new(&self.env);
+        for item in self.items.iter() {
+            if item.0 == *contract {
+                filtered.push_back(item);
+            }
+        }
+        Self::new(self.env.clone(), filtered)
+    }
+
+    /// Decodes the event data at `index` into typed Rust value using `FromVal`.
+    pub fn data_as<D: FromVal<Env, Val>>(&self, index: u32) -> D {
+        let event = self.items.get(index).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::data_as index {} out of bounds (len {})",
+                index,
+                self.items.len()
+            )
+        });
+        D::from_val(&self.env, &event.2)
+    }
+
+    /// Decodes the topic at `topic_idx` of event at `event_idx` into typed Rust value using `FromVal`.
+    pub fn topic_as<T: FromVal<Env, Val>>(&self, event_idx: u32, topic_idx: u32) -> T {
+        let event = self.items.get(event_idx).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::topic_as event index {} out of bounds (len {})",
+                event_idx,
+                self.items.len()
+            )
+        });
+        let topic_val = event.1.get(topic_idx).unwrap_or_else(|| {
+            panic!(
+                "EventMatches::topic_as topic index {} out of bounds (topics len {})",
+                topic_idx,
+                event.1.len()
+            )
+        });
+        T::from_val(&self.env, &topic_val)
+    }
+
+    /// Convert matches into a `Vec<CapturedEvent>` for typed inspection.
+    pub fn to_captured(&self) -> std::vec::Vec<CapturedEvent> {
+        let mut result = std::vec::Vec::with_capacity(self.len());
+        for item in self.items.iter() {
+            result.push(CapturedEvent {
+                env: self.env.clone(),
+                contract: item.0,
+                topics: item.1,
+                data: item.2,
+            });
+        }
+        result
+    }
+
+    /// Assert that at least one matching event was emitted.
+    pub fn assert_emitted(&self) {
+        assert!(
+            !self.is_empty(),
+            "Expected at least one matching event, but none were emitted"
+        );
+    }
+
+    /// Assert that exactly `expected` matching events were emitted.
+    pub fn assert_count(&self, expected: usize) {
+        assert_eq!(
+            self.len(),
+            expected,
+            "Expected {} matching event(s), but found {}",
+            expected,
+            self.len()
+        );
+    }
+}
+
 impl MockEnv {
     /// Returns the underlying `soroban_sdk::Env`.
     pub fn inner(&self) -> &Env {
@@ -317,6 +496,35 @@ impl MockEnv {
             });
 
         AccountHandle::new(self.clone(), name.to_string(), address)
+    }
+
+    /// Get a registered mock token by symbol.
+    ///
+    /// # Panics
+    /// Panics with a clear error message if the symbol was not registered via
+    /// [`MockEnvBuilder::with_token`].
+    pub fn token(&self, symbol: &str) -> MockToken {
+        self.token_opt(symbol).unwrap_or_else(|| {
+            let mut available: Vec<_> = self.tokens.borrow().keys().cloned().collect();
+            available.sort();
+            panic!(
+                "Token '{}' not found in MockEnv. Available tokens: [{}]. Ensure it was registered via MockEnvBuilder.",
+                symbol,
+                available.join(", ")
+            )
+        })
+    }
+
+    /// Get a registered mock token by symbol, returning `None` if not registered.
+    pub fn token_opt(&self, symbol: &str) -> Option<MockToken> {
+        self.tokens.borrow().get(symbol).cloned()
+    }
+
+    /// Registers a [`MockToken`] by symbol into this environment's token registry.
+    pub fn register_token(&self, symbol: &str, token: MockToken) {
+        self.tokens
+            .borrow_mut()
+            .insert(symbol.to_string(), token);
     }
 
     /// Get a contract ID by type.
@@ -404,11 +612,23 @@ impl MockEnv {
     }
 
     /// Advance the ledger timestamp by a duration.
+    ///
+    /// # Panics
+    /// Panics if the timestamp overflows.
     pub fn advance_time(&self, duration: Duration) {
+        // Guard: zero duration is a no-op
+        if duration.as_seconds() == 0 {
+            return;
+        }
+
         let info = self.inner.ledger().get();
+        let new_ts = info
+            .timestamp
+            .checked_add(duration.as_seconds())
+            .expect("timestamp overflow in advance_time");
         self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
             sequence_number: info.sequence_number,
-            timestamp: info.timestamp + duration.as_seconds(),
+            timestamp: new_ts,
             protocol_version: info.protocol_version,
             base_reserve: info.base_reserve,
             network_id: info.network_id,
@@ -458,6 +678,11 @@ impl MockEnv {
 
     /// Advance the ledger sequence number by n.
     pub fn advance_sequence(&self, n: u32) {
+        // Guard: zero is a no-op
+        if n == 0 {
+            return;
+        }
+
         let info = self.inner.ledger().get();
         self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
             sequence_number: info.sequence_number + n,
@@ -501,6 +726,11 @@ impl MockEnv {
         });
     }
 
+    /// Returns the current ledger sequence number.
+    pub fn ledger_sequence(&self) -> u32 {
+        self.inner.ledger().get().sequence_number
+    }
+
     /// Register an account with a name.
     pub fn register_account(&self, name: &str, address: Address) {
         if self.accounts.borrow().contains_key(name) {
@@ -535,7 +765,10 @@ impl MockEnv {
     /// let pool_events = env.events_from_contract(&pool_address);
     /// assert!(!pool_events.is_empty());
     /// ```
-    pub fn events_from_contract(&self, contract_id: &Address) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    pub fn events_from_contract(
+        &self,
+        contract_id: &Address,
+    ) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
         use soroban_sdk::xdr::{self, ScAddress};
         let all_events = self.inner.events().all();
         let mut result = SorobanVec::new(&self.inner);
@@ -565,7 +798,10 @@ impl MockEnv {
     /// let events = env.events_from_contracts(&[&pool_a, &pool_b]);
     /// assert_eq!(events.len(), 1); // only one pool was used
     /// ```
-    pub fn events_from_contracts(&self, contract_ids: &[&Address]) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
+    pub fn events_from_contracts(
+        &self,
+        contract_ids: &[&Address],
+    ) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
         use soroban_sdk::xdr::{self, ScAddress};
         let all_events = self.inner.events().all();
         let mut result = SorobanVec::new(&self.inner);
@@ -584,10 +820,10 @@ impl MockEnv {
         result
     }
 
-    /// Returns events matching the given topics.
+    /// Returns events matching the given topics wrapped in ergonomic [`EventMatches`].
     ///
-    /// Updated for Soroban SDK v25.x ContractEvents compatibility.
-    pub fn events_matching<T>(&self, topics: T) -> SorobanVec<(Address, SorobanVec<Val>, Val)>
+    /// Updated for Soroban SDK v25.x ContractEvents compatibility and programmatic inspection ergonomics.
+    pub fn events_matching<T>(&self, topics: T) -> EventMatches
     where
         T: IntoVal<Env, SorobanVec<Val>>,
     {
@@ -617,7 +853,7 @@ impl MockEnv {
                 matching.push_back((contract_id, event_topics, data));
             }
         }
-        matching
+        EventMatches::new(self.inner.clone(), matching)
     }
 
     /// Returns events matching the given topics as typed [`CapturedEvent`] wrappers.
@@ -657,7 +893,8 @@ impl MockEnv {
             if event_topics.len() < filter_topics.len() {
                 continue;
             }
-            let matches = crate::event_topic_match::topics_match(&self.inner, &filter_topics, &event_topics);
+            let matches =
+                crate::event_topic_match::topics_match(&self.inner, &filter_topics, &event_topics);
             if matches {
                 let sc_addr = ScAddress::Contract(hash.clone());
                 let contract_id = Address::from_val(&self.inner, &sc_addr);
@@ -819,13 +1056,7 @@ impl MockEnv {
         // Clear the global auth bypass so it does not leak into later operations.
         self.inner.mock_auths(&[]);
 
-        SimulatedTx::new(
-            fee,
-            instructions,
-            auths,
-            true,
-            Some(result),
-        )
+        SimulatedTx::new(fee, instructions, auths, true, Some(result))
     }
 
     /// Creates a fully independent copy of this environment.
@@ -844,9 +1075,122 @@ impl MockEnv {
             inner: self.inner.clone(),
             accounts: Rc::new(RefCell::new(self.accounts.borrow().clone())),
             contract_ids: Rc::new(RefCell::new(self.contract_ids.borrow().clone())),
+            tokens: Rc::new(RefCell::new(self.tokens.borrow().clone())),
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
             track_costs: self.track_costs,
         }
+    }
+
+    // Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
+
+    /// Mock BN254 G1 addition (`bn254_g1_add` host function stand-in).
+    pub fn bn254_g1_add(&self, p: G1, q: G1) -> G1 {
+        let _ = self;
+        zk::g1_add(p, q)
+    }
+
+    /// Mock BN254 G1 scalar multiplication (`bn254_g1_mul` host function stand-in).
+    pub fn bn254_g1_mul(&self, p: G1, scalar: u64) -> G1 {
+        let _ = self;
+        zk::g1_mul(p, scalar)
+    }
+
+    /// Mock BN254 G2 addition (`bn254_g2_add` host function stand-in).
+    pub fn bn254_g2_add(&self, p: G2, q: G2) -> G2 {
+        let _ = self;
+        zk::g2_add(p, q)
+    }
+
+    /// Mock BN254 G2 scalar multiplication (`bn254_g2_mul` host function stand-in).
+    pub fn bn254_g2_mul(&self, p: G2, scalar: u64) -> G2 {
+        let _ = self;
+        zk::g2_mul(p, scalar)
+    }
+
+    /// Mock BN254 multi-pairing check (`bn254_pairing_check` host function stand-in).
+    pub fn bn254_pairing_check(&self, pairs: &[(G1, G2)]) -> bool {
+        let _ = self;
+        zk::pairing_check(pairs)
+    }
+
+    /// Mock BLS12-381 G1 addition (`bls12_381_g1_add` host function stand-in).
+    pub fn bls12_381_g1_add(&self, p: G1, q: G1) -> G1 {
+        let _ = self;
+        zk::g1_add(p, q)
+    }
+
+    /// Mock BLS12-381 G1 scalar multiplication (`bls12_381_g1_mul` host function stand-in).
+    pub fn bls12_381_g1_mul(&self, p: G1, scalar: u64) -> G1 {
+        let _ = self;
+        zk::g1_mul(p, scalar)
+    }
+
+    /// Mock BLS12-381 G2 addition (`bls12_381_g2_add` host function stand-in).
+    pub fn bls12_381_g2_add(&self, p: G2, q: G2) -> G2 {
+        let _ = self;
+        zk::g2_add(p, q)
+    }
+
+    /// Mock BLS12-381 G2 scalar multiplication (`bls12_381_g2_mul` host function stand-in).
+    pub fn bls12_381_g2_mul(&self, p: G2, scalar: u64) -> G2 {
+        let _ = self;
+        zk::g2_mul(p, scalar)
+    }
+
+    /// Mock BLS12-381 multi-pairing check (`bls12_381_pairing_check` host function stand-in).
+    pub fn bls12_381_pairing_check(&self, pairs: &[(G1, G2)]) -> bool {
+        let _ = self;
+        zk::pairing_check(pairs)
+    }
+
+    /// Sample a Groth16 verifying key for `n_public` public inputs on `curve`.
+    pub fn groth16_verifying_key(
+        &self,
+        curve: PairingCurve,
+        n_public: usize,
+    ) -> Groth16VerifyingKey {
+        let _ = self;
+        zk::sample_verifying_key(curve, n_public)
+    }
+
+    /// Generate a valid Groth16 proof for `vk` and `public_inputs`.
+    pub fn generate_groth16_proof(
+        &self,
+        vk: &Groth16VerifyingKey,
+        public_inputs: &[u64],
+    ) -> Groth16Proof {
+        let _ = self;
+        zk::generate_groth16_proof(vk, public_inputs)
+            .expect("public input count must match verifying key IC length")
+    }
+
+    /// Verify a Groth16 proof against `vk` using the mock pairing check.
+    pub fn verify_groth16(
+        &self,
+        vk: &Groth16VerifyingKey,
+        proof: &Groth16Proof,
+        public_inputs: &[u64],
+    ) -> bool {
+        let _ = self;
+        zk::verify_groth16(vk, proof, public_inputs)
+    }
+
+    /// Produce a structurally valid but algebraically invalid Groth16 proof.
+    pub fn tamper_groth16_proof(&self, proof: Groth16Proof) -> Groth16Proof {
+        let _ = self;
+        zk::tamper_groth16_proof(proof)
+    }
+
+    /// Generate a valid Plonk proof for a single public input.
+    pub fn generate_plonk_proof(&self, curve: PairingCurve, public_input: u64) -> PlonkProof {
+        let _ = self;
+        zk::generate_plonk_proof(curve, public_input)
+    }
+
+    /// Verify a Plonk proof using the mock pairing check.
+    pub fn verify_plonk(&self, curve: PairingCurve, proof: &PlonkProof, public_input: u64) -> bool {
+        let _ = self;
+        zk::verify_plonk(curve, proof, public_input)
     }
 
     /// Simulate a contract call that is expected to fail (panic/revert).
@@ -886,9 +1230,15 @@ impl MockEnv {
                 } else {
                     None
                 };
-                FailedCallResult { failed: true, message }
+                FailedCallResult {
+                    failed: true,
+                    message,
+                }
             }
-            Ok(()) => FailedCallResult { failed: false, message: None },
+            Ok(()) => FailedCallResult {
+                failed: false,
+                message: None,
+            },
         }
     }
 }
@@ -948,6 +1298,7 @@ impl Default for MockEnv {
             inner: Env::default(),
             accounts: Rc::new(RefCell::new(HashMap::new())),
             contract_ids: Rc::new(RefCell::new(HashMap::new())),
+            tokens: Rc::new(RefCell::new(HashMap::new())),
             xlm_token_address: Rc::new(RefCell::new(None)),
             track_costs: false,
         }
@@ -987,13 +1338,13 @@ mod tests {
     static_assertions::assert_not_impl_any!(MockEnv: Send, Sync);
 }
 
-
 /// Builder for constructing a `MockEnv` with custom configuration.
 ///
 /// **Host-only:** See [`MockEnv`] for runtime requirements.
 pub struct MockEnvBuilder {
     env: MockEnv,
     account_configs: Vec<(String, Stroops)>,
+    token_configs: Vec<(String, u32)>,
 }
 
 impl MockEnvBuilder {
@@ -1001,6 +1352,7 @@ impl MockEnvBuilder {
         Self {
             env: MockEnv::default(),
             account_configs: Vec::new(),
+            token_configs: Vec::new(),
         }
     }
 
@@ -1092,6 +1444,12 @@ impl MockEnvBuilder {
         self
     }
 
+    /// Add a named mock token with decimals.
+    pub fn with_token(mut self, symbol: &str, decimals: u32) -> Self {
+        self.token_configs.push((symbol.to_string(), decimals));
+        self
+    }
+
     /// Enable cost tracking for instruction counting.
     pub fn track_costs(mut self) -> Self {
         self.env.track_costs = true;
@@ -1105,6 +1463,14 @@ impl MockEnvBuilder {
                 .name(&name)
                 .fund_xlm(balance)
                 .build();
+        }
+        for (symbol, decimals) in self.token_configs {
+            let token = if symbol.eq_ignore_ascii_case("xlm") {
+                MockToken::xlm(&self.env)
+            } else {
+                MockToken::new(&self.env, &symbol, decimals)
+            };
+            self.env.register_token(&symbol, token);
         }
         self.env
     }
@@ -1125,17 +1491,24 @@ mod extra_tests {
     #[contractimpl]
     impl TestContract {
         pub fn initialize(env: Env, value: u32) {
-            env.storage().instance().set(&soroban_sdk::symbol_short!("val"), &value);
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::symbol_short!("val"), &value);
         }
 
         pub fn get(env: Env) -> u32 {
-            env.storage().instance().get(&soroban_sdk::symbol_short!("val")).unwrap_or(0)
+            env.storage()
+                .instance()
+                .get(&soroban_sdk::symbol_short!("val"))
+                .unwrap_or(0)
         }
 
         pub fn increment(env: Env) -> u32 {
             let val = Self::get(env.clone());
             let new_val = val + 1;
-            env.storage().instance().set(&soroban_sdk::symbol_short!("val"), &new_val);
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::symbol_short!("val"), &new_val);
             new_val
         }
     }
@@ -1332,10 +1705,7 @@ mod time_advance_tests {
     fn advance_time_by_months_updates_ledger() {
         let env = MockEnv::builder().at_timestamp(JAN_31_2024).build();
         env.advance_time_by_months(1);
-        assert_eq!(
-            env.timestamp(),
-            datetime_to_unix(2024, 2, 29, 12, 30, 45)
-        );
+        assert_eq!(env.timestamp(), datetime_to_unix(2024, 2, 29, 12, 30, 45));
     }
 
     #[test]
@@ -1350,6 +1720,36 @@ mod time_advance_tests {
         let env = MockEnv::builder().at_timestamp(MAR_15_2024).build();
         env.advance_time_by_months(6);
         assert_eq!(env.timestamp(), add_months(MAR_15_2024, 6));
+    }
+
+    #[test]
+    fn advance_time_zero_duration_is_noop() {
+        let env = MockEnv::builder()
+            .at_timestamp(1_700_000_000)
+            .build();
+        
+        // Verify initial state
+        assert_eq!(env.timestamp(), 1_700_000_000);
+        
+        // Advance by zero using Duration::ZERO equivalent
+        env.advance_time(Duration::days(0));
+        
+        // Timestamp should remain unchanged
+        assert_eq!(env.timestamp(), 1_700_000_000);
+        
+        // Also test with Duration::seconds(0)
+        env.advance_time(Duration::seconds(0));
+        assert_eq!(env.timestamp(), 1_700_000_000);
+    }
+
+    #[test]
+    fn advance_sequence_zero_is_noop() {
+        let env = MockEnv::builder().build();
+        let initial_seq = env.ledger_sequence();
+        
+        env.advance_sequence(0);
+        
+        assert_eq!(env.ledger_sequence(), initial_seq);
     }
 }
 
@@ -1395,6 +1795,79 @@ mod auth_scope_tests {
         }
         assert!(env.inner().auths().is_empty());
     }
+
+    #[soroban_sdk::contract]
+    struct DummyProtectedContract;
+
+    #[soroban_sdk::contractimpl]
+    impl DummyProtectedContract {
+        pub fn protected_action(_env: soroban_sdk::Env, user: soroban_sdk::Address) -> u32 {
+            user.require_auth();
+            100
+        }
+    }
+
+    #[test]
+    fn protected_call_valid_auth_succeeds() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+
+        // 1. Global mock auth pattern
+        env.mock_all_auths();
+        assert_eq!(client.protected_action(&alice), 100);
+
+        // 2. Specific mock auth pattern
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &alice,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "protected_action",
+                args: (alice.clone(),).into_val(env.inner()),
+                sub_invokes: &[],
+            },
+        }]);
+        assert_eq!(client.protected_action(&alice), 100);
+    }
+
+    #[test]
+    #[should_panic]
+    fn protected_call_missing_auth_panics() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+
+        // Clear mock authorizations so require_auth fails
+        env.mock_auths(&[]);
+        client.protected_action(&alice);
+    }
+
+    #[test]
+    #[should_panic]
+    fn protected_call_wrong_signer_panics() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+
+        // Provide authorization for bob when alice is the required caller argument
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &bob,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "protected_action",
+                args: (alice.clone(),).into_val(env.inner()),
+                sub_invokes: &[],
+            },
+        }]);
+        client.protected_action(&alice);
+    }
 }
 
 #[cfg(test)]
@@ -1403,7 +1876,9 @@ mod missing_lookup_tests {
     use soroban_sdk::testutils::Address as _;
 
     #[test]
-    #[should_panic(expected = "Account 'missing' not found. Available accounts: [admin, alice, bob]. Ensure it was registered via MockEnvBuilder or AccountBuilder.")]
+    #[should_panic(
+        expected = "Account 'missing' not found. Available accounts: [admin, alice, bob]. Ensure it was registered via MockEnvBuilder or AccountBuilder."
+    )]
     fn missing_account_shows_available() {
         let env = MockEnv::builder()
             .with_account("admin", Stroops::xlm(10))
@@ -1414,11 +1889,241 @@ mod missing_lookup_tests {
     }
 
     #[test]
-    #[should_panic(expected = "Contract 'alloc::string::String' not registered. Available contracts: [crucible::env::MockEnv]")]
+    #[should_panic(
+        expected = "Contract 'alloc::string::String' not registered. Available contracts: [crucible::env::MockEnv]"
+    )]
     fn missing_contract_shows_available() {
         let env = MockEnv::default();
         let addr = Address::generate(&env.inner);
         env.register_contract::<MockEnv>(addr);
         env.contract_id::<String>();
     }
+
+    #[test]
+    fn test_with_token_and_token_accessors() {
+        let env = MockEnv::builder()
+            .with_token("USDC", 6)
+            .with_token("XLM", 7)
+            .build();
+
+        let usdc = env.token("USDC");
+        assert_eq!(usdc.decimals(), 6);
+
+        let usdc_opt = env.token_opt("USDC");
+        assert!(usdc_opt.is_some());
+        assert_eq!(usdc_opt.unwrap().decimals(), 6);
+
+        assert!(env.token_opt("UNKNOWN").is_none());
+
+        let xlm = env.token("XLM");
+        assert_eq!(xlm.decimals(), 7);
+
+        // Manually created MockToken works alongside registered tokens
+        let manual_usdc = MockToken::new(&env, "USDC_MANUAL", 6);
+        assert_eq!(manual_usdc.decimals(), 6);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Token 'MISSING' not found in MockEnv. Available tokens: [USDC, XLM]. Ensure it was registered via MockEnvBuilder."
+    )]
+    fn test_missing_token_panics() {
+        let env = MockEnv::builder()
+            .with_token("USDC", 6)
+            .with_token("XLM", 7)
+            .build();
+        env.token("MISSING");
+    }
 }
+
+// Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
+#[cfg(test)]
+mod zk_pairing_harness_tests {
+    use super::*;
+    use crate::zk::{self, encode_scalar, G1, G2, PairingCurve};
+    use soroban_sdk::{contract, contractimpl, Bytes};
+
+    #[test]
+    fn bn254_host_mocks_add_and_mul() {
+        let env = MockEnv::default();
+        let p = G1::generator();
+        let q = env.bn254_g1_mul(p, 3);
+        let sum = env.bn254_g1_add(p, q);
+        assert_eq!(sum, zk::g1_add(p, q));
+
+        let g2 = G2::generator();
+        let g2s = env.bn254_g2_mul(g2, 5);
+        assert_eq!(env.bn254_g2_add(g2, g2s), zk::g2_add(g2, g2s));
+    }
+
+    #[test]
+    fn bls12_381_host_mocks_pairing_check() {
+        let env = MockEnv::default();
+        let p = env.bls12_381_g1_mul(G1::generator(), 2);
+        let q = env.bls12_381_g2_mul(G2::generator(), 3);
+        // e(2G, 3H) * e(-6G, H) = 1
+        let neg = zk::g1_neg(env.bls12_381_g1_mul(G1::generator(), 6));
+        assert!(env.bls12_381_pairing_check(&[(p, q), (neg, G2::generator())]));
+    }
+
+    #[test]
+    fn generate_and_verify_valid_groth16_on_bn254() {
+        let env = MockEnv::default();
+        let vk = env.groth16_verifying_key(PairingCurve::Bn254, 2);
+        let inputs = [4u64, 9];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+        assert!(env.verify_groth16(&vk, &proof, &inputs));
+    }
+
+    #[test]
+    fn negative_groth16_proof_is_rejected() {
+        let env = MockEnv::default();
+        let vk = env.groth16_verifying_key(PairingCurve::Bls12_381, 1);
+        let inputs = [12u64];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+        let bad = env.tamper_groth16_proof(proof);
+        assert!(!env.verify_groth16(&vk, &bad, &inputs));
+        assert!(!env.verify_groth16(&vk, &proof, &[99]));
+    }
+
+    #[test]
+    fn plonk_valid_and_negative_via_mock_env() {
+        let env = MockEnv::default();
+        let proof = env.generate_plonk_proof(PairingCurve::Bn254, 7);
+        assert!(env.verify_plonk(PairingCurve::Bn254, &proof, 7));
+        assert!(!env.verify_plonk(
+            PairingCurve::Bn254,
+            &zk::tamper_plonk_proof(proof),
+            7
+        ));
+    }
+
+    /// On-chain Groth16 verifier that consumes harness-encoded proof bytes
+    /// for a single public input (IC[0] + pub·IC[1]).
+    #[contract]
+    struct OnChainGroth16Verifier;
+
+    #[contractimpl]
+    impl OnChainGroth16Verifier {
+        pub fn verify_proof(
+            env: soroban_sdk::Env,
+            a: Bytes,
+            b: Bytes,
+            c: Bytes,
+            alpha: Bytes,
+            beta: Bytes,
+            gamma: Bytes,
+            delta: Bytes,
+            ic0: Bytes,
+            ic1: Bytes,
+            public_input: Bytes,
+        ) -> bool {
+            let _ = env;
+            groth16_pairing_equation(
+                &a,
+                &b,
+                &c,
+                &alpha,
+                &beta,
+                &gamma,
+                &delta,
+                &ic0,
+                &ic1,
+                &public_input,
+            )
+        }
+    }
+
+    fn groth16_pairing_equation(
+        a: &Bytes,
+        b: &Bytes,
+        c: &Bytes,
+        alpha: &Bytes,
+        beta: &Bytes,
+        gamma: &Bytes,
+        delta: &Bytes,
+        ic0: &Bytes,
+        ic1: &Bytes,
+        public_input: &Bytes,
+    ) -> bool {
+        let a_x = read_u64(a, 0);
+        let b_x0 = read_u64(b, 0);
+        let c_x = read_u64(c, 0);
+        let alpha_x = read_u64(alpha, 0);
+        let beta_x0 = read_u64(beta, 0);
+        let gamma_x0 = read_u64(gamma, 0);
+        let delta_x0 = read_u64(delta, 0);
+        let input = read_u64(public_input, 0);
+        let l_x = read_u64(ic0, 0).wrapping_add(input.wrapping_mul(read_u64(ic1, 0)));
+
+        let lhs = a_x.wrapping_mul(b_x0);
+        let rhs = alpha_x
+            .wrapping_mul(beta_x0)
+            .wrapping_add(l_x.wrapping_mul(gamma_x0))
+            .wrapping_add(c_x.wrapping_mul(delta_x0));
+        lhs == rhs
+    }
+
+    fn read_u64(bytes: &Bytes, offset: u32) -> u64 {
+        let mut out = [0u8; 8];
+        for i in 0..8u32 {
+            out[i as usize] = bytes.get(offset + i).unwrap_or(0);
+        }
+        u64::from_le_bytes(out)
+    }
+
+    #[test]
+    fn groth16_proof_verifies_on_chain() {
+        let env = MockEnv::default();
+        env.mock_all_auths();
+        let inner = env.inner();
+        let contract_id = inner.register(OnChainGroth16Verifier, ());
+        let client = OnChainGroth16VerifierClient::new(inner, &contract_id);
+
+        let vk = env.groth16_verifying_key(PairingCurve::Bn254, 1);
+        let inputs = [5u64];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+
+        let ok = client.verify_proof(
+            &proof.a.to_bytes(inner, proof.curve),
+            &proof.b.to_bytes(inner, proof.curve),
+            &proof.c.to_bytes(inner, proof.curve),
+            &vk.alpha_g1.to_bytes(inner, vk.curve),
+            &vk.beta_g2.to_bytes(inner, vk.curve),
+            &vk.gamma_g2.to_bytes(inner, vk.curve),
+            &vk.delta_g2.to_bytes(inner, vk.curve),
+            &vk.ic[0].to_bytes(inner, vk.curve),
+            &vk.ic[1].to_bytes(inner, vk.curve),
+            &encode_scalar(inner, inputs[0]),
+        );
+        assert!(ok, "valid Groth16 proof must verify on-chain");
+    }
+
+    #[test]
+    fn groth16_negative_proof_fails_on_chain() {
+        let env = MockEnv::default();
+        env.mock_all_auths();
+        let inner = env.inner();
+        let contract_id = inner.register(OnChainGroth16Verifier, ());
+        let client = OnChainGroth16VerifierClient::new(inner, &contract_id);
+
+        let vk = env.groth16_verifying_key(PairingCurve::Bls12_381, 1);
+        let inputs = [5u64];
+        let proof = env.tamper_groth16_proof(env.generate_groth16_proof(&vk, &inputs));
+
+        let ok = client.verify_proof(
+            &proof.a.to_bytes(inner, proof.curve),
+            &proof.b.to_bytes(inner, proof.curve),
+            &proof.c.to_bytes(inner, proof.curve),
+            &vk.alpha_g1.to_bytes(inner, vk.curve),
+            &vk.beta_g2.to_bytes(inner, vk.curve),
+            &vk.gamma_g2.to_bytes(inner, vk.curve),
+            &vk.delta_g2.to_bytes(inner, vk.curve),
+            &vk.ic[0].to_bytes(inner, vk.curve),
+            &vk.ic[1].to_bytes(inner, vk.curve),
+            &encode_scalar(inner, inputs[0]),
+        );
+        assert!(!ok, "tampered Groth16 proof must fail on-chain");
+    }
+}
+

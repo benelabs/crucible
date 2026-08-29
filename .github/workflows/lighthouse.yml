@@ -1,0 +1,39 @@
+name: Lighthouse Performance Audit
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/lighthouse.yml'
+      - 'lighthouserc.json'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/lighthouse.yml'
+      - 'lighthouserc.json'
+
+jobs:
+  lighthouse:
+    name: Lighthouse Performance Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Install Frontend Dependencies & Build
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Run Lighthouse CI Audit
+        run: |
+          npm install -g @lhci/cli
+          lhci autorun --config=./lighthouserc.json

@@ -2,8 +2,9 @@
 
 # Script to create separate branches and PRs for the implemented features
 
-# Ensure we're in the right directory
-cd /home/knights/Documents/Project/Drips/crucible || { echo "Error: Could not change to crucible directory"; exit 1; }
+# Use CRUCIBLE_DIR or fall back to PWD
+CRUCIBLE_DIR="${CRUCIBLE_DIR:-$PWD}"
+cd "$CRUCIBLE_DIR" || { echo "Error: Could not change to crucible directory at $CRUCIBLE_DIR"; exit 1; }
 
 echo "Creating branches for the implemented features..."
 

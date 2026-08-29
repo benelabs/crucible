@@ -52,7 +52,16 @@ impl Ctx {
         let token = MockToken::new(&env, "USDC", 6);
         token.mint(&depositor, AMOUNT * 3);
 
-        Ctx { env, id, depositor, recipient, arbiter_a, arbiter_b, arbiter_c, token }
+        Ctx {
+            env,
+            id,
+            depositor,
+            recipient,
+            arbiter_a,
+            arbiter_b,
+            arbiter_c,
+            token,
+        }
     }
 
     fn client(&self) -> MultiArbiterEscrowClient<'_> {
@@ -138,7 +147,8 @@ fn test_arbiter_a_can_approve() {
     let ctx = Ctx::setup();
     ctx.create_escrow();
 
-    ctx.env.with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter_a));
+    ctx.env
+        .with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter_a));
     assert_eq!(ctx.client().get_state().status, EscrowStatus::Approved);
 }
 
@@ -147,7 +157,8 @@ fn test_arbiter_b_can_approve() {
     let ctx = Ctx::setup();
     ctx.create_escrow();
 
-    ctx.env.with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter_b));
+    ctx.env
+        .with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter_b));
     assert_eq!(ctx.client().get_state().status, EscrowStatus::Approved);
 }
 
@@ -156,7 +167,8 @@ fn test_arbiter_c_can_approve() {
     let ctx = Ctx::setup();
     ctx.create_escrow();
 
-    ctx.env.with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter_c));
+    ctx.env
+        .with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter_c));
     assert_eq!(ctx.client().get_state().status, EscrowStatus::Approved);
 }
 
@@ -195,7 +207,8 @@ fn test_claim_after_arbiter_approval_succeeds_before_timeout() {
     ctx.create_escrow();
 
     // Approve without advancing time.
-    ctx.env.with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter_b));
+    ctx.env
+        .with_mock_all_auths(|| ctx.client().approve(&ctx.arbiter_b));
     ctx.env.with_mock_all_auths(|| ctx.client().claim());
 
     assert_eq!(ctx.token.balance(&ctx.recipient), AMOUNT);

@@ -20,7 +20,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource;
 use std::time::Duration;
 use tracing::{info_span, warn};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// Central tracing service for initialization and span creation
 pub struct TracingService;
@@ -278,6 +278,26 @@ impl TracingService {
     pub fn record_error(span: &tracing::Span, error_message: &str, error_type: &str) {
         span.record("error.type", error_type);
         warn!("Span error recorded: {} ({})", error_message, error_type);
+    }
+
+    /// Inject trace context into a carrier map for distributed propagation
+    pub fn inject_trace_context(
+        cx: &opentelemetry::Context,
+    ) -> std::collections::HashMap<String, String> {
+        use opentelemetry::propagation::TextMapPropagator;
+        let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+        let mut carrier = std::collections::HashMap::new();
+        propagator.inject_context(cx, &mut carrier);
+        carrier
+    }
+
+    /// Extract trace context from a carrier map for distributed propagation
+    pub fn extract_trace_context(
+        carrier: &std::collections::HashMap<String, String>,
+    ) -> opentelemetry::Context {
+        use opentelemetry::propagation::TextMapPropagator;
+        let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+        propagator.extract(carrier)
     }
 }
 

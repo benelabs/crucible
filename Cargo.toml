@@ -17,13 +17,14 @@ members = [
     "examples/lending",
     "examples/prediction-market",
     "examples/escrow-multi-arbiter",
+    "examples/amm-pool",
     "examples/bounty-escrow",
     "examples/nft-rental",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "1.5.0"
+version = "1.6.0"
 edition = "2021"
 rust-version = "1.91.0"
 license = "MIT"

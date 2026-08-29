@@ -1133,6 +1133,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-example-amm-pool"
+version = "0.1.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "crucible-example-counter"
 version = "0.1.0"
 dependencies = [

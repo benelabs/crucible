@@ -181,7 +181,7 @@ fn has_derive(attrs: &[syn::Attribute], name: &str) -> bool {
 #[proc_macro_derive(Fixture, attributes(contract_client))]
 pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    let name = input.ident.clone();
 
     let mut has_debug = false;
     for attr in &input.attrs {
@@ -229,7 +229,7 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                         if let Ok(metas) = meta {
                             for m in metas {
                                 if m.path().is_ident("contract") {
-                                    if let Meta::Path(path) = m.value {
+                                    if let Meta::Path(path) = m {
                                         contract_ty = Some(path);
                                     }
                                 }

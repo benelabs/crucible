@@ -221,6 +221,86 @@ impl Stroops {
     }
 }
 
+/// Supported Soroban protocol versions for compatibility testing.
+///
+/// Crucible environments can be configured to target a specific protocol version
+/// so that contracts can be tested against multiple Soroban network upgrades
+/// (Protocol 20, 21, 22, …).
+///
+/// # Example
+///
+/// ```ignore
+/// use crucible::prelude::*;
+///
+/// let env = MockEnv::builder()
+///     .with_protocol_version(ProtocolVersion::V21)
+///     .build();
+/// assert_eq!(env.protocol_version(), 21);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProtocolVersion {
+    V20 = 20,
+    V21 = 21,
+    V22 = 22,
+}
+
+impl ProtocolVersion {
+    /// Returns the numeric protocol version.
+    pub fn value(&self) -> u32 {
+        *self as u32
+    }
+
+    /// Returns `true` if this protocol version supports the given host function
+    /// name.  The list is intentionally conservative: if a function is not
+    /// listed here we assume it is available in all supported versions.
+    pub fn supports_host_function(&self, _function: &str) -> bool {
+        let version = self.value();
+        match _function {
+            "v1_low_level_operations" | "v1_wasm_host_function_with_abi" => version >= 20,
+            "v2_low_level_operations" | "v2_wasm_host_function_with_abi" => version >= 21,
+            "v3_low_level_operations" | "v3_wasm_host_function_with_abi" => version >= 22,
+            _ => true,
+        }
+    }
+
+    /// Returns the maximum supported protocol version known to Crucible.
+    pub fn max_supported() -> Self {
+        ProtocolVersion::V22
+    }
+
+    /// Returns an iterator over all supported protocol versions.
+    pub fn all() -> impl Iterator<Item = ProtocolVersion> {
+        [ProtocolVersion::V20, ProtocolVersion::V21, ProtocolVersion::V22]
+            .into_iter()
+    }
+}
+
+impl std::fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Protocol {}", self.value())
+    }
+}
+
+impl From<u32> for ProtocolVersion {
+    fn from(value: u32) -> Self {
+        match value {
+            20 => ProtocolVersion::V20,
+            21 => ProtocolVersion::V21,
+            22 => ProtocolVersion::V22,
+            _ => panic!(
+                "Unsupported protocol version: {}. Supported versions are 20, 21, 22.",
+                value
+            ),
+        }
+    }
+}
+
+impl From<ProtocolVersion> for u32 {
+    fn from(version: ProtocolVersion) -> Self {
+        version.value()
+    }
+}
+
 /// **Thread‑safety:** `MockEnv` is deliberately single‑threaded; it uses `Rc`/`RefCell` and does **not** implement `Send` or `Sync`. This ensures deterministic behavior in tests but means fixtures cannot be moved across async tasks.
 /// A wrapper around the Soroban test environment with additional helpers.
 ///
@@ -471,6 +551,11 @@ impl MockEnv {
         &self.inner
     }
 
+    /// Returns the current Soroban protocol version configured on the ledger.
+    pub fn protocol_version(&self) -> u32 {
+        self.inner.ledger().get().protocol_version
+    }
+
     /// Creates a new `MockEnvBuilder` for fluent environment construction.
     pub fn builder() -> MockEnvBuilder {
         MockEnvBuilder::new()
@@ -606,6 +691,11 @@ impl MockEnv {
     /// Returns the current ledger timestamp (UNIX seconds).
     pub fn timestamp(&self) -> u64 {
         self.inner.ledger().get().timestamp
+    }
+
+    /// Returns the current ledger sequence number.
+    pub fn ledger_sequence(&self) -> u32 {
+        self.inner.ledger().get().sequence_number
     }
 
     /// Advance the ledger timestamp by a duration.
@@ -1813,6 +1903,82 @@ mod missing_lookup_tests {
             .with_token("XLM", 7)
             .build();
         env.token("MISSING");
+    }
+}
+
+#[cfg(test)]
+mod protocol_version_tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_version_getter_returns_default() {
+        let env = MockEnv::default();
+        assert_eq!(env.protocol_version(), 26);
+    }
+
+    #[test]
+    fn test_with_protocol_version_sets_ledger() {
+        let env = MockEnv::builder()
+            .with_protocol_version(26)
+            .build();
+        assert_eq!(env.protocol_version(), 26);
+    }
+
+    #[test]
+    fn test_protocol_version_enum_values() {
+        assert_eq!(ProtocolVersion::V20.value(), 20);
+        assert_eq!(ProtocolVersion::V21.value(), 21);
+        assert_eq!(ProtocolVersion::V22.value(), 22);
+    }
+
+    #[test]
+    fn test_protocol_version_all_versions() {
+        let versions: Vec<u32> = ProtocolVersion::all().map(|v| v.value()).collect();
+        assert_eq!(versions, vec![20, 21, 22]);
+    }
+
+    #[test]
+    fn test_protocol_version_max_supported() {
+        assert_eq!(ProtocolVersion::max_supported(), ProtocolVersion::V22);
+    }
+
+    #[test]
+    fn test_protocol_version_supports_host_function() {
+        let v20 = ProtocolVersion::V20;
+        let v21 = ProtocolVersion::V21;
+        let v22 = ProtocolVersion::V22;
+
+        assert!(v20.supports_host_function("v1_low_level_operations"));
+        assert!(!v20.supports_host_function("v2_low_level_operations"));
+        assert!(!v20.supports_host_function("v3_low_level_operations"));
+
+        assert!(v21.supports_host_function("v1_low_level_operations"));
+        assert!(v21.supports_host_function("v2_low_level_operations"));
+        assert!(!v21.supports_host_function("v3_low_level_operations"));
+
+        assert!(v22.supports_host_function("v1_low_level_operations"));
+        assert!(v22.supports_host_function("v2_low_level_operations"));
+        assert!(v22.supports_host_function("v3_low_level_operations"));
+    }
+
+    #[test]
+    fn test_protocol_version_from_u32() {
+        assert_eq!(ProtocolVersion::from(20), ProtocolVersion::V20);
+        assert_eq!(ProtocolVersion::from(21), ProtocolVersion::V21);
+        assert_eq!(ProtocolVersion::from(22), ProtocolVersion::V22);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unsupported protocol version: 99")]
+    fn test_protocol_version_from_invalid_u32_panics() {
+        let _ = ProtocolVersion::from(99);
+    }
+
+    #[test]
+    fn test_protocol_version_display() {
+        assert_eq!(format!("{}", ProtocolVersion::V20), "Protocol 20");
+        assert_eq!(format!("{}", ProtocolVersion::V21), "Protocol 21");
+        assert_eq!(format!("{}", ProtocolVersion::V22), "Protocol 22");
     }
 }
 

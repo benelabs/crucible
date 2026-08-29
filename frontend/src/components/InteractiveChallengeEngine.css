@@ -358,3 +358,174 @@
   background-color: #fee2e2;
   color: #991b1b;
 }
+
+/* Step Progression Styles */
+.step-progression {
+  padding: 20px;
+  background-color: #f3f4f6;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.steps-container {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.step-indicator {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #e5e7eb;
+  border: 2px solid #d1d5db;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.step-indicator:hover {
+  border-color: #9ca3af;
+  transform: scale(1.1);
+}
+
+.step-indicator.active {
+  background-color: #3b82f6;
+  border-color: #2563eb;
+  color: white;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+}
+
+.step-indicator.completed {
+  background-color: #10b981;
+  border-color: #059669;
+  color: white;
+}
+
+.step-indicator.completed svg {
+  width: 20px;
+  height: 20px;
+}
+
+.step-indicator.active.completed {
+  background-color: #0891b2;
+  border-color: #0e7490;
+}
+
+.step-details {
+  padding: 12px;
+  background-color: white;
+  border-radius: 6px;
+  border-left: 4px solid #3b82f6;
+}
+
+.step-details h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.step-details p {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.btn-tertiary {
+  background-color: #fbbf24;
+  color: #78350f;
+}
+
+.btn-tertiary:hover:not(:disabled) {
+  background-color: #f59e0b;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.btn-tertiary:disabled {
+  background-color: #fde68a;
+  cursor: not-allowed;
+  color: #b8860b;
+}
+
+.step-navigation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  margin-top: 20px;
+}
+
+.step-counter {
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  text-align: center;
+  flex: 1;
+}
+
+.completion-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  background-color: #fef3c7;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #78350f;
+  margin-top: 8px;
+}
+
+.hint-item.revealed {
+  border-color: #fcd34d;
+  background-color: #fffbeb;
+}
+
+.hint-item.revealed .hint-button {
+  background-color: #fef3c7;
+}
+
+@media (max-width: 768px) {
+  .challenge-header {
+    flex-direction: column;
+  }
+
+  .challenge-content {
+    grid-template-columns: 1fr;
+  }
+
+  .steps-container {
+    gap: 8px;
+  }
+
+  .step-indicator {
+    width: 36px;
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .editor-actions {
+    flex-wrap: wrap;
+  }
+
+  .step-navigation {
+    flex-direction: column;
+  }
+
+  .step-navigation .btn {
+    width: 100%;
+  }
+}

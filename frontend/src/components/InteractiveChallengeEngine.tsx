@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { ChevronDown, Check, X, Lightbulb, Play } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { ChevronDown, Check, X, Lightbulb, Play, SkipForward } from 'lucide-react';
 import './InteractiveChallengeEngine.css';
 
 export interface TestCase {
@@ -17,6 +17,16 @@ export interface Challenge {
   initialCode: string;
   testCases: TestCase[];
   hints: string[];
+  steps?: ChallengeStep[];
+}
+
+export interface ChallengeStep {
+  id: string;
+  title: string;
+  description: string;
+  testCaseIndex: number;
+  hint: string;
+  expectedCode?: string;
 }
 
 export interface ChallengeResult {
@@ -30,30 +40,62 @@ export interface ChallengeResult {
 interface Props {
   challenge: Challenge;
   onComplete?: (results: ChallengeResult[]) => void;
+  onStepComplete?: (stepId: string) => void;
 }
 
-export function InteractiveChallengeEngine({ challenge, onComplete }: Props) {
+export function InteractiveChallengeEngine({ challenge, onComplete, onStepComplete }: Props) {
   const [code, setCode] = useState(challenge.initialCode);
   const [results, setResults] = useState<ChallengeResult[]>([]);
   const [running, setRunning] = useState(false);
-  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
-  const [expandedHint, setExpandedHint] = useState<number | null>(null);
+  const [completedSteps, setCompletedSteps] = useState<Set<string>>(new Set());
+  const [expandedHints, setExpandedHints] = useState<Set<number>>(new Set());
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [revealedHints, setRevealedHints] = useState<Set<number>>(new Set());
+  const [showProgressModal, setShowProgressModal] = useState(false);
 
+  const steps = challenge.steps || [];
   const allTestsPassed = results.length > 0 && results.every(r => r.passed);
+  const currentStep = steps[currentStepIndex];
+  const stepProgress = (completedSteps.size / Math.max(steps.length, 1)) * 100;
+
+  const toggleHint = useCallback((hintIndex: number) => {
+    setExpandedHints(prev => {
+      const next = new Set(prev);
+      if (next.has(hintIndex)) {
+        next.delete(hintIndex);
+      } else {
+        next.add(hintIndex);
+      }
+      return next;
+    });
+  }, []);
+
+  const revealHint = useCallback((hintIndex: number) => {
+    setRevealedHints(prev => new Set([...prev, hintIndex]));
+    toggleHint(hintIndex);
+  }, [toggleHint]);
 
   const runTests = async () => {
     setRunning(true);
     try {
-      // Simulate test execution - in production, this would call a backend API
       const testResults: ChallengeResult[] = await executeTests(code, challenge.testCases);
       setResults(testResults);
 
-      // Track completed steps
-      if (testResults.every(r => r.passed)) {
-        setCompletedSteps(prev => new Set([...prev, challenge.testCases.length]));
+      // Track completed steps based on test results
+      if (steps.length > 0) {
+        const newCompleted = new Set(completedSteps);
+        steps.forEach((step, idx) => {
+          if (step.testCaseIndex < testResults.length && testResults[step.testCaseIndex].passed) {
+            newCompleted.add(step.id);
+            if (!completedSteps.has(step.id) && onStepComplete) {
+              onStepComplete(step.id);
+            }
+          }
+        });
+        setCompletedSteps(newCompleted);
       }
 
-      if (onComplete) {
+      if (allTestsPassed && onComplete) {
         onComplete(testResults);
       }
     } catch (error) {
@@ -73,6 +115,19 @@ export function InteractiveChallengeEngine({ challenge, onComplete }: Props) {
   const resetCode = () => {
     setCode(challenge.initialCode);
     setResults([]);
+    setExpandedHints(new Set());
+  };
+
+  const skipToNextStep = () => {
+    if (currentStepIndex < steps.length - 1) {
+      setCurrentStepIndex(prev => prev + 1);
+    }
+  };
+
+  const goToPreviousStep = () => {
+    if (currentStepIndex > 0) {
+      setCurrentStepIndex(prev => prev - 1);
+    }
   };
 
   return (
@@ -89,13 +144,41 @@ export function InteractiveChallengeEngine({ challenge, onComplete }: Props) {
           <div className="progress-bar">
             <div 
               className="progress-fill" 
-              style={{ width: `${completedSteps.size > 0 ? 100 : 0}%` }}
+              style={{ width: `${stepProgress}%` }}
               data-testid="progress-fill"
             />
           </div>
-          <p>{completedSteps.size > 0 ? '✓ Challenge Complete!' : 'In Progress'}</p>
+          <p>{completedSteps.size > 0 ? `✓ ${completedSteps.size}/${Math.max(steps.length, 1)} Steps Complete` : 'Get Started'}</p>
+          {allTestsPassed && <p className="completion-badge">🎉 Challenge Complete!</p>}
         </div>
       </div>
+
+      {/* Step-by-step progression */}
+      {steps.length > 0 && (
+        <div className="step-progression" data-testid="step-progression">
+          <div className="steps-container">
+            {steps.map((step, idx) => (
+              <div
+                key={step.id}
+                className={`step-indicator ${completedSteps.has(step.id) ? 'completed' : ''} ${idx === currentStepIndex ? 'active' : ''}`}
+                onClick={() => setCurrentStepIndex(idx)}
+                data-testid={`step-${idx}`}
+                title={step.title}
+              >
+                <div className="step-number">
+                  {completedSteps.has(step.id) ? <Check size={16} /> : idx + 1}
+                </div>
+              </div>
+            ))}
+          </div>
+          {currentStep && (
+            <div className="step-details">
+              <h4>{currentStep.title}</h4>
+              <p>{currentStep.description}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="challenge-content">
         <div className="code-editor-section">
@@ -106,6 +189,7 @@ export function InteractiveChallengeEngine({ challenge, onComplete }: Props) {
             onChange={(e) => setCode(e.target.value)}
             placeholder="Write your Soroban contract code here..."
             data-testid="code-editor"
+            spellCheck="false"
           />
           <div className="editor-actions">
             <button 
@@ -125,31 +209,53 @@ export function InteractiveChallengeEngine({ challenge, onComplete }: Props) {
             >
               Reset Code
             </button>
+            {steps.length > 0 && currentStepIndex < steps.length - 1 && (
+              <button 
+                className="btn btn-tertiary" 
+                onClick={skipToNextStep}
+                disabled={running}
+                data-testid="skip-btn"
+              >
+                <SkipForward size={18} />
+                Skip Step
+              </button>
+            )}
           </div>
         </div>
 
         <div className="hints-section">
-          <h3>Hints</h3>
+          <h3>Hints ({revealedHints.size} revealed)</h3>
           <div className="hints-list">
-            {challenge.hints.map((hint, idx) => (
-              <div key={idx} className="hint-item" data-testid={`hint-${idx}`}>
-                <button
-                  className="hint-button"
-                  onClick={() => setExpandedHint(expandedHint === idx ? null : idx)}
-                  data-testid={`hint-toggle-${idx}`}
-                >
-                  <Lightbulb size={18} />
-                  <span>Hint {idx + 1}</span>
-                  <ChevronDown 
-                    size={18} 
-                    className={expandedHint === idx ? 'rotated' : ''}
-                  />
-                </button>
-                {expandedHint === idx && (
-                  <p className="hint-content" data-testid={`hint-content-${idx}`}>{hint}</p>
-                )}
-              </div>
-            ))}
+            {challenge.hints.map((hint, idx) => {
+              const isRevealed = revealedHints.has(idx);
+              return (
+                <div key={idx} className={`hint-item ${isRevealed ? 'revealed' : ''}`} data-testid={`hint-${idx}`}>
+                  <button
+                    className="hint-button"
+                    onClick={() => {
+                      if (isRevealed) {
+                        toggleHint(idx);
+                      } else {
+                        revealHint(idx);
+                      }
+                    }}
+                    data-testid={`hint-toggle-${idx}`}
+                  >
+                    <Lightbulb size={18} />
+                    <span>Hint {idx + 1} {isRevealed ? '(Revealed)' : '(Locked)'}</span>
+                    {isRevealed && (
+                      <ChevronDown 
+                        size={18} 
+                        className={expandedHints.has(idx) ? 'rotated' : ''}
+                      />
+                    )}
+                  </button>
+                  {isRevealed && expandedHints.has(idx) && (
+                    <p className="hint-content" data-testid={`hint-content-${idx}`}>{hint}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -198,6 +304,29 @@ export function InteractiveChallengeEngine({ challenge, onComplete }: Props) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Step navigation */}
+      {steps.length > 0 && (
+        <div className="step-navigation">
+          <button 
+            className="btn btn-secondary" 
+            onClick={goToPreviousStep}
+            disabled={currentStepIndex === 0}
+            data-testid="prev-step-btn"
+          >
+            ← Previous Step
+          </button>
+          <span className="step-counter">Step {currentStepIndex + 1} of {steps.length}</span>
+          <button 
+            className="btn btn-secondary" 
+            onClick={skipToNextStep}
+            disabled={currentStepIndex === steps.length - 1}
+            data-testid="next-step-btn"
+          >
+            Next Step →
+          </button>
         </div>
       )}
     </div>

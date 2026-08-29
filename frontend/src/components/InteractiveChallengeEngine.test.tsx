@@ -26,6 +26,22 @@ const mockChallenge: Challenge = {
     'Remember to use #[contract] and #[contractimpl] macros from soroban_sdk',
     'Use env.storage().instance() to persist data',
     'The Soroban documentation is your friend!'
+  ],
+  steps: [
+    {
+      id: 'step-1',
+      title: 'Create the contract struct',
+      description: 'Define the counter contract struct',
+      testCaseIndex: 0,
+      hint: 'Use #[contract] macro'
+    },
+    {
+      id: 'step-2',
+      title: 'Implement increment',
+      description: 'Add increment function',
+      testCaseIndex: 1,
+      hint: 'Use env.storage() to persist'
+    }
   ]
 };
 
@@ -291,4 +307,187 @@ describe('InteractiveChallengeEngine', () => {
     expect(container.querySelector('.challenge-header')).toBeInTheDocument();
     expect(container.querySelector('.challenge-content')).toBeInTheDocument();
   });
-});
+
+  // Step Progression Tests
+  it('renders step progression', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByTestId('step-progression')).toBeInTheDocument();
+  });
+
+  it('displays all steps in progression', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByTestId('step-0')).toBeInTheDocument();
+    expect(screen.getByTestId('step-1')).toBeInTheDocument();
+  });
+
+  it('activates first step by default', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const step0 = screen.getByTestId('step-0');
+    expect(step0).toHaveClass('active');
+  });
+
+  it('changes active step on click', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const step1 = screen.getByTestId('step-1');
+    fireEvent.click(step1);
+    expect(step1).toHaveClass('active');
+  });
+
+  it('displays step details for active step', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByText('Create the contract struct')).toBeInTheDocument();
+  });
+
+  it('updates step details when step changes', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const step1 = screen.getByTestId('step-1');
+    fireEvent.click(step1);
+    expect(screen.getByText('Implement increment')).toBeInTheDocument();
+  });
+
+  // Hint Reveal System Tests
+  it('locks hints by default', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByText(/Hint 1 \(Locked\)/)).toBeInTheDocument();
+  });
+
+  it('reveals hint on click', async () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const hintToggle = screen.getByTestId('hint-toggle-0');
+    fireEvent.click(hintToggle);
+    
+    await waitFor(() => {
+      expect(screen.getByText(/Hint 1 \(Revealed\)/)).toBeInTheDocument();
+    });
+  });
+
+  it('shows revealed hint count', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const hintToggle = screen.getByTestId('hint-toggle-0');
+    fireEvent.click(hintToggle);
+    expect(screen.getByText(/Hints \(1 revealed\)/)).toBeInTheDocument();
+  });
+
+  it('tracks multiple revealed hints', async () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const hint0 = screen.getByTestId('hint-toggle-0');
+    const hint1 = screen.getByTestId('hint-toggle-1');
+    
+    fireEvent.click(hint0);
+    fireEvent.click(hint1);
+    
+    await waitFor(() => {
+      expect(screen.getByText(/Hints \(2 revealed\)/)).toBeInTheDocument();
+    });
+  });
+
+  // Step Completion Tests
+  it('calls onStepComplete callback when step test passes', async () => {
+    const onStepComplete = vi.fn();
+    render(<InteractiveChallengeEngine challenge={mockChallenge} onStepComplete={onStepComplete} />);
+    
+    const editor = screen.getByTestId('code-editor') as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: mockChallenge.initialCode + '\npub fn increment' } });
+    
+    const runBtn = screen.getByTestId('run-tests-btn');
+    fireEvent.click(runBtn);
+    
+    await waitFor(() => {
+      expect(onStepComplete).toHaveBeenCalledWith('step-1');
+    });
+  });
+
+  it('marks completed steps visually', async () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    
+    const editor = screen.getByTestId('code-editor') as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: mockChallenge.initialCode + '\npub fn increment' } });
+    
+    const runBtn = screen.getByTestId('run-tests-btn');
+    fireEvent.click(runBtn);
+    
+    await waitFor(() => {
+      const step0 = screen.getByTestId('step-0');
+      expect(step0).toHaveClass('completed');
+    });
+  });
+
+  it('displays step progress indicator', async () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByText(/0\/2 Steps Complete/)).toBeInTheDocument();
+  });
+
+  it('updates progress when steps complete', async () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    
+    const editor = screen.getByTestId('code-editor') as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: mockChallenge.initialCode + '\npub fn increment' } });
+    
+    const runBtn = screen.getByTestId('run-tests-btn');
+    fireEvent.click(runBtn);
+    
+    await waitFor(() => {
+      expect(screen.getByText(/1\/2 Steps Complete/)).toBeInTheDocument();
+    });
+  });
+
+  // Step Navigation Tests
+  it('displays step navigation buttons', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByTestId('prev-step-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('next-step-btn')).toBeInTheDocument();
+  });
+
+  it('navigates to next step', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const nextBtn = screen.getByTestId('next-step-btn');
+    fireEvent.click(nextBtn);
+    expect(screen.getByText(/Step 2 of 2/)).toBeInTheDocument();
+  });
+
+  it('navigates to previous step', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const nextBtn = screen.getByTestId('next-step-btn');
+    fireEvent.click(nextBtn);
+    
+    const prevBtn = screen.getByTestId('prev-step-btn');
+    fireEvent.click(prevBtn);
+    
+    expect(screen.getByText(/Step 1 of 2/)).toBeInTheDocument();
+  });
+
+  it('disables prev button on first step', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByTestId('prev-step-btn')).toBeDisabled();
+  });
+
+  it('disables next button on last step', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const nextBtn = screen.getByTestId('next-step-btn');
+    fireEvent.click(nextBtn);
+    expect(nextBtn).toBeDisabled();
+  });
+
+  it('displays skip button', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByTestId('skip-btn')).toBeInTheDocument();
+  });
+
+  it('skips to next step', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const skipBtn = screen.getByTestId('skip-btn');
+    fireEvent.click(skipBtn);
+    expect(screen.getByText(/Step 2 of 2/)).toBeInTheDocument();
+  });
+
+  it('displays step counter', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    expect(screen.getByText(/Step 1 of 2/)).toBeInTheDocument();
+  });
+
+  it('updates step counter on navigation', () => {
+    render(<InteractiveChallengeEngine challenge={mockChallenge} />);
+    const nextBtn = screen.getByTestId('next-step-btn');
+    fireEvent.click(nextBtn);
+    expect(screen.getByText(/Step 2 of 2/)).toBeInTheDocument();
+  });

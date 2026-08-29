@@ -124,6 +124,10 @@ pub fn build_router(
         .route("/", get(|| async { "Crucible Backend API" }))
         .route("/metrics", get(profiling::get_prometheus_metrics))
         .route("/.well-known/stellar.toml", get(stellar::get_stellar_toml))
+        .route("/api/stellar/faucet", post(stellar::fund_testnet_account))
+        .route("/api/stellar/faucet/status", get(stellar::get_faucet_status))
+        .route("/api/v1/faucet", post(stellar::fund_testnet_account))
+        .route("/api/v1/faucet/status", get(stellar::get_faucet_status))
         .merge(
             Router::new()
                 .route("/api/config", get(handle_get_config))

@@ -19,13 +19,14 @@ members = [
     "examples/prediction-market",
     "examples/escrow-multi-arbiter",
     "examples/amm-pool",
+    "examples/yield-vault",
     "examples/bounty-escrow",
     "examples/nft-rental",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "1.7.0"
+version = "1.10.0"
 edition = "2021"
 rust-version = "1.91.0"
 license = "MIT"
@@ -43,3 +44,4 @@ strip = true
 [workspace.dependencies]
 soroban-sdk = { version = "26", features = ["testutils"] }
 crucible-macros = { path = "crucible-macros", version = "1.7.0" }
+crucible-macros = { path = "crucible-macros", version = "1.5.0" }

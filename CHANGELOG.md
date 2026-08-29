@@ -1,3 +1,21 @@
+## [1.10.0](https://github.com/benelabs/crucible/compare/v1.9.0...v1.10.0) (2026-08-29)
+
+### Features
+
+* **frontend:** ABI form generator, state machine visualizer, mobile nav, time-travel debugger ([ca08c94](https://github.com/benelabs/crucible/commit/ca08c9468d2679d7f41968d24156b93ffe7f374b)), closes [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903)
+
+## [1.9.0](https://github.com/benelabs/crucible/compare/v1.8.0...v1.9.0) (2026-08-29)
+
+### Features
+
+* contract decompiler & source verification, testnet faucet dispenser, bytecode optimizer, and vulnerability scanner ([8d8af5b](https://github.com/benelabs/crucible/commit/8d8af5b4768429bb7bf34e59e2d3931ae94aee81))
+
+## [1.8.0](https://github.com/benelabs/crucible/compare/v1.7.0...v1.8.0) (2026-08-29)
+
+### Features
+
+* resolve issues [#856](https://github.com/benelabs/crucible/issues/856), [#849](https://github.com/benelabs/crucible/issues/849), [#864](https://github.com/benelabs/crucible/issues/864), and [#858](https://github.com/benelabs/crucible/issues/858) ([bdd6a65](https://github.com/benelabs/crucible/commit/bdd6a655ba2db70f23fe281e0dd8458e36e848dc))
+
 ## [1.7.0](https://github.com/benelabs/crucible/compare/v1.6.0...v1.7.0) (2026-08-29)
 
 ### Features

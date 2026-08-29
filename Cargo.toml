@@ -12,6 +12,7 @@ members = [
     "examples/staking",
     "examples/time_locked_vault",
     "examples/emergency_stop",
+    "examples/emergency-circuit-breaker",
     "examples/gasless",
     "examples/cross-contract",
     "examples/lending",
@@ -41,4 +42,4 @@ strip = true
 
 [workspace.dependencies]
 soroban-sdk = { version = "26", features = ["testutils"] }
-crucible-macros = { path = "crucible-macros", version = "0.1.0" }
+crucible-macros = { path = "crucible-macros", version = "1.7.0" }

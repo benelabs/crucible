@@ -1,14 +1,20 @@
 //! Health check endpoints.
 //!
-//! Provides two endpoints:
+//! Provides three endpoints:
 //!
 //! - `GET /health/live`  — liveness probe: returns 200 if the process is running.
 //! - `GET /health/ready` — readiness probe: returns 200 only when PostgreSQL,
 //!   Redis, worker queue, and Soroban RPC are reachable; returns 503 otherwise.
+//! - `GET /health/live`    — liveness probe: returns 200 if the process is running.
+//! - `GET /health/ready`   — readiness probe: returns 200 only when PostgreSQL,
+//!   Redis, and the worker queue are reachable; returns 503 otherwise.
+//! - `GET /health/startup` — startup probe: returns 503 until full startup is
+//!   complete (migrations, Redis, workers), then returns 200 permanently.
 //!
-//! Both endpoints return a JSON body with per-component status details so that
-//! operators can quickly identify which dependency is unhealthy. Connection
-//! strings, hostnames, and credentials are never included in responses.
+//! Both liveness and readiness endpoints return a JSON body with per-component
+//! status details so that operators can quickly identify which dependency is
+//! unhealthy. Connection strings, hostnames, and credentials are never included
+//! in responses.
 
 use std::time::Duration;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
@@ -20,6 +26,11 @@ use tracing::{debug, instrument, warn};
 
 /// Timeout threshold for individual dependency health check pings.
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
+use std::sync::atomic::{AtomicBool, Ordering};
+use tracing::{debug, instrument, warn};
+
+/// Tracks whether the application has completed its initial startup sequence.
+static STARTUP_COMPLETE: AtomicBool = AtomicBool::new(false);
 
 /// Minimal application state required by health check handlers.
 #[derive(Clone)]
@@ -67,6 +78,14 @@ pub struct HealthReport {
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct LivenessResponse {
     pub status: &'static str,
+    pub version: String,
+}
+
+/// Response body for the startup probe.
+#[derive(Debug, Serialize)]
+pub struct StartupResponse {
+    pub status: &'static str,
+    pub ready: bool,
     pub version: String,
 }
 
@@ -216,6 +235,106 @@ pub async fn readiness(State(state): State<HealthState>) -> impl IntoResponse {
     (status_code, Json(report))
 }
 
+/// `GET /health/startup` — startup probe.
+///
+/// Returns `503 Service Unavailable` while the application is initializing
+/// (database migrations, Redis connection, worker queue setup). Once startup
+/// completes and this endpoint returns `200 OK` for the first time, it will
+/// continue to return `200 OK` permanently, even if dependencies later become
+/// unavailable.
+///
+/// This differs from the readiness probe, which can transition back to 503
+/// during transient failures. Kubernetes uses startup probes to delay liveness
+/// and readiness checks until the container is fully initialized.
+///
+/// Call [`mark_startup_complete()`] after all initialization is done to signal
+/// that this endpoint should return 200.
+#[instrument(skip_all)]
+pub async fn startup(State(state): State<HealthState>) -> impl IntoResponse {
+    // Once startup is marked complete, always return 200
+    if STARTUP_COMPLETE.load(Ordering::Relaxed) {
+        debug!("Startup probe: already completed");
+        return (
+            StatusCode::OK,
+            Json(StartupResponse {
+                status: "ok",
+                ready: true,
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            }),
+        );
+    }
+
+    // Check if all dependencies are available
+    let database = check_database(&state.db).await;
+    let redis = check_cache(&state.cache).await;
+    let queue = check_queue(&state.queue).await;
+
+    let all_ready = database.status == "up" && redis.status == "up" && queue.status == "up";
+
+    if all_ready {
+        // Mark startup as complete (first successful check)
+        STARTUP_COMPLETE.store(true, Ordering::Relaxed);
+        debug!("Startup probe: marking startup as complete");
+        (
+            StatusCode::OK,
+            Json(StartupResponse {
+                status: "ok",
+                ready: true,
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            }),
+        )
+    } else {
+        debug!("Startup probe: still initializing");
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(StartupResponse {
+                status: "initializing",
+                ready: false,
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            }),
+        )
+    }
+}
+
+/// Marks the application startup sequence as complete.
+///
+/// Call this after all initialization is done (database migrations, Redis
+/// connection, worker queue setup). After calling this, the `/health/startup`
+/// endpoint will permanently return `200 OK`.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use backend::api::handlers::health;
+///
+/// async fn initialize_app() {
+///     // Run migrations
+///     run_migrations().await;
+///     
+///     // Initialize Redis
+///     setup_redis().await;
+///     
+///     // Start workers
+///     start_workers().await;
+///     
+///     // Mark startup complete
+///     health::mark_startup_complete();
+/// }
+/// # async fn run_migrations() {}
+/// # async fn setup_redis() {}
+/// # async fn start_workers() {}
+/// ```
+pub fn mark_startup_complete() {
+    STARTUP_COMPLETE.store(true, Ordering::Relaxed);
+    tracing::info!("Application startup marked as complete");
+}
+
+/// Resets the startup completion flag. This is primarily for testing.
+#[cfg(test)]
+pub fn reset_startup_flag() {
+    STARTUP_COMPLETE.store(false, Ordering::Relaxed);
+}
+
 // ---------------------------------------------------------------------------
 // Dependency checks
 // ---------------------------------------------------------------------------
@@ -335,6 +454,7 @@ pub fn router() -> axum::Router<HealthState> {
     axum::Router::new()
         .route("/live", get(liveness))
         .route("/ready", get(readiness))
+        .route("/startup", get(startup))
 }
 
 // ---------------------------------------------------------------------------
@@ -480,5 +600,48 @@ mod tests {
 
         assert_eq!(status_healthy, StatusCode::OK);
         assert_eq!(status_degraded, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn startup_response_serializes() {
+        let response = StartupResponse {
+            status: "ok",
+            ready: true,
+            version: "0.1.0".into(),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["ready"], true);
+        assert_eq!(json["version"], "0.1.0");
+    }
+
+    #[test]
+    fn startup_response_serializes_initializing() {
+        let response = StartupResponse {
+            status: "initializing",
+            ready: false,
+            version: "0.1.0".into(),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["status"], "initializing");
+        assert_eq!(json["ready"], false);
+        assert_eq!(json["version"], "0.1.0");
+    }
+
+    #[test]
+    fn mark_startup_complete_sets_flag() {
+        use super::reset_startup_flag;
+        
+        // Reset to initial state
+        reset_startup_flag();
+        
+        // Mark complete
+        super::mark_startup_complete();
+        
+        // Verify flag is set
+        assert_eq!(super::STARTUP_COMPLETE.load(std::sync::atomic::Ordering::Relaxed), true);
+        
+        // Clean up
+        reset_startup_flag();
     }
 }

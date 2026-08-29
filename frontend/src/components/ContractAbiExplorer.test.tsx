@@ -41,7 +41,7 @@ describe('ContractAbiExplorer', () => {
     const executeBtn = screen.getByTestId('execute-btn');
     fireEvent.click(executeBtn);
 
-    expect(executeBtn).toHaveTextContent('Executing Simulation...');
+    expect(executeBtn).toHaveTextContent(/Executing Simulation/);
     expect(executeBtn).toBeDisabled();
 
     await waitFor(() => {

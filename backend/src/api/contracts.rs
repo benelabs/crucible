@@ -18,8 +18,9 @@ pub type ApiResult<T> = Result<ApiResponse<T>, ApiError>;
 /// Standardized API error response.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiErrorResponse {
-    pub error: String,
     pub code: String,
+    pub message: String,
+    pub timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,8 +100,9 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status_code();
         let body = Json(ApiErrorResponse {
-            error: self.to_string(),
             code: self.error_code(),
+            message: self.to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
             details: None,
             request_id: None,
         });

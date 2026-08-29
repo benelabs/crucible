@@ -27,4 +27,10 @@ fn fixture_ui_tests() {
     t.compile_fail("tests/ui/fail-fixture-args-multiple.rs");
     t.compile_fail("tests/ui/fail-missing-setup.rs");
     t.compile_fail("tests/ui/fail-invalid-generics.rs");
+
+    // --- derive Fixture pass cases ---
+    t.pass("tests/ui/pass-derive-fixture-basic.rs");
+
+    // --- derive Fixture fail cases ---
+    t.compile_fail("tests/ui/fail-derive-fixture-no-env.rs");
 }

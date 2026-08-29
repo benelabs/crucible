@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Cpu, Play, HelpCircle, Code2, FileText, CheckCircle2 } from 'lucide-react';
 import './ContractAbiExplorer.css';
+import { ContractExecutionStateMachine, ExecutionState } from '../machines/contractExecutionMachine';
 
 interface FunctionArg {
   name: string;
@@ -89,7 +90,7 @@ export const ContractAbiExplorer: React.FC = () => {
   const [selectedFuncIndex, setSelectedFuncIndex] = useState<number>(0);
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [executionResult, setExecutionResult] = useState<any>(null);
-  const [isRunning, setIsRunning] = useState<boolean>(false);
+  const [executionState, setExecutionState] = useState<ExecutionState>('idle');
 
   const contract = CONTRACT_ABIS[selectedContractIndex];
   const func = contract.functions[selectedFuncIndex] || contract.functions[0];
@@ -102,14 +103,22 @@ export const ContractAbiExplorer: React.FC = () => {
   };
 
   const handleRunExecution = () => {
-    setIsRunning(true);
-    setExecutionResult(null);
+    const machine = new ContractExecutionStateMachine();
+    machine.subscribe((state, ctx) => {
+      setExecutionState(state);
+      if (state === 'success') {
+        setExecutionResult(ctx.result);
+      }
+    });
 
-    // Simulate function execution
+    machine.send({ type: 'START_EXECUTION', payload: { functionName: func.name, inputs } });
+    machine.send({ type: 'VALIDATED' });
+
+    // Simulate multi-stage execution flow
     setTimeout(() => {
-      setIsRunning(false);
+      machine.send({ type: 'SIMULATION_SUCCESS', result: null });
+      machine.send({ type: 'SIGNED' });
 
-      // Generate a plausible mock response based on returnType and input values
       let returnValue = 'void';
       let gasCost = Math.floor(Math.random() * 4000) + 1200;
 
@@ -122,13 +131,13 @@ export const ContractAbiExplorer: React.FC = () => {
       } else if (func.returnType === 'u128') {
         const amt = inputs['amount'] || '1000';
         if (func.name === 'deposit' || func.name === 'withdraw') {
-          returnValue = String(parseInt(amt) * 98 / 100); // 2% fee / share ratio
+          returnValue = String(parseInt(amt) * 98 / 100);
         } else {
           returnValue = String(Math.floor(Math.random() * 10000) + 500);
         }
       }
 
-      setExecutionResult({
+      const result = {
         status: 'success',
         returnValue,
         gasCost,
@@ -139,9 +148,12 @@ export const ContractAbiExplorer: React.FC = () => {
           },
         ],
         ledgerHeight: 452936,
-      });
-    }, 900);
+      };
+
+      machine.send({ type: 'SUBMISSION_SUCCESS', result });
+    }, 400);
   };
+
 
   const handleSelectContract = (idx: number) => {
     setSelectedContractIndex(idx);
@@ -246,13 +258,15 @@ export const ContractAbiExplorer: React.FC = () => {
           </div>
 
           <button
-            className={`execute-btn ${isRunning ? 'running' : ''}`}
+            className={`execute-btn ${executionState !== 'idle' && executionState !== 'success' && executionState !== 'error' ? 'running' : ''}`}
             onClick={handleRunExecution}
-            disabled={isRunning}
+            disabled={executionState !== 'idle' && executionState !== 'success' && executionState !== 'error'}
             data-testid="execute-btn"
           >
-            {isRunning ? 'Executing Simulation...' : 'Simulate Call'}
-            {!isRunning && <Play size={14} />}
+            {executionState !== 'idle' && executionState !== 'success' && executionState !== 'error'
+              ? `Executing Simulation (${executionState})...`
+              : 'Simulate Call'}
+            {(executionState === 'idle' || executionState === 'success' || executionState === 'error') && <Play size={14} />}
           </button>
 
           {executionResult && (

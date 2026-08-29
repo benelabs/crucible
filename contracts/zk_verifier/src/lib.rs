@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
-    Address, Bytes, BytesN, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
+    Bytes, BytesN, Env, Vec,
 };
 
 /// Groth16 / Plonk Zero-Knowledge Proof parameters
@@ -137,7 +137,9 @@ impl ZkVerifier {
             .get(&DataKey::ProofCounter)
             .unwrap_or(0);
         counter += 1;
-        env.storage().instance().set(&DataKey::ProofCounter, &counter);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProofCounter, &counter);
 
         env.events()
             .publish((symbol_short!("zk_pass"), circuit_id), counter);

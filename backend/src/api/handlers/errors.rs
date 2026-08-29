@@ -5,7 +5,6 @@
 
 use crate::error::AppError;
 use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
-use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tracing::{info, instrument};

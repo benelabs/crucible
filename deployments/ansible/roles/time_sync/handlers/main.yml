@@ -1,0 +1,13 @@
+---
+- name: restart chrony
+  service:
+    name: "{{ chrony_service_name }}"
+    state: restarted
+  become: true
+
+- name: reload prometheus
+  systemd:
+    name: prometheus
+    state: reloaded
+  become: true
+  listen: reload prometheus

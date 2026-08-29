@@ -141,6 +141,10 @@ pub enum AppError {
     #[error("Unsupported media type: {0}")]
     UnsupportedMediaType(String),
 
+    // --- 503 Service Unavailable ---
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
+
     // --- 500 Database ---
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
@@ -179,6 +183,12 @@ impl AppError {
             AppError::PayloadTooLarge(_) => (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             AppError::UnsupportedMediaType(_) => {
                 (StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type")
+            }
+            AppError::ServiceUnavailable(_) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable")
+            }
+            AppError::Database(sqlx::Error::PoolTimedOut) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable")
             }
             AppError::Database(e) => {
                 error!("Database error: {e:?}");
@@ -243,7 +253,7 @@ impl From<DatabaseError> for AppError {
             DatabaseError::ForeignKeyViolation(msg) => AppError::BadRequest(msg),
             DatabaseError::Connection(msg) => AppError::Internal(msg),
             DatabaseError::Query(sqlx::Error::PoolTimedOut) => {
-                AppError::Internal("database pool timed out".into())
+                AppError::ServiceUnavailable("service temporarily unavailable".into())
             }
             DatabaseError::Query(e) => AppError::Database(e),
         }

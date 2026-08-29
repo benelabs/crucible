@@ -116,12 +116,11 @@ async fn test_config_manager_patch() {
     assert_eq!(updated.server.host, "0.0.0.0");
 }
 
-
 #[tokio::test]
 async fn test_sanitized_config_endpoint() {
-    use backend::api::handlers::admin::get_effective_config;
     use axum::response::IntoResponse;
-    
+    use backend::api::handlers::admin::get_effective_config;
+
     let config = AppConfig::default();
     let config_manager = Arc::new(ConfigManager::new(config));
 
@@ -131,23 +130,23 @@ async fn test_sanitized_config_endpoint() {
 
     let body = response.into_response();
     let status = body.status();
-    
+
     assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn test_sanitized_config_redacts_secrets() {
     use backend::config::sanitize;
-    
+
     let config = AppConfig::default();
     let sanitized = sanitize(&config);
 
     // Verify database URL is redacted
     assert_eq!(sanitized.database.url, "[REDACTED]");
-    
+
     // Verify Redis URL is redacted
     assert_eq!(sanitized.redis.url, "[REDACTED]");
-    
+
     // Verify TLS key is redacted if present
     if let Some(tls) = &sanitized.server.tls {
         assert_eq!(tls.key_path, "[REDACTED]");
@@ -157,14 +156,17 @@ async fn test_sanitized_config_redacts_secrets() {
 #[tokio::test]
 async fn test_sanitized_config_preserves_non_secrets() {
     use backend::config::sanitize;
-    
+
     let config = AppConfig::default();
     let sanitized = sanitize(&config);
 
     // Verify non-sensitive fields are preserved
     assert_eq!(sanitized.server.host, config.server.host);
     assert_eq!(sanitized.server.port, config.server.port);
-    assert_eq!(sanitized.database.max_connections, config.database.max_connections);
+    assert_eq!(
+        sanitized.database.max_connections,
+        config.database.max_connections
+    );
     assert_eq!(sanitized.redis.pool_size, config.redis.pool_size);
     assert_eq!(sanitized.cors.allowed_origins, config.cors.allowed_origins);
 }
@@ -172,7 +174,7 @@ async fn test_sanitized_config_preserves_non_secrets() {
 #[tokio::test]
 async fn test_sanitized_config_serializes_without_secrets() {
     use backend::config::sanitize;
-    
+
     let config = AppConfig::default();
     let sanitized = sanitize(&config);
 
@@ -181,7 +183,7 @@ async fn test_sanitized_config_serializes_without_secrets() {
     // Verify no actual secrets appear in JSON output
     assert!(!json.contains(&config.database.url));
     assert!(!json.contains(&config.redis.url));
-    
+
     // Verify redaction markers are present
     assert!(json.contains("[REDACTED]"));
 }
@@ -189,13 +191,16 @@ async fn test_sanitized_config_serializes_without_secrets() {
 #[tokio::test]
 async fn test_sanitized_config_optional_redis_job_queue_url() {
     use backend::config::sanitize;
-    
+
     let config = AppConfig::default();
     let sanitized = sanitize(&config);
 
     // If job queue URL exists, it should be redacted
     if sanitized.redis.job_queue_url.is_some() {
-        assert_eq!(sanitized.redis.job_queue_url, Some("[REDACTED]".to_string()));
+        assert_eq!(
+            sanitized.redis.job_queue_url,
+            Some("[REDACTED]".to_string())
+        );
     } else {
         assert_eq!(sanitized.redis.job_queue_url, None);
     }
@@ -204,7 +209,7 @@ async fn test_sanitized_config_optional_redis_job_queue_url() {
 #[tokio::test]
 async fn test_sanitized_config_preserves_tls_cert_path() {
     use backend::config::sanitize;
-    
+
     let config = AppConfig::default();
     let sanitized = sanitize(&config);
 
@@ -221,14 +226,13 @@ async fn test_sanitized_config_preserves_tls_cert_path() {
 #[tokio::test]
 async fn test_sanitized_config_produces_valid_json() {
     use backend::config::sanitize;
-    
+
     let config = AppConfig::default();
     let sanitized = sanitize(&config);
 
-    let json_str = serde_json::to_string_pretty(&sanitized)
-        .expect("Failed to serialize sanitized config");
+    let json_str =
+        serde_json::to_string_pretty(&sanitized).expect("Failed to serialize sanitized config");
 
     // Verify we can parse it back
-    let _: serde_json::Value = 
-        serde_json::from_str(&json_str).expect("Invalid JSON produced");
+    let _: serde_json::Value = serde_json::from_str(&json_str).expect("Invalid JSON produced");
 }

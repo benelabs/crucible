@@ -22,6 +22,13 @@ pub struct DatabaseConfig {
     pub connect_timeout_secs: u64,
     /// Maximum time in seconds a connection can remain idle before being closed.
     pub idle_timeout_secs: u64,
+    /// Duration in seconds for Retry-After header when pool is exhausted.
+    #[serde(default = "default_pool_retry_after_secs")]
+    pub pool_retry_after_secs: u64,
+}
+
+fn default_pool_retry_after_secs() -> u64 {
+    5
 }
 
 impl fmt::Debug for DatabaseConfig {
@@ -32,6 +39,7 @@ impl fmt::Debug for DatabaseConfig {
             .field("min_connections", &self.min_connections)
             .field("connect_timeout_secs", &self.connect_timeout_secs)
             .field("idle_timeout_secs", &self.idle_timeout_secs)
+            .field("pool_retry_after_secs", &self.pool_retry_after_secs)
             .finish()
     }
 }

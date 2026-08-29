@@ -94,7 +94,8 @@ tokio-util = "0.7"
 cron = "0.12"
 
 # CSV serialization
-csv = { version = "1.3", features = ["serde"] }
+csv = "1.3"
+
 
 # Optional mock support for tests
 mockall = { version = "0.15", optional = true }

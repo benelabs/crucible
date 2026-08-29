@@ -19,6 +19,9 @@ members = [
     "examples/escrow-multi-arbiter",
     "examples/bounty-escrow",
     "examples/nft-rental",
+    "examples/payment-streaming",
+    "examples/insurance-mutual",
+    "examples/portfolio-index",
 ]
 resolver = "2"
 
@@ -40,4 +43,5 @@ strip = true
 
 [workspace.dependencies]
 soroban-sdk = { version = "26", features = ["testutils"] }
-crucible-macros = { path = "crucible-macros", version = "0.1.0" }
+crucible-macros = { path = "crucible-macros", version = "1.5.0" }
+

@@ -18,6 +18,7 @@ pub mod contract_upgrade;
 pub mod contract_versioning;
 pub mod dedup;
 pub mod dependency_analyzer;
+pub mod developer_batch_gloreecodes;
 pub mod developer_batch_devcyprian;
 pub mod developer_batch_devdave;
 pub mod doc_generator;

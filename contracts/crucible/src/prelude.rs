@@ -15,11 +15,19 @@ pub use crate::env::MockEnv;
 pub use crate::env::MockEnvBuilder;
 pub use crate::env::ProtocolVersion;
 pub use crate::env::Stroops;
+pub use crate::sim::ContractError;
+pub use crate::sim::IngressLock;
+pub use crate::sim::IngressLockValidator;
 pub use crate::sim::PreparedTx;
+pub use crate::sim::ReentrancyProbe;
+pub use crate::sim::ReentrancyProbeResult;
 pub use crate::sim::SimulatedTx;
 pub use crate::time::{add_months, add_years};
 pub use crate::token::MockToken;
 pub use crate::profiler::{export_flamegraph_svg, export_speedscope, Frame, GasProfiler, Profile, Sample};
+pub use crate::zk::{
+    G1, G2, Groth16Proof, Groth16VerifyingKey, Gt, PairingCurve, PlonkProof,
+};
 
 #[cfg(feature = "derive")]
 pub use crucible_macros::fixture;

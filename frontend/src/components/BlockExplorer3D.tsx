@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, RotateCcw, ZoomIn, ZoomOut, Info, ShieldCheck, Cpu, Database } from 'lucide-react';
+import { Play, Pause, RotateCcw, ZoomIn, ZoomOut, ShieldCheck, Cpu, Database } from 'lucide-react';
 import './BlockExplorer3D.css';
 
 export interface LedgerBlockNode {

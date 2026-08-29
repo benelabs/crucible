@@ -1,5 +1,5 @@
 use axum::{body::Body, http::Request, http::StatusCode};
-use backend::services::audit::{routes, AuditDomainEvent, AuditEvent, AuditEventRequest, AuditService};
+use backend::services::audit::{routes, AuditDomainEvent, AuditEventRequest, AuditService};
 use redis::AsyncCommands;
 use serde_json::json;
 use sqlx::{Executor, PgPool, Row};

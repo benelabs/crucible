@@ -18,6 +18,7 @@ pub use self::time as time_helpers;
 pub mod token;
 pub mod profiler;
 pub mod storage_size;
+pub mod zk;
 
 /// The `#[fixture]` attribute macro for defining reusable test setup structs.
 ///

@@ -70,6 +70,7 @@ fn arb_compilation_result() -> impl Strategy<Value = CompilationResult> {
                     wasm_hash,
                     wasm_size_bytes,
                     compile_time_ms,
+                    optimization: None,
                 }
             },
         )

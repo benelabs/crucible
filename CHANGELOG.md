@@ -1,3 +1,40 @@
+## [1.11.0](https://github.com/benelabs/crucible/compare/v1.10.0...v1.11.0) (2026-08-29)
+
+### Features
+
+* **examples:** cross-contract rate limiter and security circuit breaker ([#887](https://github.com/benelabs/crucible/issues/887)) ([b2874f2](https://github.com/benelabs/crucible/commit/b2874f29255bd218b90fc7ad3c0bc787a5a85f6c))
+* **frontend:** hardware wallet integration via WebHID ([#891](https://github.com/benelabs/crucible/issues/891)) ([8c96d95](https://github.com/benelabs/crucible/commit/8c96d95f6fe517de78e8ac22264e37a25986a807))
+* **frontend:** real-time storage diff and footprint visualizer ([#889](https://github.com/benelabs/crucible/issues/889)) ([0923e68](https://github.com/benelabs/crucible/commit/0923e680a5c0ddd8b606120db05dd9a3b46acc70))
+* **frontend:** WebAssembly local sandbox execution engine ([#890](https://github.com/benelabs/crucible/issues/890)) ([703daed](https://github.com/benelabs/crucible/commit/703daedbb2621fbe48fd4240a563e62242aa2f7a))
+
+### Bug Fixes
+
+* **build:** make the Cargo workspace resolve and compile again ([ec4fbee](https://github.com/benelabs/crucible/commit/ec4fbeedae9d6673ebce41c9d9e7a34f96574a0b))
+
+## [1.10.0](https://github.com/benelabs/crucible/compare/v1.9.0...v1.10.0) (2026-08-29)
+
+### Features
+
+* **frontend:** ABI form generator, state machine visualizer, mobile nav, time-travel debugger ([ca08c94](https://github.com/benelabs/crucible/commit/ca08c9468d2679d7f41968d24156b93ffe7f374b)), closes [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903)
+
+## [1.9.0](https://github.com/benelabs/crucible/compare/v1.8.0...v1.9.0) (2026-08-29)
+
+### Features
+
+* contract decompiler & source verification, testnet faucet dispenser, bytecode optimizer, and vulnerability scanner ([8d8af5b](https://github.com/benelabs/crucible/commit/8d8af5b4768429bb7bf34e59e2d3931ae94aee81))
+
+## [1.8.0](https://github.com/benelabs/crucible/compare/v1.7.0...v1.8.0) (2026-08-29)
+
+### Features
+
+* resolve issues [#856](https://github.com/benelabs/crucible/issues/856), [#849](https://github.com/benelabs/crucible/issues/849), [#864](https://github.com/benelabs/crucible/issues/864), and [#858](https://github.com/benelabs/crucible/issues/858) ([bdd6a65](https://github.com/benelabs/crucible/commit/bdd6a655ba2db70f23fe281e0dd8458e36e848dc))
+
+## [1.7.0](https://github.com/benelabs/crucible/compare/v1.6.0...v1.7.0) (2026-08-29)
+
+### Features
+
+* add ZK pairing mock harness and reentrancy probe ([dd85de6](https://github.com/benelabs/crucible/commit/dd85de6693b1efae25ec8e95d954f6a7072735eb)), closes [#828](https://github.com/benelabs/crucible/issues/828) [#829](https://github.com/benelabs/crucible/issues/829)
+
 ## [1.6.0](https://github.com/benelabs/crucible/compare/v1.5.0...v1.6.0) (2026-08-29)
 
 ### Features

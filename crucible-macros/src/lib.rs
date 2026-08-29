@@ -12,7 +12,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Ident, Meta, Path, Type};
+use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 
 /// Marks a struct as a reusable test fixture.
 ///
@@ -181,6 +181,8 @@ fn has_derive(attrs: &[syn::Attribute], name: &str) -> bool {
 #[proc_macro_derive(Fixture, attributes(contract_client))]
 pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    // Cloned rather than borrowed: `input` is moved into `ast` below, and
+    // `name` is still needed after that move.
     let name = input.ident.clone();
 
     let mut has_debug = false;
@@ -231,6 +233,15 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                                 if m.path().is_ident("contract") {
                                     if let Meta::Path(path) = m {
                                         contract_ty = Some(path);
+                                // `#[contract_client(contract = T)]` parses as
+                                // a name-value pair whose value is an
+                                // expression, so the type is reached through
+                                // `Expr::Path` — `Meta` itself has no `value`.
+                                if let Meta::NameValue(nv) = &m {
+                                    if nv.path.is_ident("contract") {
+                                        if let syn::Expr::Path(expr) = &nv.value {
+                                            contract_ty = Some(expr.path.clone());
+                                        }
                                     }
                                 }
                             }

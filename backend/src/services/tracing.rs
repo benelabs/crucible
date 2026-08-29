@@ -124,7 +124,7 @@ impl TracingService {
             .with_attributes(vec![
                 KeyValue::new(resource::SERVICE_NAME, config.service_name.clone()),
                 KeyValue::new(resource::SERVICE_VERSION, config.service_version.clone()),
-                KeyValue::new(resource::DEPLOYMENT_ENVIRONMENT, config.environment.clone()),
+                KeyValue::new(resource::DEPLOYMENT_ENVIRONMENT_NAME, config.environment.clone()),
                 KeyValue::new("service.namespace", "crucible"),
             ])
             .build();

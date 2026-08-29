@@ -1137,6 +1137,8 @@ dependencies = [
 [[package]]
 name = "crucible-example-bounty-escrow"
 version = "1.5.0"
+name = "crucible-example-amm-pool"
+version = "0.1.0"
 dependencies = [
  "crucible",
  "soroban-sdk",

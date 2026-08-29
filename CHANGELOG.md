@@ -1,3 +1,21 @@
+## [1.8.0](https://github.com/benelabs/crucible/compare/v1.7.0...v1.8.0) (2026-08-29)
+
+### Features
+
+* resolve issues [#856](https://github.com/benelabs/crucible/issues/856), [#849](https://github.com/benelabs/crucible/issues/849), [#864](https://github.com/benelabs/crucible/issues/864), and [#858](https://github.com/benelabs/crucible/issues/858) ([bdd6a65](https://github.com/benelabs/crucible/commit/bdd6a655ba2db70f23fe281e0dd8458e36e848dc))
+
+## [1.7.0](https://github.com/benelabs/crucible/compare/v1.6.0...v1.7.0) (2026-08-29)
+
+### Features
+
+* add ZK pairing mock harness and reentrancy probe ([dd85de6](https://github.com/benelabs/crucible/commit/dd85de6693b1efae25ec8e95d954f6a7072735eb)), closes [#828](https://github.com/benelabs/crucible/issues/828) [#829](https://github.com/benelabs/crucible/issues/829)
+
+## [1.6.0](https://github.com/benelabs/crucible/compare/v1.5.0...v1.6.0) (2026-08-29)
+
+### Features
+
+* implement issues [#861](https://github.com/benelabs/crucible/issues/861), [#860](https://github.com/benelabs/crucible/issues/860), [#865](https://github.com/benelabs/crucible/issues/865), and [#859](https://github.com/benelabs/crucible/issues/859) ([161f6fa](https://github.com/benelabs/crucible/commit/161f6fa1bac862859ba342bcd4daf52ab506acbf))
+
 ## [1.5.0](https://github.com/benelabs/crucible/compare/v1.4.0...v1.5.0) (2026-08-28)
 
 ### Features

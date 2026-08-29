@@ -1,3 +1,9 @@
+## [1.7.0](https://github.com/benelabs/crucible/compare/v1.6.0...v1.7.0) (2026-08-29)
+
+### Features
+
+* add ZK pairing mock harness and reentrancy probe ([dd85de6](https://github.com/benelabs/crucible/commit/dd85de6693b1efae25ec8e95d954f6a7072735eb)), closes [#828](https://github.com/benelabs/crucible/issues/828) [#829](https://github.com/benelabs/crucible/issues/829)
+
 ## [1.6.0](https://github.com/benelabs/crucible/compare/v1.5.0...v1.6.0) (2026-08-29)
 
 ### Features

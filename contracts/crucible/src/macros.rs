@@ -127,6 +127,63 @@ macro_rules! assert_emitted {
     }};
 }
 
+/// Asserts that an event matching the given topic pattern (with wildcard support `*` or `_`)
+/// and optional data payload was emitted by the contract.
+///
+/// Wildcard symbols (`symbol_short!("*")`, `symbol_short!("_")`) match any topic segment.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_event_matches!(
+///     env,
+///     contract_id,
+///     (symbol_short!("transfer"), symbol_short!("*"), symbol_short!("*"))
+/// );
+///
+/// assert_event_matches!(
+///     env,
+///     contract_id,
+///     (symbol_short!("mint"), symbol_short!("*")),
+///     1000_u128
+/// );
+/// ```
+#[macro_export]
+macro_rules! assert_event_matches {
+    ($env:expr, $contract_id:expr, $topics:expr) => {{
+        extern crate std;
+        let __parsed = $env.events_parsed($topics);
+        let __want_contract: soroban_sdk::Address = $contract_id.clone();
+        let __matching = __parsed.iter().any(|ev| ev.contract == __want_contract);
+        assert!(
+            __matching,
+            "assert_event_matches! failed: no matching event found for contract {:?} with topic pattern {:?}",
+            __want_contract,
+            $topics
+        );
+    }};
+    ($env:expr, $contract_id:expr, $topics:expr, $data:expr) => {{
+        extern crate std;
+        use soroban_env_host::Compare as _;
+        use soroban_sdk::IntoVal as _;
+        let __env = $env.inner();
+        let __want_data: soroban_sdk::Val = ($data).into_val(__env);
+        let __parsed = $env.events_parsed($topics);
+        let __want_contract: soroban_sdk::Address = $contract_id.clone();
+        let __matching = __parsed.iter().any(|ev| {
+            ev.contract == __want_contract
+                && __env.compare(&ev.data, &__want_data) == Ok(core::cmp::Ordering::Equal)
+        });
+        assert!(
+            __matching,
+            "assert_event_matches! failed: no matching event found for contract {:?} with topic pattern {:?} and expected data payload {:?}",
+            __want_contract,
+            $topics,
+            __want_data
+        );
+    }};
+}
+
 /// Asserts that no events were emitted.
 ///
 /// # Example

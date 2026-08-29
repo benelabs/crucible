@@ -11,6 +11,11 @@ use crate::account::AccountHandle;
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use crate::token::MockToken;
+use ed25519_dalek::{Signer as _, SigningKey as Ed25519SigningKey};
+use k256::ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey};
+use p256::ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey};
+use rand::SeedableRng as _;
+use rand_chacha::ChaCha8Rng;
 use soroban_sdk::{
     testutils::{ContractEvents, Events, Ledger, Register},
     Address, Env, FromVal, IntoVal, Val, Vec as SorobanVec,
@@ -235,6 +240,7 @@ pub struct MockEnv {
     tokens: Rc<RefCell<HashMap<String, MockToken>>>,
     xlm_token_address: Rc<RefCell<Option<Address>>>,
     track_costs: bool,
+    crypto_registry: Rc<RefCell<MockCryptoRegistry>>,
 }
 
 // Typed event wrapper to provide ergonomic access to event fields and typed data conversion.
@@ -286,6 +292,36 @@ impl CapturedEvent {
     /// ```
     pub fn data_as<T: FromVal<Env, Val>>(&self) -> T {
         T::from_val(&self.env, &self.data)
+    }
+
+    /// Checks whether the event's topics match the given topic pattern (with wildcard support `*` or `_`).
+    pub fn matches_topic_pattern(&self, pattern: &SorobanVec<Val>) -> bool {
+        crate::event_topic_match::topics_match(&self.env, pattern, &self.topics)
+    }
+
+    /// Checks whether the event's topics match the given topic tuple or vector pattern.
+    pub fn matches_topics<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> bool {
+        let pattern_vec = pattern.into_val(&self.env);
+        self.matches_topic_pattern(&pattern_vec)
+    }
+
+    /// Safely decodes a topic segment at `index` into a typed Rust value if present.
+    pub fn topic_as<T: FromVal<Env, Val>>(&self, index: usize) -> Option<T> {
+        if (index as u32) < self.topics.len() {
+            let val = self.topics.get(index as u32).unwrap();
+            Some(T::from_val(&self.env, &val))
+        } else {
+            None
+        }
+    }
+
+    /// Validates the event topic segment count and applies a schema validator closure to the data payload.
+    pub fn assert_schema<F: FnOnce(&Val) -> bool>(
+        &self,
+        expected_topic_count: usize,
+        data_validator: F,
+    ) -> bool {
+        (self.topics.len() as usize) == expected_topic_count && data_validator(&self.data)
     }
 }
 
@@ -343,6 +379,22 @@ impl EventMatches {
     /// Returns the underlying Soroban `Env`.
     pub fn env(&self) -> &Env {
         &self.env
+    }
+
+    /// Filter matching events by topic pattern supporting wildcards (`*` or `_`).
+    pub fn filter_by_topic_pattern<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> EventMatches {
+        let pattern_vec = pattern.into_val(&self.env);
+        let mut filtered = SorobanVec::new(&self.env);
+        for item in self.items.iter() {
+            let topics = &item.1;
+            if crate::event_topic_match::topics_match(&self.env, &pattern_vec, topics) {
+                filtered.push_back(item);
+            }
+        }
+        EventMatches {
+            env: self.env.clone(),
+            items: filtered,
+        }
     }
 
     /// Returns a reference to the inner SorobanVec.
@@ -1121,6 +1173,35 @@ impl MockEnv {
             },
         }
     }
+
+    /// Returns a mutable reference guard to the mock crypto registry.
+    pub fn crypto_registry(&self) -> std::cell::RefMut<'_, MockCryptoRegistry> {
+        self.crypto_registry.borrow_mut()
+    }
+
+    /// Generates a deterministic mock keypair for the given curve and seed.
+    pub fn generate_keypair(&self, curve: CryptoCurve, seed: u64) -> MockKeyPair {
+        match curve {
+            CryptoCurve::Ed25519 => MockKeyPair::generate_ed25519(seed),
+            CryptoCurve::Secp256k1 => MockKeyPair::generate_secp256k1(seed),
+            CryptoCurve::Secp256r1 => MockKeyPair::generate_secp256r1(seed),
+        }
+    }
+
+    /// Generates a deterministic Ed25519 keypair from a numeric seed.
+    pub fn generate_ed25519_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_ed25519(seed)
+    }
+
+    /// Generates a deterministic Secp256k1 keypair from a numeric seed.
+    pub fn generate_secp256k1_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_secp256k1(seed)
+    }
+
+    /// Generates a deterministic Secp256r1 keypair from a numeric seed.
+    pub fn generate_secp256r1_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_secp256r1(seed)
+    }
 }
 
 /// The outcome of a [`MockEnv::simulate_failing_call`] invocation.
@@ -1181,6 +1262,7 @@ impl Default for MockEnv {
             tokens: Rc::new(RefCell::new(HashMap::new())),
             xlm_token_address: Rc::new(RefCell::new(None)),
             track_costs: false,
+            crypto_registry: Rc::new(RefCell::new(MockCryptoRegistry::new())),
         }
     }
 }
@@ -1353,6 +1435,194 @@ impl MockEnvBuilder {
             self.env.register_token(&symbol, token);
         }
         self.env
+    }
+}
+
+/// Supported cryptographic curves for mock signature generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CryptoCurve {
+    Ed25519,
+    Secp256k1,
+    Secp256r1,
+}
+
+/// A deterministic keypair representation for mock crypto testing.
+#[derive(Debug, Clone)]
+pub struct MockKeyPair {
+    pub curve: CryptoCurve,
+    pub seed: u64,
+    pub public_key_bytes: std::vec::Vec<u8>,
+    pub secret_key_bytes: std::vec::Vec<u8>,
+}
+
+impl MockKeyPair {
+    /// Generates a deterministic Ed25519 keypair from a numeric seed.
+    pub fn generate_ed25519(seed: u64) -> Self {
+        let mut seed_bytes = [0_u8; 32];
+        seed_bytes[..8].copy_from_slice(&seed.to_le_bytes());
+        for i in 8..32 {
+            seed_bytes[i] = seed_bytes[i % 8].wrapping_add(i as u8);
+        }
+        let signing_key = Ed25519SigningKey::from_bytes(&seed_bytes);
+        let verifying_key = signing_key.verifying_key();
+        Self {
+            curve: CryptoCurve::Ed25519,
+            seed,
+            public_key_bytes: verifying_key.to_bytes().to_vec(),
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Generates a deterministic Secp256k1 keypair from a numeric seed.
+    pub fn generate_secp256k1(seed: u64) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let signing_key = K256SigningKey::random(&mut rng);
+        let verifying_key = K256VerifyingKey::from(&signing_key);
+        let uncompressed = verifying_key.to_encoded_point(false);
+        let pub_bytes = uncompressed.as_bytes()[1..].to_vec();
+        Self {
+            curve: CryptoCurve::Secp256k1,
+            seed,
+            public_key_bytes: pub_bytes,
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Generates a deterministic Secp256r1 keypair from a numeric seed.
+    pub fn generate_secp256r1(seed: u64) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let signing_key = P256SigningKey::random(&mut rng);
+        let verifying_key = P256VerifyingKey::from(&signing_key);
+        let uncompressed = verifying_key.to_encoded_point(false);
+        let pub_bytes = uncompressed.as_bytes()[1..].to_vec();
+        Self {
+            curve: CryptoCurve::Secp256r1,
+            seed,
+            public_key_bytes: pub_bytes,
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Returns the public key as a 32-byte Soroban `BytesN<32>` (used for Ed25519).
+    pub fn public_key_bytes32(&self, env: &Env) -> soroban_sdk::BytesN<32> {
+        let array: [u8; 32] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("public key must be 32 bytes");
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Returns the public key as a 64-byte Soroban `BytesN<64>` (used for Secp256k1 / Secp256r1).
+    pub fn public_key_bytes64(&self, env: &Env) -> soroban_sdk::BytesN<64> {
+        let array: [u8; 64] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("public key must be 64 bytes");
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Returns the public key as a Soroban `Bytes`.
+    pub fn public_key_bytes(&self, env: &Env) -> soroban_sdk::Bytes {
+        soroban_sdk::Bytes::from_slice(env, &self.public_key_bytes)
+    }
+
+    /// Signs a message slice and produces a valid 64-byte signature `BytesN<64>`.
+    pub fn sign(&self, env: &Env, message: &[u8]) -> soroban_sdk::BytesN<64> {
+        let sig_bytes = match self.curve {
+            CryptoCurve::Ed25519 => {
+                let sk_array: [u8; 32] = self.secret_key_bytes.as_slice().try_into().unwrap();
+                let signing_key = Ed25519SigningKey::from_bytes(&sk_array);
+                let signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256k1 => {
+                use k256::ecdsa::signature::Signer as _;
+                let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: k256::ecdsa::Signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256r1 => {
+                use p256::ecdsa::signature::Signer as _;
+                let signing_key = P256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: p256::ecdsa::Signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+        };
+        let array: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Signs a Soroban `Bytes` payload and produces a valid 64-byte signature `BytesN<64>`.
+    pub fn sign_bytes(&self, env: &Env, message: &soroban_sdk::Bytes) -> soroban_sdk::BytesN<64> {
+        let mut buf = std::vec::Vec::with_capacity(message.len() as usize);
+        for i in 0..message.len() {
+            buf.push(message.get(i).unwrap());
+        }
+        self.sign(env, &buf)
+    }
+
+    /// Generates a corrupt (invalid) signature for negative path verification testing.
+    pub fn corrupt_signature(&self, env: &Env, message: &[u8]) -> soroban_sdk::BytesN<64> {
+        let mut valid_sig = self.sign(env, message).to_array();
+        valid_sig[63] ^= 0xff;
+        soroban_sdk::BytesN::from_array(env, &valid_sig)
+    }
+
+    /// Generates a corrupt signature from a Soroban `Bytes` payload.
+    pub fn corrupt_signature_bytes(
+        &self,
+        env: &Env,
+        message: &soroban_sdk::Bytes,
+    ) -> soroban_sdk::BytesN<64> {
+        let mut valid_sig = self.sign_bytes(env, message).to_array();
+        valid_sig[63] ^= 0xff;
+        soroban_sdk::BytesN::from_array(env, &valid_sig)
+    }
+}
+
+/// Deterministic mock cryptographic registry managing pre-built keypairs and signature synthesis.
+#[derive(Debug, Clone, Default)]
+pub struct MockCryptoRegistry {
+    keypairs: HashMap<String, MockKeyPair>,
+}
+
+impl MockCryptoRegistry {
+    /// Creates a new empty `MockCryptoRegistry`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a named keypair.
+    pub fn register(&mut self, name: impl Into<String>, keypair: MockKeyPair) {
+        self.keypairs.insert(name.into(), keypair);
+    }
+
+    /// Retrieves a registered keypair by name.
+    pub fn get(&self, name: &str) -> Option<&MockKeyPair> {
+        self.keypairs.get(name)
+    }
+
+    /// Gets or generates an Ed25519 keypair by name.
+    pub fn ed25519_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_ed25519(seed))
+    }
+
+    /// Gets or generates a Secp256k1 keypair by name.
+    pub fn secp256k1_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_secp256k1(seed))
+    }
+
+    /// Gets or generates a Secp256r1 keypair by name.
+    pub fn secp256r1_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_secp256r1(seed))
     }
 }
 

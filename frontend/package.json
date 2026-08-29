@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.9.0",
     "i18next": "^24.2.2",
     "i18next-browser-languagedetector": "^8.0.4",
     "lucide-react": "^1.17.0",

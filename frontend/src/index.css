@@ -3,13 +3,110 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
+/* ─── Colour tokens ───────────────────────────────────────────────────────── */
+/*  Every colour token is defined on bare :root as the dark palette, then       */
+/*  overridden for light. The theme engine (components/theme.ts) stamps         */
+/*  data-theme="light" | "dark" on <html>; when the user has chosen "system"    */
+/*  nothing is stamped and prefers-color-scheme decides. Each palette is        */
+/*  therefore declared twice — once under the media query for the system        */
+/*  default, once under [data-theme] so an explicit choice always wins.         */
+:root {
+  --surface-base:       #020617;
+  --surface-raised:     rgba(15, 23, 42, 0.6);
+  --surface-overlay:    rgba(2, 6, 23, 0.8);
+  --surface-input:      rgba(15, 23, 42, 0.8);
+  --surface-chip:       rgba(30, 41, 59, 0.6);
+
+  --border-subtle:      rgba(255, 255, 255, 0.08);
+  --border-strong:      rgba(255, 255, 255, 0.16);
+
+  --text-primary:       #f8fafc;
+  --text-body:          #e2e8f0;
+  --text-muted:         #94a3b8;
+  --text-faint:         #64748b;
+
+  --accent:             #8b5cf6;
+  --accent-soft:        rgba(139, 92, 246, 0.25);
+  --accent-contrast:    #a78bfa;
+
+  --status-success:     #4ade80;
+  --status-warning:     #fbbf24;
+  --status-danger:      #f87171;
+  --status-info:        #22d3ee;
+
+  color-scheme: dark;
+}
+
+.theme-light,
+:root[data-theme='light'] {
+  --surface-base:       #f8fafc;
+  --surface-raised:     rgba(255, 255, 255, 0.9);
+  --surface-overlay:    rgba(241, 245, 249, 0.9);
+  --surface-input:      #ffffff;
+  --surface-chip:       rgba(226, 232, 240, 0.7);
+
+  --border-subtle:      rgba(15, 23, 42, 0.1);
+  --border-strong:      rgba(15, 23, 42, 0.2);
+
+  --text-primary:       #0f172a;
+  --text-body:          #1e293b;
+  --text-muted:         #475569;
+  --text-faint:         #64748b;
+
+  --accent:             #7c3aed;
+  --accent-soft:        rgba(124, 58, 237, 0.15);
+  --accent-contrast:    #6d28d9;
+
+  --status-success:     #15803d;
+  --status-warning:     #b45309;
+  --status-danger:      #b91c1c;
+  --status-info:        #0e7490;
+
+  color-scheme: light;
+}
+
+/*  System default: only applies when no explicit choice has been stamped.      */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']):not(.theme-dark) {
+    --surface-base:       #f8fafc;
+    --surface-raised:     rgba(255, 255, 255, 0.9);
+    --surface-overlay:    rgba(241, 245, 249, 0.9);
+    --surface-input:      #ffffff;
+    --surface-chip:       rgba(226, 232, 240, 0.7);
+
+    --border-subtle:      rgba(15, 23, 42, 0.1);
+    --border-strong:      rgba(15, 23, 42, 0.2);
+
+    --text-primary:       #0f172a;
+    --text-body:          #1e293b;
+    --text-muted:         #475569;
+    --text-faint:         #64748b;
+
+    --accent:             #7c3aed;
+    --accent-soft:        rgba(124, 58, 237, 0.15);
+    --accent-contrast:    #6d28d9;
+
+    --status-success:     #15803d;
+    --status-warning:     #b45309;
+    --status-danger:      #b91c1c;
+    --status-info:        #0e7490;
+
+    color-scheme: light;
+  }
+}
+
 /* ─── Design tokens ───────────────────────────────────────────────────────── */
 :root {
   font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #e2e8f0;
-  background-color: #020617;
+  color: var(--text-body);
+  background-color: var(--surface-base);
+
+  /* Colour changes are animated so switching themes reads as one motion,
+     not a flash. Honoured by the reduced-motion block further down.           */
+  transition: background-color var(--motion-duration-base) var(--motion-ease-standard),
+              color var(--motion-duration-base) var(--motion-ease-standard);
 
   /* Motion tokens — all durations and easings live here so every animation
      can be tuned from a single location.                                     */

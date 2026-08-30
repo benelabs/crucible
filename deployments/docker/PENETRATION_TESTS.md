@@ -189,7 +189,7 @@ test_wasm_validation() {
   EOF
   
   docker run --security-opt seccomp=sandbox-seccomp.json \
-    /app/sandbox-executor --wasm test_wasm_invalid.wasm
+    /app/backend --wasm test_wasm_invalid.wasm
 }
 ```
 
@@ -212,7 +212,7 @@ test_wasm_instruction_limits() {
   EOF
   
   timeout 5 docker run --security-opt seccomp=sandbox-seccomp.json \
-    /app/sandbox-executor --wasm infinite_loop.wasm --max-instructions 1000000
+    /app/backend --wasm infinite_loop.wasm --max-instructions 1000000
 }
 ```
 

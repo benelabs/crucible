@@ -8,10 +8,9 @@ services:
     container_name: crucible-sandbox
     image: crucible-sandbox:latest
     ports:
-      - "9090:9090"
+      - "3000:3000"
     environment:
       RUST_LOG: info
-      SANDBOX_MODE: "true"
       SANDBOX_LIMITS_MAX_WASM_BYTES: 2097152
       SANDBOX_LIMITS_MAX_ARGS: 32
       SANDBOX_LIMITS_MAX_ARG_XDR_BYTES: 65536
@@ -41,13 +40,11 @@ services:
     tmpfs:
       - /tmp
       - /var/run
-    # Health check
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+    # No container-level HEALTHCHECK: the runtime image is distroless (no
+    # shell, no curl/wget), which is deliberate — it minimizes the sandboxed
+    # process's attack surface. Probe /health over HTTP from the orchestrator
+    # instead (e.g. a Kubernetes httpGet livenessProbe, or an external check
+    # against the published port).
     restart: unless-stopped
 
 networks:

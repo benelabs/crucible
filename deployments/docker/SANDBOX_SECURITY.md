@@ -13,7 +13,7 @@ The Crucible sandbox provides a secure, isolated execution environment for untru
 Seccomp (Secure Computing) mode restricts the system calls available to the sandbox process using a whitelist approach:
 
 - **Default Action:** `SCMP_ACT_ERRNO` - Deny all syscalls by default
-- **Allowed Syscalls:** Only 150+ critical syscalls for execution, memory management, and signal handling
+- **Allowed Syscalls:** ~90 syscalls the sandbox-executor (a tokio/axum HTTP service) needs for execution, memory management, networking, and signal handling — see `sandbox-seccomp.json`
 - **Blocked Syscalls:** All dangerous operations including:
   - Raw socket creation (`AF_RAW`, `SOCK_RAW`)
   - Privilege escalation (`setuid`, `setgid`, `setcap`)
@@ -73,7 +73,7 @@ max_args: 32
 
 - Container runs on isolated bridge network `172.20.0.0/16`
 - No access to host network (network namespace isolated)
-- Only port 9090 exposed for API communication
+- Only port 3000 exposed for API communication
 
 ### 6. User Isolation
 
@@ -109,7 +109,7 @@ docker run \
   --read-only \
   --tmpfs /tmp:size=128m \
   --tmpfs /var/run:size=32m \
-  -p 9090:9090 \
+  -p 3000:3000 \
   crucible-sandbox:latest
 ```
 

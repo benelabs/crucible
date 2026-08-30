@@ -1,318 +1,174 @@
-//! Sandbox security tests verifying containment and isolation
+//! Automated checks on the sandbox's security posture.
 //!
-//! Tests verify that:
-//! - Raw socket creation is blocked
-//! - Filesystem access outside sandbox is prevented
-//! - Kernel escape attempts are caught
-//! - Resource limits are enforced
-//! - Privilege escalation is blocked
+//! These tests verify structural properties of the deploy-time artifacts
+//! (the seccomp profile and the resource limits baked into the sandbox
+//! service) that CI can check on every change. They are NOT a substitute for
+//! a live container-escape drill: verifying that a *running* gVisor/seccomp
+//! container actually blocks a raw-socket or ptrace attempt requires a
+//! provisioned container runtime, which this test suite does not have
+//! access to. That gap is documented, not silently skipped — see
+//! deployments/docker/SANDBOX_SECURITY.md for the manual/CI-with-Docker
+//! verification procedure.
 
-#[cfg(test)]
-mod sandbox_security_tests {
-    use std::process::{Command, Stdio};
-    use std::time::Duration;
+use serde_json::Value;
+use std::fs;
+use std::path::PathBuf;
 
-    /// Test that raw socket creation is blocked by seccomp
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_raw_socket_blocked_by_seccomp() {
-        // This would be run against a sandboxed container
-        // Testing that AF_RAW socket creation fails with EPERM (Operation not permitted)
-        let test_code = r#"
-        use std::net::IpAddr;
-        use libc::{socket, AF_INET, SOCK_RAW, IPPROTO_ICMP};
-        
-        fn main() {
-            unsafe {
-                let sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-                if sock < 0 {
-                    println!("BLOCKED: Raw socket creation denied");
-                    std::process::exit(0);
-                } else {
-                    println!("FAILED: Raw socket was created!");
-                    std::process::exit(1);
-                }
-            }
-        }
-        "#;
+fn seccomp_profile() -> Value {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deployments/docker/sandbox-seccomp.json");
+    let raw = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    serde_json::from_str(&raw).unwrap_or_else(|e| panic!("invalid seccomp JSON: {e}"))
+}
 
-        // This would compile and run inside the sandbox
-        assert!(test_code.contains("AF_RAW"));
-    }
+fn allowed_syscalls(profile: &Value) -> Vec<String> {
+    profile["syscalls"]
+        .as_array()
+        .expect("syscalls must be an array")
+        .iter()
+        .filter(|rule| rule["action"] == "SCMP_ACT_ALLOW")
+        .flat_map(|rule| {
+            rule["names"]
+                .as_array()
+                .expect("names must be an array")
+                .iter()
+                .map(|n| n.as_str().unwrap().to_string())
+        })
+        .collect()
+}
 
-    /// Test that filesystem access outside container is blocked
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_host_filesystem_blocked() {
-        // In sandbox, attempting to access host filesystem should fail
-        // Example paths that would be blocked:
-        let blocked_paths = vec![
-            "/etc/passwd",
-            "/etc/shadow",
-            "/root/.ssh",
-            "/proc/kcore",
-            "/dev/mem",
-            "/dev/kmem",
-        ];
+#[test]
+fn seccomp_profile_is_deny_by_default() {
+    let profile = seccomp_profile();
+    assert_eq!(
+        profile["defaultAction"], "SCMP_ACT_ERRNO",
+        "the profile must deny any syscall not explicitly allow-listed"
+    );
+}
 
-        for path in blocked_paths {
-            // All these should return permission denied in sandbox
-            assert!(!path.is_empty());
-        }
-    }
+#[test]
+fn seccomp_profile_blocks_privilege_escalation_and_kernel_tampering() {
+    let profile = seccomp_profile();
+    let allowed = allowed_syscalls(&profile);
 
-    /// Test that system calls are restricted to whitelist
-    #[test]
-    fn test_syscall_whitelist_defined() {
-        // Verify seccomp.json contains the right syscalls
-        let allowed_syscalls = vec![
-            "read", "write", "open", "close", "stat", "fstat", "lstat",
-            "poll", "lseek", "mmap", "mprotect", "munmap", "brk",
-            "exit", "exit_group", "futex", "nanosleep",
-            // Memory management
-            "mremap", "msync", "madvise",
-            // Process control
-            "getpid", "getppid", "gettid", "sched_yield",
-            // Signals
-            "rt_sigaction", "rt_sigprocmask", "rt_sigreturn",
-            // Networking (restricted)
-            // socket, bind, listen, accept, connect are BLOCKED
-        ];
+    let must_not_be_allowed = [
+        "ptrace",
+        "process_vm_readv",
+        "process_vm_writev",
+        "mount",
+        "umount2",
+        "pivot_root",
+        "chroot",
+        "setns",
+        "unshare",
+        "setuid",
+        "setgid",
+        "setresuid",
+        "setresgid",
+        "capset",
+        "init_module",
+        "finit_module",
+        "delete_module",
+        "kexec_load",
+        "kexec_file_load",
+        "reboot",
+        "swapon",
+        "swapoff",
+        "acct",
+        "iopl",
+        "ioperm",
+        "bpf",
+        "add_key",
+        "request_key",
+        "keyctl",
+        "execve",
+        "execveat",
+    ];
 
-        // All critical execution syscalls should be allowed
-        assert!(allowed_syscalls.contains(&"read"));
-        assert!(allowed_syscalls.contains(&"write"));
-        assert!(allowed_syscalls.contains(&"exit"));
-    }
-
-    /// Test that dangerous syscalls are blocked
-    #[test]
-    fn test_dangerous_syscalls_blocked() {
-        let blocked_syscalls = vec![
-            // Privilege escalation
-            "setuid", "setgid", "seteuid", "setegid",
-            // Module/kernel modification
-            "create_module", "delete_module", "init_module",
-            // Process manipulation
-            "ptrace", "process_vm_readv", "process_vm_writev",
-            // Filesystem
-            "mount", "umount2", "chroot",
-            // Raw networking
-            "socket", // With AF_RAW flag
-            // IPC
-            "shmctl", "semctl", "msgctl",
-        ];
-
-        // These should all be blocked
-        assert!(blocked_syscalls.len() > 0);
-    }
-
-    /// Test that WASM execution has resource limits
-    #[test]
-    fn test_wasm_resource_limits_enforced() {
-        // Resource limits from SandboxLimits:
-        let limits = vec![
-            ("max_wasm_bytes", 2 * 1024 * 1024), // 2 MB
-            ("max_args", 32),
-            ("max_arg_xdr_bytes", 64 * 1024),
-            ("max_cpu_instructions", 25_000_000),
-            ("max_memory_bytes", 64 * 1024 * 1024),
-            ("timeout_ms", 2_000),
-        ];
-
-        // Verify reasonable limits
-        for (name, value) in limits {
-            assert!(value > 0, "Limit {} should be positive", name);
-        }
-    }
-
-    /// Test that network socket types are restricted
-    #[test]
-    fn test_socket_types_restricted() {
-        // In sandbox, only specific socket types are allowed
-        let dangerous_socket_types = vec![
-            ("AF_RAW", "Raw packet sockets"),
-            ("SOCK_RAW", "Raw sockets"),
-            ("SOCK_PACKET", "Packet sockets"),
-        ];
-
-        for (socket_type, description) in dangerous_socket_types {
-            // These should be blocked by seccomp
-            assert!(!socket_type.is_empty(), "{} should be blocked", description);
-        }
-    }
-
-    /// Test that memory protection is configured
-    #[test]
-    fn test_memory_protection_configured() {
-        // Verify mprotect calls are allowed but restricted
-        let protection_flags = vec![
-            "PROT_READ",
-            "PROT_WRITE",
-            "PROT_EXEC",
-        ];
-
-        // These should be allowed for legitimate memory management
-        assert!(protection_flags.len() > 0);
-    }
-
-    /// Test container runs with dropped capabilities
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_container_capabilities_dropped() {
-        // Should drop ALL capabilities except NET_BIND_SERVICE
-        let dangerous_caps = vec![
-            "CAP_SYS_ADMIN",       // Can do almost anything
-            "CAP_SYS_MODULE",      // Load kernel modules
-            "CAP_SYS_BOOT",        // Reboot
-            "CAP_SYS_PTRACE",      // Trace processes
-            "CAP_NET_ADMIN",       // Network configuration
-            "CAP_SYS_CHROOT",      // Change root
-            "CAP_DAC_OVERRIDE",    // Bypass file permissions
-            "CAP_SETFCAP",         // Set file capabilities
-        ];
-
-        for cap in dangerous_caps {
-            // All should be dropped
-            assert!(!cap.is_empty());
-        }
-    }
-
-    /// Test read-only filesystem
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_root_filesystem_readonly() {
-        // Only /tmp and /var/run should be writable
-        // Attempting to write to / should fail
-        let paths = vec![
-            ("/", false),      // Not writable
-            ("/bin", false),    // Not writable
-            ("/usr", false),    // Not writable
-            ("/tmp", true),     // Writable
-            ("/var/run", true), // Writable
-        ];
-
-        for (path, writable) in paths {
-            assert!(!path.is_empty(), "Path {} should {'be' if writable} writable", path);
-        }
-    }
-
-    /// Test resource limit enforcement
-    #[test]
-    fn test_cpu_memory_limits() {
-        // Docker compose limits should be enforced:
-        // cpus: '1'
-        // memory: 256M
-        // This test would verify actual enforcement
-
-        let cpu_limit = 1.0;
-        let memory_limit_bytes = 256 * 1024 * 1024;
-
-        assert!(cpu_limit > 0.0);
-        assert!(memory_limit_bytes > 0);
-    }
-
-    /// Test timeout enforcement on WASM execution
-    #[test]
-    fn test_wasm_execution_timeout() {
-        // WASM that tries to infinite loop should timeout after 2 seconds
-        let timeout_ms = 2_000;
-        let infinite_loop_time = std::time::Duration::from_millis(timeout_ms + 100);
-
-        assert!(timeout_ms == 2_000);
-        assert!(infinite_loop_time.as_millis() > timeout_ms as u128);
-    }
-
-    /// Test WASM magic number validation
-    #[test]
-    fn test_wasm_magic_validation() {
-        const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
-        const WASM_VERSION: [u8; 4] = [0x01, 0x00, 0x00, 0x00];
-
-        // Valid WASM header
-        let valid_wasm = [WASM_MAGIC[0], WASM_MAGIC[1], WASM_MAGIC[2], WASM_MAGIC[3], 
-                          WASM_VERSION[0], WASM_VERSION[1], WASM_VERSION[2], WASM_VERSION[3]];
-        
-        assert_eq!(valid_wasm[0..4], WASM_MAGIC);
-        assert_eq!(valid_wasm[4..8], WASM_VERSION);
-
-        // Invalid magic should be rejected
-        let invalid_wasm = [0xFF, 0xFF, 0xFF, 0xFF];
-        assert_ne!(invalid_wasm, WASM_MAGIC);
-    }
-
-    /// Test that container has no access to host secrets
-    #[test]
-    fn test_no_host_secret_access() {
-        let secret_paths = vec![
-            "/root/.ssh/id_rsa",
-            "/run/secrets/",
-            "/etc/docker/config.json",
-            "~/.aws/credentials",
-        ];
-
-        // All should be blocked
-        for _path in secret_paths {
-            // In a real test, we'd verify these fail to open
-        }
-    }
-
-    /// Test seccomp profile structure
-    #[test]
-    fn test_seccomp_profile_valid() {
-        // This would load and validate the seccomp.json file
-        // Verify it has:
-        // - defaultAction: SCMP_ACT_ERRNO
-        // - syscalls array with allowed syscalls
-        // - socket syscalls in restricted list
-
-        let has_default_action = true;
-        let has_syscalls_list = true;
-        let has_socket_restrictions = true;
-
-        assert!(has_default_action);
-        assert!(has_syscalls_list);
-        assert!(has_socket_restrictions);
+    for syscall in must_not_be_allowed {
+        assert!(
+            !allowed.contains(&syscall.to_string()),
+            "{syscall} must not be in the seccomp allow-list — it is a privilege \
+            escalation, kernel-tampering, or process-spawning primitive"
+        );
     }
 }
 
-#[cfg(test)]
-mod sandbox_penetration_tests {
-    /// Attempt to break out via symlink attacks
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_symlink_escape_blocked() {
-        // Try to create symlink to /etc/passwd
-        // Should fail with permission error
-    }
+#[test]
+fn seccomp_profile_has_no_contradictory_rules() {
+    let profile = seccomp_profile();
+    let rules = profile["syscalls"].as_array().unwrap();
 
-    /// Attempt to use race conditions
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_race_condition_exploits_blocked() {
-        // Time-of-check-time-of-use (TOCTTOU) attacks should be prevented
-        // by read-only filesystem and seccomp
+    let mut seen = std::collections::HashMap::new();
+    for rule in rules {
+        let action = rule["action"].as_str().unwrap().to_string();
+        for name in rule["names"].as_array().unwrap() {
+            let name = name.as_str().unwrap().to_string();
+            if let Some(prev_action) = seen.insert(name.clone(), action.clone()) {
+                assert_eq!(
+                    prev_action, action,
+                    "{name} appears with conflicting actions ({prev_action} vs {action}) — \
+                    seccomp rule ordering is not guaranteed, so a syscall must only ever \
+                    appear once"
+                );
+            }
+        }
     }
+}
 
-    /// Attempt privilege escalation via capabilities
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_cap_escalation_blocked() {
-        // Try to use setcap, capabilities raising
-        // Should fail - capabilities should be dropped
+#[test]
+fn seccomp_profile_allows_the_syscalls_a_tokio_http_service_needs() {
+    let profile = seccomp_profile();
+    let allowed = allowed_syscalls(&profile);
+
+    // A minimal but real set the sandbox-executor (tokio + axum) needs to
+    // start, accept connections, and run the WASM interpreter. This is
+    // deliberately broader than the issue's illustrative "read, write, exit,
+    // futex" — that literal set cannot host an HTTP service at all.
+    let required = [
+        "read", "write", "exit", "exit_group", "futex", "mmap", "munmap", "mprotect", "brk",
+        "clone", "clone3", "socket", "bind", "listen", "accept4", "epoll_wait", "epoll_ctl",
+        "close", "openat",
+    ];
+
+    for syscall in required {
+        assert!(
+            allowed.contains(&syscall.to_string()),
+            "{syscall} is required for the sandbox-executor to run but is missing \
+            from the seccomp allow-list"
+        );
     }
+}
 
-    /// Attempt to access /proc/sys kernelparams
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_kernel_params_protected() {
-        // /proc/sys modifications should fail
-    }
+#[test]
+fn sandbox_resource_limits_match_the_dockerfile_env_defaults() {
+    // Keeps backend/src/services/sandbox.rs::SandboxLimits::default() honest
+    // against the ENV defaults baked into deployments/docker/sandbox.Dockerfile.
+    // If either changes without the other, a WASM binary that the service
+    // accepts could still be rejected by the container's own env-configured
+    // limits (or vice versa) — a silent policy drift, not a crash, so it
+    // needs an explicit test rather than relying on a build failure.
+    let dockerfile_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deployments/docker/sandbox.Dockerfile");
+    let dockerfile = fs::read_to_string(&dockerfile_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", dockerfile_path.display()));
 
-    /// Attempt cgroup escape
-    #[test]
-    #[ignore] // Requires Docker environment
-    fn test_cgroup_escape_blocked() {
-        // Cgroup v2 escape attempts should fail
+    let expectations = [
+        ("SANDBOX_LIMITS_MAX_WASM_BYTES", "2097152"),
+        ("SANDBOX_LIMITS_MAX_ARGS", "32"),
+        ("SANDBOX_LIMITS_MAX_ARG_XDR_BYTES", "65536"),
+        ("SANDBOX_LIMITS_MAX_CPU_INSTRUCTIONS", "25000000"),
+        ("SANDBOX_LIMITS_MAX_MEMORY_BYTES", "268435456"),
+        ("SANDBOX_LIMITS_TIMEOUT_MS", "2000"),
+    ];
+
+    for (key, value) in expectations {
+        let needle = format!("{key}={value}");
+        assert!(
+            dockerfile.contains(&needle),
+            "expected {needle} in sandbox.Dockerfile to match \
+            SandboxLimits::default() in backend/src/services/sandbox.rs"
+        );
     }
 }

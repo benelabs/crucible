@@ -729,3 +729,306 @@ mod reentrancy_probe_tests {
         assert_eq!(vault.balance(&user), 100);
     }
 }
+
+// Location: contracts/crucible/src/sim.rs // Production requirement: Wasm Memory Allocator Leak & Stack Depth Tester
+
+/// Size of a single Soroban Wasm linear-memory page (64 KiB).
+pub const WASM_PAGE_SIZE_BYTES: usize = 64 * 1024;
+
+/// Default Soroban host memory ceiling (~40 MiB).
+pub const DEFAULT_MAX_MEMORY_BYTES: usize = 40 * 1024 * 1024;
+
+/// Default recursion / call-stack depth budget for simulated execution.
+pub const DEFAULT_MAX_STACK_DEPTH: u32 = 256;
+
+/// Configured memory and stack limits for a simulated contract run.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryLimitConfig {
+    /// Maximum linear memory in bytes (must be a multiple of [`WASM_PAGE_SIZE_BYTES`] conceptually).
+    pub max_memory_bytes: usize,
+    /// Maximum nested call / recursion depth.
+    pub max_stack_depth: u32,
+}
+
+impl Default for MemoryLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
+            max_stack_depth: DEFAULT_MAX_STACK_DEPTH,
+        }
+    }
+}
+
+impl MemoryLimitConfig {
+    pub fn max_pages(&self) -> usize {
+        self.max_memory_bytes / WASM_PAGE_SIZE_BYTES
+    }
+}
+
+/// Violation raised when a simulated allocation or stack push exceeds limits.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MemoryLimitViolation {
+    /// Requested pages would exceed the configured memory ceiling.
+    OutOfMemory {
+        requested_pages: usize,
+        peak_pages: usize,
+        max_pages: usize,
+    },
+    /// Recursion / nesting depth exceeded the configured stack budget.
+    StackOverflow {
+        depth: u32,
+        max_depth: u32,
+    },
+}
+
+/// Monitors peak Wasm memory page allocations and recursion stack depth
+/// during simulated contract execution.
+#[derive(Clone, Debug)]
+pub struct WasmMemoryMonitor {
+    config: MemoryLimitConfig,
+    current_pages: usize,
+    peak_pages: usize,
+    stack_depth: u32,
+    peak_stack_depth: u32,
+}
+
+impl WasmMemoryMonitor {
+    pub fn new(config: MemoryLimitConfig) -> Self {
+        Self {
+            config,
+            current_pages: 0,
+            peak_pages: 0,
+            stack_depth: 0,
+            peak_stack_depth: 0,
+        }
+    }
+
+    pub fn with_defaults() -> Self {
+        Self::new(MemoryLimitConfig::default())
+    }
+
+    pub fn config(&self) -> &MemoryLimitConfig {
+        &self.config
+    }
+
+    pub fn current_pages(&self) -> usize {
+        self.current_pages
+    }
+
+    pub fn peak_pages(&self) -> usize {
+        self.peak_pages
+    }
+
+    pub fn peak_memory_bytes(&self) -> usize {
+        self.peak_pages.saturating_mul(WASM_PAGE_SIZE_BYTES)
+    }
+
+    pub fn stack_depth(&self) -> u32 {
+        self.stack_depth
+    }
+
+    pub fn peak_stack_depth(&self) -> u32 {
+        self.peak_stack_depth
+    }
+
+    /// Grow linear memory by `pages` (64 KiB each). Returns the previous page count.
+    pub fn grow_pages(&mut self, pages: usize) -> Result<usize, MemoryLimitViolation> {
+        let next = self.current_pages.saturating_add(pages);
+        if next > self.config.max_pages() {
+            return Err(MemoryLimitViolation::OutOfMemory {
+                requested_pages: pages,
+                peak_pages: self.peak_pages.max(next),
+                max_pages: self.config.max_pages(),
+            });
+        }
+        let prev = self.current_pages;
+        self.current_pages = next;
+        self.peak_pages = self.peak_pages.max(self.current_pages);
+        Ok(prev)
+    }
+
+    /// Account for an allocation of `bytes`, rounding up to whole Wasm pages.
+    pub fn allocate_bytes(&mut self, bytes: usize) -> Result<usize, MemoryLimitViolation> {
+        let pages = bytes.div_ceil(WASM_PAGE_SIZE_BYTES).max(1);
+        self.grow_pages(pages)
+    }
+
+    /// Release `pages` of linear memory (simulates free / drop of large buffers).
+    pub fn free_pages(&mut self, pages: usize) {
+        self.current_pages = self.current_pages.saturating_sub(pages);
+    }
+
+    /// Push one frame onto the simulated call stack.
+    pub fn push_frame(&mut self) -> Result<u32, MemoryLimitViolation> {
+        let next = self.stack_depth.saturating_add(1);
+        if next > self.config.max_stack_depth {
+            return Err(MemoryLimitViolation::StackOverflow {
+                depth: next,
+                max_depth: self.config.max_stack_depth,
+            });
+        }
+        self.stack_depth = next;
+        self.peak_stack_depth = self.peak_stack_depth.max(self.stack_depth);
+        Ok(self.stack_depth)
+    }
+
+    /// Pop one frame from the simulated call stack.
+    pub fn pop_frame(&mut self) {
+        self.stack_depth = self.stack_depth.saturating_sub(1);
+    }
+
+    /// Assert peak memory and stack stayed strictly within configured limits.
+    pub fn assert_within_limits(&self) {
+        assert!(
+            self.peak_pages <= self.config.max_pages(),
+            "peak memory pages {} exceed limit {} ({} bytes > {} bytes)",
+            self.peak_pages,
+            self.config.max_pages(),
+            self.peak_memory_bytes(),
+            self.config.max_memory_bytes
+        );
+        assert!(
+            self.peak_stack_depth <= self.config.max_stack_depth,
+            "peak stack depth {} exceeds limit {}",
+            self.peak_stack_depth,
+            self.config.max_stack_depth
+        );
+        assert!(
+            self.peak_memory_bytes() <= self.config.max_memory_bytes,
+            "peak memory bytes must remain strictly within configured limits"
+        );
+    }
+
+    /// Recursively walk a nested `Vec` tree, charging stack frames and page growth
+    /// proportional to element counts — used to stress deeply nested payloads.
+    pub fn stress_nested_vectors<T>(
+        &mut self,
+        depth: u32,
+        branching: usize,
+        leaf_bytes: usize,
+        _marker: &T,
+    ) -> Result<(), MemoryLimitViolation> {
+        self.push_frame()?;
+        if depth == 0 {
+            let _ = self.allocate_bytes(leaf_bytes.max(1))?;
+            self.pop_frame();
+            return Ok(());
+        }
+        // Charge a page for the vector spine at this level.
+        let spine_bytes = branching.saturating_mul(std::mem::size_of::<usize>()).max(1);
+        let _ = self.allocate_bytes(spine_bytes)?;
+        for _ in 0..branching {
+            self.stress_nested_vectors(depth - 1, branching, leaf_bytes, _marker)?;
+        }
+        self.pop_frame();
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod wasm_memory_monitor_tests {
+    use super::*;
+
+    #[test]
+    fn tracks_peak_pages_under_grow_and_free() {
+        let mut mon = WasmMemoryMonitor::new(MemoryLimitConfig {
+            max_memory_bytes: 256 * 1024, // 4 pages
+            max_stack_depth: 32,
+        });
+
+        assert_eq!(mon.grow_pages(2).unwrap(), 0);
+        assert_eq!(mon.current_pages(), 2);
+        assert_eq!(mon.peak_pages(), 2);
+
+        mon.free_pages(1);
+        assert_eq!(mon.current_pages(), 1);
+        assert_eq!(mon.peak_pages(), 2, "peak must not decrease on free");
+
+        assert_eq!(mon.grow_pages(2).unwrap(), 1);
+        assert_eq!(mon.peak_pages(), 3);
+        mon.assert_within_limits();
+    }
+
+    #[test]
+    fn rejects_allocations_beyond_configured_limit() {
+        let mut mon = WasmMemoryMonitor::new(MemoryLimitConfig {
+            max_memory_bytes: 128 * 1024, // 2 pages
+            max_stack_depth: 8,
+        });
+
+        assert!(mon.grow_pages(2).is_ok());
+        let err = mon.grow_pages(1).unwrap_err();
+        assert!(matches!(
+            err,
+            MemoryLimitViolation::OutOfMemory { max_pages: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn stack_depth_guard_trips_on_deep_recursion() {
+        let mut mon = WasmMemoryMonitor::new(MemoryLimitConfig {
+            max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
+            max_stack_depth: 4,
+        });
+
+        for _ in 0..4 {
+            mon.push_frame().unwrap();
+        }
+        let err = mon.push_frame().unwrap_err();
+        assert_eq!(
+            err,
+            MemoryLimitViolation::StackOverflow {
+                depth: 5,
+                max_depth: 4
+            }
+        );
+        assert_eq!(mon.peak_stack_depth(), 4);
+    }
+
+    #[test]
+    fn maximal_payload_stays_within_soroban_40mb_ceiling() {
+        let mut mon = WasmMemoryMonitor::with_defaults();
+        // ~39 MiB payload — just under the 40 MiB Soroban limit.
+        let bytes = 39 * 1024 * 1024;
+        mon.allocate_bytes(bytes).unwrap();
+        mon.assert_within_limits();
+        assert!(mon.peak_memory_bytes() <= DEFAULT_MAX_MEMORY_BYTES);
+        assert!(mon.peak_pages() <= MemoryLimitConfig::default().max_pages());
+    }
+
+    #[test]
+    fn stress_deeply_nested_vector_structures() {
+        let mut mon = WasmMemoryMonitor::new(MemoryLimitConfig {
+            max_memory_bytes: 8 * 1024 * 1024,
+            max_stack_depth: 64,
+        });
+
+        // depth=6, branching=2 → 2^6 leaves; exercises stack + page accounting.
+        mon.stress_nested_vectors(6, 2, 1024, &0u8).unwrap();
+        mon.assert_within_limits();
+        assert!(mon.peak_stack_depth() >= 6);
+        assert!(mon.peak_pages() > 0);
+    }
+
+    #[test]
+    fn nested_vector_stress_can_hit_stack_limit() {
+        let mut mon = WasmMemoryMonitor::new(MemoryLimitConfig {
+            max_memory_bytes: DEFAULT_MAX_MEMORY_BYTES,
+            max_stack_depth: 5,
+        });
+
+        let err = mon
+            .stress_nested_vectors(10, 1, 64, &0u8)
+            .unwrap_err();
+        assert!(matches!(err, MemoryLimitViolation::StackOverflow { .. }));
+    }
+
+    #[test]
+    fn allocate_bytes_rounds_up_to_whole_pages() {
+        let mut mon = WasmMemoryMonitor::with_defaults();
+        mon.allocate_bytes(1).unwrap();
+        assert_eq!(mon.current_pages(), 1);
+        mon.allocate_bytes(WASM_PAGE_SIZE_BYTES + 1).unwrap();
+        assert_eq!(mon.current_pages(), 1 + 2);
+    }
+}

@@ -23,6 +23,9 @@ pub use crate::sim::ReentrancyProbe;
 pub use crate::sim::ReentrancyProbeResult;
 pub use crate::sim::SimulatedTx;
 pub use crate::time::{add_months, add_years};
+pub use crate::env::CryptoCurve;
+pub use crate::env::MockCryptoRegistry;
+pub use crate::env::MockKeyPair;
 pub use crate::token::MockToken;
 pub use crate::profiler::{export_flamegraph_svg, export_speedscope, Frame, GasProfiler, Profile, Sample};
 pub use crate::zk::{

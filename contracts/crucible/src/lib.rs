@@ -3,6 +3,8 @@ pub mod account;
 pub mod cost;
 pub mod env;
 #[cfg(test)]
+mod env_crypto_tests;
+#[cfg(test)]
 mod env_event_filter_tests;
 mod event_topic_match;
 pub mod fixture;

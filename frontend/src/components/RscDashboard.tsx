@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { fetchDashboardDataServer, DashboardServerData } from './rsc/rsc';
+import { fetchDashboardDataServer } from './rsc/rsc';
+import type { DashboardServerData } from './rsc/rsc';
 import './MultiChainDashboard.css';
 
 export const RscDashboard: React.FC = () => {

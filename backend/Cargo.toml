@@ -1,6 +1,6 @@
 [package]
 name = "backend"
-version = "1.5.0"
+version = "1.16.0"
 edition = "2021"
 description = "Backend API server for the Crucible smart contract testing platform"
 license = "MIT"
@@ -94,6 +94,7 @@ tokio-util = "0.7"
 cron = "0.12"
 
 # CSV serialization
+# `csv` has serde support built in; there is no `serde` feature to enable.
 csv = "1.3"
 
 
@@ -106,9 +107,9 @@ http-body-util = "0.1"
 toml = "0.8"
 temp-env = "0.3"
 prometheus = "0.14.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-test = "0.4"
 testcontainers = "0.16"
 wiremock = "0.6"

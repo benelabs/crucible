@@ -101,4 +101,82 @@ mod tests {
         let decoded: u32 = captured[0].data_as();
         assert_eq!(decoded, 1_u32);
     }
+
+    #[contract]
+    #[derive(Default)]
+    struct TokenEventContract;
+
+    #[contractimpl]
+    impl TokenEventContract {
+        pub fn transfer(env: Env, from: soroban_sdk::Address, to: soroban_sdk::Address, amount: i128) {
+            env.events().publish((symbol_short!("transfer"), from, to), amount);
+        }
+
+        pub fn mint(env: Env, to: soroban_sdk::Address, amount: i128) {
+            env.events().publish((symbol_short!("mint"), to), amount);
+        }
+
+        pub fn burn(env: Env, from: soroban_sdk::Address, amount: i128) {
+            env.events().publish((symbol_short!("burn"), from), amount);
+        }
+    }
+
+    #[test]
+    fn test_wildcard_topic_matching_and_macro_assertions() {
+        let env = MockEnv::builder()
+            .with_contract::<TokenEventContract>()
+            .build();
+        let id = env.contract_id::<TokenEventContract>();
+        let client = TokenEventContractClient::new(env.inner(), &id);
+
+        let alice = env.create_account("alice");
+        let bob = env.create_account("bob");
+
+        client.mint(&alice, &1000_i128);
+        client.transfer(&alice, &bob, &300_i128);
+        client.burn(&bob, &50_i128);
+
+        // Wildcard match for any transfer event regardless of sender/receiver
+        let transfer_wildcards = env.events_parsed((
+            symbol_short!("transfer"),
+            symbol_short!("*"),
+            symbol_short!("*"),
+        ));
+        assert_eq!(transfer_wildcards.len(), 1);
+        let ev = &transfer_wildcards[0];
+        assert_eq!(ev.contract, id);
+        assert_eq!(ev.data_as::<i128>(), 300_i128);
+        assert_eq!(ev.topic_as::<soroban_sdk::Symbol>(0), Some(symbol_short!("transfer")));
+        assert_eq!(ev.topic_as::<soroban_sdk::Address>(1), Some(alice.address()));
+        assert_eq!(ev.topic_as::<soroban_sdk::Address>(2), Some(bob.address()));
+
+        // Wildcard match using '_' symbol
+        let mint_wildcards = env.events_parsed((symbol_short!("mint"), symbol_short!("_")));
+        assert_eq!(mint_wildcards.len(), 1);
+        assert_eq!(mint_wildcards[0].data_as::<i128>(), 1000_i128);
+
+        // Test assert_event_matches! macro
+        crate::assert_event_matches!(
+            env,
+            id,
+            (symbol_short!("transfer"), symbol_short!("*"), bob.address())
+        );
+        crate::assert_event_matches!(
+            env,
+            id,
+            (symbol_short!("transfer"), alice.address(), symbol_short!("*")),
+            300_i128
+        );
+        crate::assert_event_matches!(
+            env,
+            id,
+            (symbol_short!("burn"), symbol_short!("*")),
+            50_i128
+        );
+
+        // Schema validation assertions
+        assert!(ev.assert_schema(3, |data| {
+            soroban_sdk::i128::from_val(env.inner(), data) == 300_i128
+        }));
+    }
 }

@@ -1,0 +1,192 @@
+.storage-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.storage-diff__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.storage-diff__header h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.storage-diff__header p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.storage-diff__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.summary-card.is-active {
+  border-color: rgba(139, 92, 246, 0.6);
+  background: rgba(139, 92, 246, 0.12);
+}
+
+.summary-card__title {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.summary-card__counts {
+  display: flex;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+
+.summary-card__bytes {
+  font-size: 12px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.is-created { color: #4ade80; }
+.is-modified { color: #facc15; }
+.is-deleted { color: #f87171; }
+
+.storage-diff__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.storage-diff__table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: #94a3b8;
+  font-weight: 500;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.storage-diff__table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  vertical-align: top;
+}
+
+/* Colour is a reinforcement, never the only signal: every row also carries a
+   labelled badge, so the diff stays readable without colour vision. */
+.diff-row--created { background: rgba(74, 222, 128, 0.08); }
+.diff-row--modified { background: rgba(250, 204, 21, 0.08); }
+.diff-row--deleted { background: rgba(248, 113, 113, 0.08); }
+
+.diff-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.diff-badge--created { background: rgba(74, 222, 128, 0.16); color: #4ade80; }
+.diff-badge--modified { background: rgba(250, 204, 21, 0.16); color: #facc15; }
+.diff-badge--deleted { background: rgba(248, 113, 113, 0.16); color: #f87171; }
+.diff-badge--unchanged { background: rgba(148, 163, 184, 0.16); color: #94a3b8; }
+
+.diff-row__key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+
+.diff-row__numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.diff-row__numeric.is-growth { color: #f87171; }
+.diff-row__numeric.is-shrink { color: #4ade80; }
+
+.diff-row__toggle {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+}
+
+.diff-values {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 6px 4px 10px;
+}
+
+.diff-values__side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.diff-values__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+}
+
+.diff-values code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 6px;
+  padding: 6px 8px;
+  word-break: break-all;
+}
+
+.storage-diff__empty {
+  color: #94a3b8;
+  font-size: 14px;
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+}
+
+.storage-diff__table tfoot td {
+  font-weight: 600;
+  border-bottom: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

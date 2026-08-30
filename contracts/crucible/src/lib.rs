@@ -3,16 +3,24 @@ pub mod account;
 pub mod cost;
 pub mod env;
 #[cfg(test)]
+mod env_crypto_tests;
+#[cfg(test)]
 mod env_event_filter_tests;
 mod event_topic_match;
 pub mod fixture;
 pub mod macros;
 pub mod prelude;
 
+pub use crate::env::Stroops;
+
 pub mod sim;
 #[path = "time_helpers.rs"]
 pub mod time;
+pub use self::time as time_helpers;
 pub mod token;
+pub mod profiler;
+pub mod storage_size;
+pub mod zk;
 
 /// The `#[fixture]` attribute macro for defining reusable test setup structs.
 ///

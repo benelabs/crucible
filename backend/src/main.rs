@@ -130,6 +130,7 @@ async fn main() -> Result<(), anyhow::Error> {
         db: db_pool.clone(),
         cache: health_cache,
         queue: health_queue,
+        soroban_rpc_url: None,
     };
 
     let shared_services = SharedServices {

@@ -11,6 +11,14 @@ use crate::account::AccountHandle;
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use crate::token::MockToken;
+use ed25519_dalek::{Signer as _, SigningKey as Ed25519SigningKey};
+use k256::ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey};
+use p256::ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey};
+use rand::SeedableRng as _;
+use rand_chacha::ChaCha8Rng;
+use crate::zk::{
+    self, G1, G2, Groth16Proof, Groth16VerifyingKey, PairingCurve, PlonkProof,
+};
 use soroban_sdk::{
     testutils::{ContractEvents, Events, Ledger, Register},
     Address, Env, FromVal, IntoVal, Val, Vec as SorobanVec,
@@ -221,6 +229,86 @@ impl Stroops {
     }
 }
 
+/// Supported Soroban protocol versions for compatibility testing.
+///
+/// Crucible environments can be configured to target a specific protocol version
+/// so that contracts can be tested against multiple Soroban network upgrades
+/// (Protocol 20, 21, 22, …).
+///
+/// # Example
+///
+/// ```ignore
+/// use crucible::prelude::*;
+///
+/// let env = MockEnv::builder()
+///     .with_protocol_version(ProtocolVersion::V21)
+///     .build();
+/// assert_eq!(env.protocol_version(), 21);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProtocolVersion {
+    V20 = 20,
+    V21 = 21,
+    V22 = 22,
+}
+
+impl ProtocolVersion {
+    /// Returns the numeric protocol version.
+    pub fn value(&self) -> u32 {
+        *self as u32
+    }
+
+    /// Returns `true` if this protocol version supports the given host function
+    /// name.  The list is intentionally conservative: if a function is not
+    /// listed here we assume it is available in all supported versions.
+    pub fn supports_host_function(&self, _function: &str) -> bool {
+        let version = self.value();
+        match _function {
+            "v1_low_level_operations" | "v1_wasm_host_function_with_abi" => version >= 20,
+            "v2_low_level_operations" | "v2_wasm_host_function_with_abi" => version >= 21,
+            "v3_low_level_operations" | "v3_wasm_host_function_with_abi" => version >= 22,
+            _ => true,
+        }
+    }
+
+    /// Returns the maximum supported protocol version known to Crucible.
+    pub fn max_supported() -> Self {
+        ProtocolVersion::V22
+    }
+
+    /// Returns an iterator over all supported protocol versions.
+    pub fn all() -> impl Iterator<Item = ProtocolVersion> {
+        [ProtocolVersion::V20, ProtocolVersion::V21, ProtocolVersion::V22]
+            .into_iter()
+    }
+}
+
+impl std::fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Protocol {}", self.value())
+    }
+}
+
+impl From<u32> for ProtocolVersion {
+    fn from(value: u32) -> Self {
+        match value {
+            20 => ProtocolVersion::V20,
+            21 => ProtocolVersion::V21,
+            22 => ProtocolVersion::V22,
+            _ => panic!(
+                "Unsupported protocol version: {}. Supported versions are 20, 21, 22.",
+                value
+            ),
+        }
+    }
+}
+
+impl From<ProtocolVersion> for u32 {
+    fn from(version: ProtocolVersion) -> Self {
+        version.value()
+    }
+}
+
 /// **Thread‑safety:** `MockEnv` is deliberately single‑threaded; it uses `Rc`/`RefCell` and does **not** implement `Send` or `Sync`. This ensures deterministic behavior in tests but means fixtures cannot be moved across async tasks.
 /// A wrapper around the Soroban test environment with additional helpers.
 ///
@@ -235,6 +323,7 @@ pub struct MockEnv {
     tokens: Rc<RefCell<HashMap<String, MockToken>>>,
     xlm_token_address: Rc<RefCell<Option<Address>>>,
     track_costs: bool,
+    crypto_registry: Rc<RefCell<MockCryptoRegistry>>,
 }
 
 // Typed event wrapper to provide ergonomic access to event fields and typed data conversion.
@@ -286,6 +375,36 @@ impl CapturedEvent {
     /// ```
     pub fn data_as<T: FromVal<Env, Val>>(&self) -> T {
         T::from_val(&self.env, &self.data)
+    }
+
+    /// Checks whether the event's topics match the given topic pattern (with wildcard support `*` or `_`).
+    pub fn matches_topic_pattern(&self, pattern: &SorobanVec<Val>) -> bool {
+        crate::event_topic_match::topics_match(&self.env, pattern, &self.topics)
+    }
+
+    /// Checks whether the event's topics match the given topic tuple or vector pattern.
+    pub fn matches_topics<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> bool {
+        let pattern_vec = pattern.into_val(&self.env);
+        self.matches_topic_pattern(&pattern_vec)
+    }
+
+    /// Safely decodes a topic segment at `index` into a typed Rust value if present.
+    pub fn topic_as<T: FromVal<Env, Val>>(&self, index: usize) -> Option<T> {
+        if (index as u32) < self.topics.len() {
+            let val = self.topics.get(index as u32).unwrap();
+            Some(T::from_val(&self.env, &val))
+        } else {
+            None
+        }
+    }
+
+    /// Validates the event topic segment count and applies a schema validator closure to the data payload.
+    pub fn assert_schema<F: FnOnce(&Val) -> bool>(
+        &self,
+        expected_topic_count: usize,
+        data_validator: F,
+    ) -> bool {
+        (self.topics.len() as usize) == expected_topic_count && data_validator(&self.data)
     }
 }
 
@@ -343,6 +462,22 @@ impl EventMatches {
     /// Returns the underlying Soroban `Env`.
     pub fn env(&self) -> &Env {
         &self.env
+    }
+
+    /// Filter matching events by topic pattern supporting wildcards (`*` or `_`).
+    pub fn filter_by_topic_pattern<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> EventMatches {
+        let pattern_vec = pattern.into_val(&self.env);
+        let mut filtered = SorobanVec::new(&self.env);
+        for item in self.items.iter() {
+            let topics = &item.1;
+            if crate::event_topic_match::topics_match(&self.env, &pattern_vec, topics) {
+                filtered.push_back(item);
+            }
+        }
+        EventMatches {
+            env: self.env.clone(),
+            items: filtered,
+        }
     }
 
     /// Returns a reference to the inner SorobanVec.
@@ -469,6 +604,11 @@ impl MockEnv {
     /// Returns the underlying `soroban_sdk::Env`.
     pub fn inner(&self) -> &Env {
         &self.inner
+    }
+
+    /// Returns the current Soroban protocol version configured on the ledger.
+    pub fn protocol_version(&self) -> u32 {
+        self.inner.ledger().get().protocol_version
     }
 
     /// Creates a new `MockEnvBuilder` for fluent environment construction.
@@ -606,6 +746,11 @@ impl MockEnv {
     /// Returns the current ledger timestamp (UNIX seconds).
     pub fn timestamp(&self) -> u64 {
         self.inner.ledger().get().timestamp
+    }
+
+    /// Returns the current ledger sequence number.
+    pub fn ledger_sequence(&self) -> u32 {
+        self.inner.ledger().get().sequence_number
     }
 
     /// Advance the ledger timestamp by a duration.
@@ -1070,7 +1215,120 @@ impl MockEnv {
             tokens: Rc::new(RefCell::new(self.tokens.borrow().clone())),
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
             track_costs: self.track_costs,
+            crypto_registry: Rc::new(RefCell::new(self.crypto_registry.borrow().clone())),
         }
+    }
+
+    // Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
+
+    /// Mock BN254 G1 addition (`bn254_g1_add` host function stand-in).
+    pub fn bn254_g1_add(&self, p: G1, q: G1) -> G1 {
+        let _ = self;
+        zk::g1_add(p, q)
+    }
+
+    /// Mock BN254 G1 scalar multiplication (`bn254_g1_mul` host function stand-in).
+    pub fn bn254_g1_mul(&self, p: G1, scalar: u64) -> G1 {
+        let _ = self;
+        zk::g1_mul(p, scalar)
+    }
+
+    /// Mock BN254 G2 addition (`bn254_g2_add` host function stand-in).
+    pub fn bn254_g2_add(&self, p: G2, q: G2) -> G2 {
+        let _ = self;
+        zk::g2_add(p, q)
+    }
+
+    /// Mock BN254 G2 scalar multiplication (`bn254_g2_mul` host function stand-in).
+    pub fn bn254_g2_mul(&self, p: G2, scalar: u64) -> G2 {
+        let _ = self;
+        zk::g2_mul(p, scalar)
+    }
+
+    /// Mock BN254 multi-pairing check (`bn254_pairing_check` host function stand-in).
+    pub fn bn254_pairing_check(&self, pairs: &[(G1, G2)]) -> bool {
+        let _ = self;
+        zk::pairing_check(pairs)
+    }
+
+    /// Mock BLS12-381 G1 addition (`bls12_381_g1_add` host function stand-in).
+    pub fn bls12_381_g1_add(&self, p: G1, q: G1) -> G1 {
+        let _ = self;
+        zk::g1_add(p, q)
+    }
+
+    /// Mock BLS12-381 G1 scalar multiplication (`bls12_381_g1_mul` host function stand-in).
+    pub fn bls12_381_g1_mul(&self, p: G1, scalar: u64) -> G1 {
+        let _ = self;
+        zk::g1_mul(p, scalar)
+    }
+
+    /// Mock BLS12-381 G2 addition (`bls12_381_g2_add` host function stand-in).
+    pub fn bls12_381_g2_add(&self, p: G2, q: G2) -> G2 {
+        let _ = self;
+        zk::g2_add(p, q)
+    }
+
+    /// Mock BLS12-381 G2 scalar multiplication (`bls12_381_g2_mul` host function stand-in).
+    pub fn bls12_381_g2_mul(&self, p: G2, scalar: u64) -> G2 {
+        let _ = self;
+        zk::g2_mul(p, scalar)
+    }
+
+    /// Mock BLS12-381 multi-pairing check (`bls12_381_pairing_check` host function stand-in).
+    pub fn bls12_381_pairing_check(&self, pairs: &[(G1, G2)]) -> bool {
+        let _ = self;
+        zk::pairing_check(pairs)
+    }
+
+    /// Sample a Groth16 verifying key for `n_public` public inputs on `curve`.
+    pub fn groth16_verifying_key(
+        &self,
+        curve: PairingCurve,
+        n_public: usize,
+    ) -> Groth16VerifyingKey {
+        let _ = self;
+        zk::sample_verifying_key(curve, n_public)
+    }
+
+    /// Generate a valid Groth16 proof for `vk` and `public_inputs`.
+    pub fn generate_groth16_proof(
+        &self,
+        vk: &Groth16VerifyingKey,
+        public_inputs: &[u64],
+    ) -> Groth16Proof {
+        let _ = self;
+        zk::generate_groth16_proof(vk, public_inputs)
+            .expect("public input count must match verifying key IC length")
+    }
+
+    /// Verify a Groth16 proof against `vk` using the mock pairing check.
+    pub fn verify_groth16(
+        &self,
+        vk: &Groth16VerifyingKey,
+        proof: &Groth16Proof,
+        public_inputs: &[u64],
+    ) -> bool {
+        let _ = self;
+        zk::verify_groth16(vk, proof, public_inputs)
+    }
+
+    /// Produce a structurally valid but algebraically invalid Groth16 proof.
+    pub fn tamper_groth16_proof(&self, proof: Groth16Proof) -> Groth16Proof {
+        let _ = self;
+        zk::tamper_groth16_proof(proof)
+    }
+
+    /// Generate a valid Plonk proof for a single public input.
+    pub fn generate_plonk_proof(&self, curve: PairingCurve, public_input: u64) -> PlonkProof {
+        let _ = self;
+        zk::generate_plonk_proof(curve, public_input)
+    }
+
+    /// Verify a Plonk proof using the mock pairing check.
+    pub fn verify_plonk(&self, curve: PairingCurve, proof: &PlonkProof, public_input: u64) -> bool {
+        let _ = self;
+        zk::verify_plonk(curve, proof, public_input)
     }
 
     /// Simulate a contract call that is expected to fail (panic/revert).
@@ -1120,6 +1378,35 @@ impl MockEnv {
                 message: None,
             },
         }
+    }
+
+    /// Returns a mutable reference guard to the mock crypto registry.
+    pub fn crypto_registry(&self) -> std::cell::RefMut<'_, MockCryptoRegistry> {
+        self.crypto_registry.borrow_mut()
+    }
+
+    /// Generates a deterministic mock keypair for the given curve and seed.
+    pub fn generate_keypair(&self, curve: CryptoCurve, seed: u64) -> MockKeyPair {
+        match curve {
+            CryptoCurve::Ed25519 => MockKeyPair::generate_ed25519(seed),
+            CryptoCurve::Secp256k1 => MockKeyPair::generate_secp256k1(seed),
+            CryptoCurve::Secp256r1 => MockKeyPair::generate_secp256r1(seed),
+        }
+    }
+
+    /// Generates a deterministic Ed25519 keypair from a numeric seed.
+    pub fn generate_ed25519_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_ed25519(seed)
+    }
+
+    /// Generates a deterministic Secp256k1 keypair from a numeric seed.
+    pub fn generate_secp256k1_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_secp256k1(seed)
+    }
+
+    /// Generates a deterministic Secp256r1 keypair from a numeric seed.
+    pub fn generate_secp256r1_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_secp256r1(seed)
     }
 }
 
@@ -1181,6 +1468,7 @@ impl Default for MockEnv {
             tokens: Rc::new(RefCell::new(HashMap::new())),
             xlm_token_address: Rc::new(RefCell::new(None)),
             track_costs: false,
+            crypto_registry: Rc::new(RefCell::new(MockCryptoRegistry::new())),
         }
     }
 }
@@ -1353,6 +1641,194 @@ impl MockEnvBuilder {
             self.env.register_token(&symbol, token);
         }
         self.env
+    }
+}
+
+/// Supported cryptographic curves for mock signature generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CryptoCurve {
+    Ed25519,
+    Secp256k1,
+    Secp256r1,
+}
+
+/// A deterministic keypair representation for mock crypto testing.
+#[derive(Debug, Clone)]
+pub struct MockKeyPair {
+    pub curve: CryptoCurve,
+    pub seed: u64,
+    pub public_key_bytes: std::vec::Vec<u8>,
+    pub secret_key_bytes: std::vec::Vec<u8>,
+}
+
+impl MockKeyPair {
+    /// Generates a deterministic Ed25519 keypair from a numeric seed.
+    pub fn generate_ed25519(seed: u64) -> Self {
+        let mut seed_bytes = [0_u8; 32];
+        seed_bytes[..8].copy_from_slice(&seed.to_le_bytes());
+        for i in 8..32 {
+            seed_bytes[i] = seed_bytes[i % 8].wrapping_add(i as u8);
+        }
+        let signing_key = Ed25519SigningKey::from_bytes(&seed_bytes);
+        let verifying_key = signing_key.verifying_key();
+        Self {
+            curve: CryptoCurve::Ed25519,
+            seed,
+            public_key_bytes: verifying_key.to_bytes().to_vec(),
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Generates a deterministic Secp256k1 keypair from a numeric seed.
+    pub fn generate_secp256k1(seed: u64) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let signing_key = K256SigningKey::random(&mut rng);
+        let verifying_key = K256VerifyingKey::from(&signing_key);
+        let uncompressed = verifying_key.to_encoded_point(false);
+        let pub_bytes = uncompressed.as_bytes()[1..].to_vec();
+        Self {
+            curve: CryptoCurve::Secp256k1,
+            seed,
+            public_key_bytes: pub_bytes,
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Generates a deterministic Secp256r1 keypair from a numeric seed.
+    pub fn generate_secp256r1(seed: u64) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let signing_key = P256SigningKey::random(&mut rng);
+        let verifying_key = P256VerifyingKey::from(&signing_key);
+        let uncompressed = verifying_key.to_encoded_point(false);
+        let pub_bytes = uncompressed.as_bytes()[1..].to_vec();
+        Self {
+            curve: CryptoCurve::Secp256r1,
+            seed,
+            public_key_bytes: pub_bytes,
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Returns the public key as a 32-byte Soroban `BytesN<32>` (used for Ed25519).
+    pub fn public_key_bytes32(&self, env: &Env) -> soroban_sdk::BytesN<32> {
+        let array: [u8; 32] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("public key must be 32 bytes");
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Returns the public key as a 64-byte Soroban `BytesN<64>` (used for Secp256k1 / Secp256r1).
+    pub fn public_key_bytes64(&self, env: &Env) -> soroban_sdk::BytesN<64> {
+        let array: [u8; 64] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("public key must be 64 bytes");
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Returns the public key as a Soroban `Bytes`.
+    pub fn public_key_bytes(&self, env: &Env) -> soroban_sdk::Bytes {
+        soroban_sdk::Bytes::from_slice(env, &self.public_key_bytes)
+    }
+
+    /// Signs a message slice and produces a valid 64-byte signature `BytesN<64>`.
+    pub fn sign(&self, env: &Env, message: &[u8]) -> soroban_sdk::BytesN<64> {
+        let sig_bytes = match self.curve {
+            CryptoCurve::Ed25519 => {
+                let sk_array: [u8; 32] = self.secret_key_bytes.as_slice().try_into().unwrap();
+                let signing_key = Ed25519SigningKey::from_bytes(&sk_array);
+                let signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256k1 => {
+                use k256::ecdsa::signature::Signer as _;
+                let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: k256::ecdsa::Signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256r1 => {
+                use p256::ecdsa::signature::Signer as _;
+                let signing_key = P256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: p256::ecdsa::Signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+        };
+        let array: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Signs a Soroban `Bytes` payload and produces a valid 64-byte signature `BytesN<64>`.
+    pub fn sign_bytes(&self, env: &Env, message: &soroban_sdk::Bytes) -> soroban_sdk::BytesN<64> {
+        let mut buf = std::vec::Vec::with_capacity(message.len() as usize);
+        for i in 0..message.len() {
+            buf.push(message.get(i).unwrap());
+        }
+        self.sign(env, &buf)
+    }
+
+    /// Generates a corrupt (invalid) signature for negative path verification testing.
+    pub fn corrupt_signature(&self, env: &Env, message: &[u8]) -> soroban_sdk::BytesN<64> {
+        let mut valid_sig = self.sign(env, message).to_array();
+        valid_sig[63] ^= 0xff;
+        soroban_sdk::BytesN::from_array(env, &valid_sig)
+    }
+
+    /// Generates a corrupt signature from a Soroban `Bytes` payload.
+    pub fn corrupt_signature_bytes(
+        &self,
+        env: &Env,
+        message: &soroban_sdk::Bytes,
+    ) -> soroban_sdk::BytesN<64> {
+        let mut valid_sig = self.sign_bytes(env, message).to_array();
+        valid_sig[63] ^= 0xff;
+        soroban_sdk::BytesN::from_array(env, &valid_sig)
+    }
+}
+
+/// Deterministic mock cryptographic registry managing pre-built keypairs and signature synthesis.
+#[derive(Debug, Clone, Default)]
+pub struct MockCryptoRegistry {
+    keypairs: HashMap<String, MockKeyPair>,
+}
+
+impl MockCryptoRegistry {
+    /// Creates a new empty `MockCryptoRegistry`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a named keypair.
+    pub fn register(&mut self, name: impl Into<String>, keypair: MockKeyPair) {
+        self.keypairs.insert(name.into(), keypair);
+    }
+
+    /// Retrieves a registered keypair by name.
+    pub fn get(&self, name: &str) -> Option<&MockKeyPair> {
+        self.keypairs.get(name)
+    }
+
+    /// Gets or generates an Ed25519 keypair by name.
+    pub fn ed25519_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_ed25519(seed))
+    }
+
+    /// Gets or generates a Secp256k1 keypair by name.
+    pub fn secp256k1_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_secp256k1(seed))
+    }
+
+    /// Gets or generates a Secp256r1 keypair by name.
+    pub fn secp256r1_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_secp256r1(seed))
     }
 }
 
@@ -1576,7 +2052,7 @@ mod extra_tests {
 #[cfg(test)]
 mod time_advance_tests {
     use super::*;
-    use crate::time_helpers::{add_months, datetime_to_unix};
+    use crate::time::{add_months, datetime_to_unix};
 
     const JAN_31_2024: u64 = 1_706_704_245;
     const MAR_15_2024: u64 = 1_710_489_600;
@@ -1813,6 +2289,273 @@ mod missing_lookup_tests {
             .with_token("XLM", 7)
             .build();
         env.token("MISSING");
+    }
+}
+
+#[cfg(test)]
+mod protocol_version_tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_version_getter_returns_default() {
+        let env = MockEnv::default();
+        assert_eq!(env.protocol_version(), 26);
+    }
+
+    #[test]
+    fn test_with_protocol_version_sets_ledger() {
+        let env = MockEnv::builder()
+            .with_protocol_version(26)
+            .build();
+        assert_eq!(env.protocol_version(), 26);
+    }
+
+    #[test]
+    fn test_protocol_version_enum_values() {
+        assert_eq!(ProtocolVersion::V20.value(), 20);
+        assert_eq!(ProtocolVersion::V21.value(), 21);
+        assert_eq!(ProtocolVersion::V22.value(), 22);
+    }
+
+    #[test]
+    fn test_protocol_version_all_versions() {
+        let versions: Vec<u32> = ProtocolVersion::all().map(|v| v.value()).collect();
+        assert_eq!(versions, vec![20, 21, 22]);
+    }
+
+    #[test]
+    fn test_protocol_version_max_supported() {
+        assert_eq!(ProtocolVersion::max_supported(), ProtocolVersion::V22);
+    }
+
+    #[test]
+    fn test_protocol_version_supports_host_function() {
+        let v20 = ProtocolVersion::V20;
+        let v21 = ProtocolVersion::V21;
+        let v22 = ProtocolVersion::V22;
+
+        assert!(v20.supports_host_function("v1_low_level_operations"));
+        assert!(!v20.supports_host_function("v2_low_level_operations"));
+        assert!(!v20.supports_host_function("v3_low_level_operations"));
+
+        assert!(v21.supports_host_function("v1_low_level_operations"));
+        assert!(v21.supports_host_function("v2_low_level_operations"));
+        assert!(!v21.supports_host_function("v3_low_level_operations"));
+
+        assert!(v22.supports_host_function("v1_low_level_operations"));
+        assert!(v22.supports_host_function("v2_low_level_operations"));
+        assert!(v22.supports_host_function("v3_low_level_operations"));
+    }
+
+    #[test]
+    fn test_protocol_version_from_u32() {
+        assert_eq!(ProtocolVersion::from(20), ProtocolVersion::V20);
+        assert_eq!(ProtocolVersion::from(21), ProtocolVersion::V21);
+        assert_eq!(ProtocolVersion::from(22), ProtocolVersion::V22);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unsupported protocol version: 99")]
+    fn test_protocol_version_from_invalid_u32_panics() {
+        let _ = ProtocolVersion::from(99);
+    }
+
+    #[test]
+    fn test_protocol_version_display() {
+        assert_eq!(format!("{}", ProtocolVersion::V20), "Protocol 20");
+        assert_eq!(format!("{}", ProtocolVersion::V21), "Protocol 21");
+        assert_eq!(format!("{}", ProtocolVersion::V22), "Protocol 22");
+    }
+}
+
+// Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
+#[cfg(test)]
+mod zk_pairing_harness_tests {
+    use super::*;
+    use crate::zk::{self, encode_scalar, G1, G2, PairingCurve};
+    use soroban_sdk::{contract, contractimpl, Bytes};
+
+    #[test]
+    fn bn254_host_mocks_add_and_mul() {
+        let env = MockEnv::default();
+        let p = G1::generator();
+        let q = env.bn254_g1_mul(p, 3);
+        let sum = env.bn254_g1_add(p, q);
+        assert_eq!(sum, zk::g1_add(p, q));
+
+        let g2 = G2::generator();
+        let g2s = env.bn254_g2_mul(g2, 5);
+        assert_eq!(env.bn254_g2_add(g2, g2s), zk::g2_add(g2, g2s));
+    }
+
+    #[test]
+    fn bls12_381_host_mocks_pairing_check() {
+        let env = MockEnv::default();
+        let p = env.bls12_381_g1_mul(G1::generator(), 2);
+        let q = env.bls12_381_g2_mul(G2::generator(), 3);
+        // e(2G, 3H) * e(-6G, H) = 1
+        let neg = zk::g1_neg(env.bls12_381_g1_mul(G1::generator(), 6));
+        assert!(env.bls12_381_pairing_check(&[(p, q), (neg, G2::generator())]));
+    }
+
+    #[test]
+    fn generate_and_verify_valid_groth16_on_bn254() {
+        let env = MockEnv::default();
+        let vk = env.groth16_verifying_key(PairingCurve::Bn254, 2);
+        let inputs = [4u64, 9];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+        assert!(env.verify_groth16(&vk, &proof, &inputs));
+    }
+
+    #[test]
+    fn negative_groth16_proof_is_rejected() {
+        let env = MockEnv::default();
+        let vk = env.groth16_verifying_key(PairingCurve::Bls12_381, 1);
+        let inputs = [12u64];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+        let bad = env.tamper_groth16_proof(proof);
+        assert!(!env.verify_groth16(&vk, &bad, &inputs));
+        assert!(!env.verify_groth16(&vk, &proof, &[99]));
+    }
+
+    #[test]
+    fn plonk_valid_and_negative_via_mock_env() {
+        let env = MockEnv::default();
+        let proof = env.generate_plonk_proof(PairingCurve::Bn254, 7);
+        assert!(env.verify_plonk(PairingCurve::Bn254, &proof, 7));
+        assert!(!env.verify_plonk(
+            PairingCurve::Bn254,
+            &zk::tamper_plonk_proof(proof),
+            7
+        ));
+    }
+
+    /// On-chain Groth16 verifier that consumes harness-encoded proof bytes
+    /// for a single public input (IC[0] + pub·IC[1]).
+    #[contract]
+    struct OnChainGroth16Verifier;
+
+    #[contractimpl]
+    impl OnChainGroth16Verifier {
+        pub fn verify_proof(
+            env: soroban_sdk::Env,
+            a: Bytes,
+            b: Bytes,
+            c: Bytes,
+            alpha: Bytes,
+            beta: Bytes,
+            gamma: Bytes,
+            delta: Bytes,
+            ic0: Bytes,
+            ic1: Bytes,
+            public_input: Bytes,
+        ) -> bool {
+            let _ = env;
+            groth16_pairing_equation(
+                &a,
+                &b,
+                &c,
+                &alpha,
+                &beta,
+                &gamma,
+                &delta,
+                &ic0,
+                &ic1,
+                &public_input,
+            )
+        }
+    }
+
+    fn groth16_pairing_equation(
+        a: &Bytes,
+        b: &Bytes,
+        c: &Bytes,
+        alpha: &Bytes,
+        beta: &Bytes,
+        gamma: &Bytes,
+        delta: &Bytes,
+        ic0: &Bytes,
+        ic1: &Bytes,
+        public_input: &Bytes,
+    ) -> bool {
+        let a_x = read_u64(a, 0);
+        let b_x0 = read_u64(b, 0);
+        let c_x = read_u64(c, 0);
+        let alpha_x = read_u64(alpha, 0);
+        let beta_x0 = read_u64(beta, 0);
+        let gamma_x0 = read_u64(gamma, 0);
+        let delta_x0 = read_u64(delta, 0);
+        let input = read_u64(public_input, 0);
+        let l_x = read_u64(ic0, 0).wrapping_add(input.wrapping_mul(read_u64(ic1, 0)));
+
+        let lhs = a_x.wrapping_mul(b_x0);
+        let rhs = alpha_x
+            .wrapping_mul(beta_x0)
+            .wrapping_add(l_x.wrapping_mul(gamma_x0))
+            .wrapping_add(c_x.wrapping_mul(delta_x0));
+        lhs == rhs
+    }
+
+    fn read_u64(bytes: &Bytes, offset: u32) -> u64 {
+        let mut out = [0u8; 8];
+        for i in 0..8u32 {
+            out[i as usize] = bytes.get(offset + i).unwrap_or(0);
+        }
+        u64::from_le_bytes(out)
+    }
+
+    #[test]
+    fn groth16_proof_verifies_on_chain() {
+        let env = MockEnv::default();
+        env.mock_all_auths();
+        let inner = env.inner();
+        let contract_id = inner.register(OnChainGroth16Verifier, ());
+        let client = OnChainGroth16VerifierClient::new(inner, &contract_id);
+
+        let vk = env.groth16_verifying_key(PairingCurve::Bn254, 1);
+        let inputs = [5u64];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+
+        let ok = client.verify_proof(
+            &proof.a.to_bytes(inner, proof.curve),
+            &proof.b.to_bytes(inner, proof.curve),
+            &proof.c.to_bytes(inner, proof.curve),
+            &vk.alpha_g1.to_bytes(inner, vk.curve),
+            &vk.beta_g2.to_bytes(inner, vk.curve),
+            &vk.gamma_g2.to_bytes(inner, vk.curve),
+            &vk.delta_g2.to_bytes(inner, vk.curve),
+            &vk.ic[0].to_bytes(inner, vk.curve),
+            &vk.ic[1].to_bytes(inner, vk.curve),
+            &encode_scalar(inner, inputs[0]),
+        );
+        assert!(ok, "valid Groth16 proof must verify on-chain");
+    }
+
+    #[test]
+    fn groth16_negative_proof_fails_on_chain() {
+        let env = MockEnv::default();
+        env.mock_all_auths();
+        let inner = env.inner();
+        let contract_id = inner.register(OnChainGroth16Verifier, ());
+        let client = OnChainGroth16VerifierClient::new(inner, &contract_id);
+
+        let vk = env.groth16_verifying_key(PairingCurve::Bls12_381, 1);
+        let inputs = [5u64];
+        let proof = env.tamper_groth16_proof(env.generate_groth16_proof(&vk, &inputs));
+
+        let ok = client.verify_proof(
+            &proof.a.to_bytes(inner, proof.curve),
+            &proof.b.to_bytes(inner, proof.curve),
+            &proof.c.to_bytes(inner, proof.curve),
+            &vk.alpha_g1.to_bytes(inner, vk.curve),
+            &vk.beta_g2.to_bytes(inner, vk.curve),
+            &vk.gamma_g2.to_bytes(inner, vk.curve),
+            &vk.delta_g2.to_bytes(inner, vk.curve),
+            &vk.ic[0].to_bytes(inner, vk.curve),
+            &vk.ic[1].to_bytes(inner, vk.curve),
+            &encode_scalar(inner, inputs[0]),
+        );
+        assert!(!ok, "tampered Groth16 proof must fail on-chain");
     }
 }
 

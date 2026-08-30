@@ -12,7 +12,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Ident, Meta, Path, Type};
+use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 
 /// Marks a struct as a reusable test fixture.
 ///
@@ -183,7 +183,6 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = input.ident.clone();
 
-
     let mut has_debug = false;
     for attr in &input.attrs {
         if attr.path().is_ident("derive") {
@@ -229,10 +228,10 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                         );
                         if let Ok(metas) = meta {
                             for m in metas {
-                                if m.path().is_ident("contract") {
-                                    if let syn::Meta::NameValue(mnv) = m {
-                                        if let syn::Expr::Path(expr_path) = mnv.value {
-                                            contract_ty = Some(expr_path.path);
+                                if let Meta::NameValue(nv) = &m {
+                                    if nv.path.is_ident("contract") {
+                                        if let syn::Expr::Path(expr) = &nv.value {
+                                            contract_ty = Some(expr.path.clone());
                                         }
                                     }
                                 }

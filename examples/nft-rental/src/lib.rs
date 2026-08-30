@@ -1,7 +1,7 @@
 // Location: examples/nft-rental/src/lib.rs // Production requirement: Decentralized Peer-to-Peer Rental Protocol with Collateral Escrow
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, Option, String,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env, String,
 };
 
 /// NFT asset record retaining underlying immutable ownership.

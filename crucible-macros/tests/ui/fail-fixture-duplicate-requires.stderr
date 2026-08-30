@@ -1,0 +1,5 @@
+error: duplicate fixture dependency: `TokenFixture` is required more than once
+  --> tests/ui/fail-fixture-duplicate-requires.rs:16:37
+   |
+16 | #[fixture(requires = [TokenFixture, TokenFixture])]
+   |                                     ^^^^^^^^^^^^

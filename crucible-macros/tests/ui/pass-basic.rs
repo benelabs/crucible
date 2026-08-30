@@ -1,5 +1,5 @@
 // Basic fixture with setup() — must compile and the generated reset() must work.
-use crucible_macros::fixture;
+use crucible::prelude::*;
 
 #[fixture]
 pub struct MyFixture {

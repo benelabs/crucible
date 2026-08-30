@@ -16,7 +16,7 @@ use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 
 /// Marks a struct as a reusable test fixture.
 ///
-/// This attribute macro does two things:
+/// This attribute macro does three things:
 ///
 /// 1. **Auto-derives [`Debug`]** — adds `#[derive(Debug)]` to the struct if it is not
 ///    already present, so fixture values can be printed in test failure output.
@@ -24,6 +24,10 @@ use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 /// 2. **Injects `reset(&mut self)`** — generates a method that calls `Self::setup()` and
 ///    assigns the result to `*self`, allowing a fixture to be cheaply reset to its initial
 ///    state at any point inside a test.
+///
+/// 3. **Resolves the dependency graph** — records the fixtures named in
+///    `requires` and generates a `setup_deps()` constructor that builds them,
+///    so a suite composes shared environments instead of duplicating setup.
 ///
 /// # Requirements
 ///
@@ -35,6 +39,37 @@ use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 ///
 /// If `setup()` is absent the code will not compile; the compiler will emit an error
 /// indicating that no associated function `setup` was found on the type.
+///
+/// # Dependency composition
+///
+/// A fixture declares what it builds on with `requires`:
+///
+/// ```rust,ignore
+/// #[fixture(requires = [TokenFixture, OracleFixture])]
+/// pub struct DexFixture {
+///     pub token: TokenFixture,
+///     pub oracle: OracleFixture,
+/// }
+///
+/// impl DexFixture {
+///     pub fn setup() -> Self {
+///         // Builds each dependency, in declaration order.
+///         let (token, oracle) = Self::setup_deps();
+///         Self { token, oracle }
+///     }
+/// }
+/// ```
+///
+/// Alongside `setup_deps()`, the macro generates a `DEPENDENCY_COUNT` constant
+/// and a `FixtureDeps` implementation whose `DEPENDENCY_NAMES` lists the
+/// required fixtures.
+///
+/// ## Cycle detection
+///
+/// A circular dependency is rejected at compile time. A fixture that names
+/// itself produces a diagnostic identifying it directly; a longer cycle is
+/// caught by the generated acyclicity bound, which the compiler reports as an
+/// overflow evaluating `AcyclicFixture` for the fixtures in the loop.
 ///
 /// # Generated code
 ///
@@ -60,13 +95,15 @@ use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 ///     pub fn reset(&mut self) {
 ///         *self = Self::setup();
 ///     }
+///
+///     pub const DEPENDENCY_COUNT: usize = 0;
 /// }
 /// ```
 ///
 /// # Examples
 ///
-/// ```rust
-/// use crucible_macros::fixture;
+/// ```rust,ignore
+/// use crucible::prelude::*;
 ///
 /// #[fixture]
 /// pub struct CounterFixture {
@@ -88,13 +125,11 @@ use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 /// ```
 #[proc_macro_attribute]
 pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
-    // #[fixture] takes no arguments.
     let args2 = proc_macro2::TokenStream::from(args);
-    if !args2.is_empty() {
-        return Error::new_spanned(args2, "#[fixture] does not take arguments")
-            .to_compile_error()
-            .into();
-    }
+    let requires = match parse_fixture_args(args2) {
+        Ok(requires) => requires,
+        Err(err) => return err.to_compile_error().into(),
+    };
 
     let mut ast = parse_macro_input!(input as DeriveInput);
 
@@ -106,6 +141,35 @@ pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     let ident = &ast.ident;
+
+    // A fixture that requires itself is a cycle of length one, which is
+    // detectable from this item alone.
+    for dependency in &requires {
+        if dependency.is_ident(ident) {
+            return Error::new_spanned(
+                dependency,
+                format!(
+                    "circular fixture dependency: `{ident}` requires itself\n\
+                     note: a fixture cannot appear in its own `requires` list"
+                ),
+            )
+            .to_compile_error()
+            .into();
+        }
+    }
+
+    if let Some(duplicate) = first_duplicate(&requires) {
+        return Error::new_spanned(
+            duplicate,
+            format!(
+                "duplicate fixture dependency: `{}` is required more than once",
+                path_name(duplicate)
+            ),
+        )
+        .to_compile_error()
+        .into();
+    }
+
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
     // Add #[derive(Debug)] if the user has not already derived it.
@@ -113,6 +177,8 @@ pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
         let debug_attr: syn::Attribute = syn::parse_quote!(#[derive(Debug)]);
         ast.attrs.push(debug_attr);
     }
+
+    let dependency_graph = dependency_graph_impl(ident, &ast.generics, &requires);
 
     let expanded = quote! {
         #ast
@@ -131,9 +197,159 @@ pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
                 *self = Self::setup();
             }
         }
+
+        #dependency_graph
     };
 
     expanded.into()
+}
+
+/// Parses the `#[fixture]` argument list.
+///
+/// The only supported form is `requires = [Path, ...]`; a bare `#[fixture]`
+/// yields an empty dependency list.
+fn parse_fixture_args(args: proc_macro2::TokenStream) -> Result<Vec<syn::Path>, Error> {
+    if args.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let meta: syn::Meta = syn::parse2(args.clone()).map_err(|_| {
+        Error::new_spanned(
+            &args,
+            "#[fixture] takes no arguments other than `requires = [..]`",
+        )
+    })?;
+
+    let syn::Meta::NameValue(name_value) = meta else {
+        return Err(Error::new_spanned(
+            &args,
+            "#[fixture] takes no arguments other than `requires = [..]`",
+        ));
+    };
+
+    if !name_value.path.is_ident("requires") {
+        return Err(Error::new_spanned(
+            &name_value.path,
+            "#[fixture] takes no arguments other than `requires = [..]`",
+        ));
+    }
+
+    let syn::Expr::Array(array) = &name_value.value else {
+        return Err(Error::new_spanned(
+            &name_value.value,
+            "`requires` expects a list of fixture types, as in `requires = [TokenFixture, OracleFixture]`",
+        ));
+    };
+
+    array
+        .elems
+        .iter()
+        .map(|element| match element {
+            syn::Expr::Path(path) => Ok(path.path.clone()),
+            other => Err(Error::new_spanned(
+                other,
+                "each entry in `requires` must be a fixture type name",
+            )),
+        })
+        .collect()
+}
+
+/// Returns the first path that appears more than once in `paths`.
+fn first_duplicate(paths: &[syn::Path]) -> Option<&syn::Path> {
+    for (index, path) in paths.iter().enumerate() {
+        let name = path_name(path);
+        if paths[..index].iter().any(|prior| path_name(prior) == name) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Renders a path as the `::`-joined source text of its segments.
+fn path_name(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+/// Generates the dependency-graph wiring for a fixture.
+///
+/// Emits three things:
+///
+/// 1. A [`FixtureDeps`] impl naming the fixture's direct dependencies, which is
+///    what makes the graph visible to the compiler.
+/// 2. A `setup_deps()` constructor returning each dependency already set up, so
+///    a `setup()` implementation composes rather than duplicating the wiring.
+/// 3. An acyclicity obligation: the fixture asserts that each dependency's
+///    *own* dependency closure is well-formed. A cycle makes that requirement
+///    refer back to the fixture itself, which the compiler rejects as an
+///    infinitely recursive obligation rather than accepting silently.
+fn dependency_graph_impl(
+    ident: &syn::Ident,
+    generics: &syn::Generics,
+    requires: &[syn::Path],
+) -> proc_macro2::TokenStream {
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
+    let deps_tuple = quote! { (#(#requires,)*) };
+    let deps_setup = quote! { (#(<#requires as crucible_fixture_graph::FixtureDeps>::setup_checked(),)*) };
+    let dep_count = requires.len();
+    let dep_names = requires.iter().map(path_name);
+
+    // Each dependency must itself be acyclic before this fixture can be, so a
+    // cycle becomes an obligation with no base case and the compiler rejects it
+    // rather than accepting a graph that could never be constructed.
+    let acyclic_bounds = requires.iter().map(|dependency| {
+        quote! { #dependency: crucible_fixture_graph::AcyclicFixture }
+    });
+
+    quote! {
+        #[doc(hidden)]
+        #[allow(non_snake_case, unused_imports)]
+        const _: () = {
+            impl #impl_generics crucible_fixture_graph::FixtureDeps for #ident #ty_generics #where_clause {
+                type Deps = #deps_tuple;
+
+                const DEPENDENCY_NAMES: &'static [&'static str] = &[#(#dep_names),*];
+
+                fn setup_checked() -> Self {
+                    Self::setup()
+                }
+            }
+
+            impl #impl_generics crucible_fixture_graph::AcyclicFixture for #ident #ty_generics
+            where
+                #(#acyclic_bounds,)*
+                #where_clause
+            {
+            }
+        };
+
+        impl #impl_generics #ident #ty_generics #where_clause {
+            /// Number of fixtures this one directly requires.
+            pub const DEPENDENCY_COUNT: usize = #dep_count;
+
+            /// Sets up every fixture named in `requires`, in declaration order.
+            ///
+            /// Use this inside `setup()` to compose shared environments instead
+            /// of repeating their wiring:
+            ///
+            /// ```ignore
+            /// pub fn setup() -> Self {
+            ///     let (token, oracle) = Self::setup_deps();
+            ///     Self { token, oracle }
+            /// }
+            /// ```
+            pub fn setup_deps() -> #deps_tuple
+            where
+                Self: crucible_fixture_graph::AcyclicFixture,
+            {
+                #deps_setup
+            }
+        }
+    }
 }
 
 /// Returns `true` if any `#[derive(...)]` attribute in `attrs` lists the given `name`.
@@ -203,6 +419,7 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
     }
 
     let mut contract_types = Vec::new();
+    let mut field_bindings = Vec::new();
     let mut field_inits = Vec::new();
     let mut has_env = false;
 
@@ -253,14 +470,19 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                 if is_contract_client {
                     if let Some(ct) = contract_ty {
                         contract_types.push(ct.clone());
-                        field_inits.push(quote! {
-                            #field_name: <#field_ty>::new(env.inner(), &env.contract_id::<#ct>()),
+                        field_bindings.push(quote! {
+                            let #field_name = <#field_ty>::new(
+                                env.inner(),
+                                &env.contract_id::<#ct>(),
+                            );
                         });
+                        field_inits.push(quote! { #field_name, });
                     }
                 } else {
-                    field_inits.push(quote! {
-                        #field_name: Default::default(),
+                    field_bindings.push(quote! {
+                        let #field_name = Default::default();
                     });
+                    field_inits.push(quote! { #field_name, });
                 }
             }
         }
@@ -275,9 +497,10 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let with_contracts = contract_types.iter().map(|ty| quote! { .with_contract::<#ty>() });
     let env_init = quote! { MockEnv::builder() #(#with_contracts)* .build() };
 
+    // A derive macro only *adds* items; re-emitting the struct would define it
+    // twice. `Debug` likewise cannot be injected from a derive, so the field
+    // walk below reads the original input rather than a rewritten copy.
     let expanded = quote! {
-        #ast
-
         impl #name {
             /// Creates a new instance with all fields initialized.
             ///
@@ -286,6 +509,9 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
             /// fields (besides `env`) are set to their `Default` value.
             pub fn setup() -> Self {
                 let env = #env_init;
+                // Fields are bound before the struct literal so `env` is still
+                // borrowable while the contract clients are built.
+                #(#field_bindings)*
                 Self {
                     env,
                     #(#field_inits)*

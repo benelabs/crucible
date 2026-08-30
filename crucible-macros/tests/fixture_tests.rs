@@ -18,6 +18,7 @@ fn fixture_ui_tests() {
     t.pass("tests/ui/pass-debug-already-derived.rs");
     t.pass("tests/ui/pass-generic.rs");
     t.pass("tests/ui/pass-private-setup.rs");
+    t.pass("tests/ui/pass-fixture-requires.rs");
 
     // --- fail cases ---
     t.compile_fail("tests/ui/fail-on-enum.rs");
@@ -27,6 +28,12 @@ fn fixture_ui_tests() {
     t.compile_fail("tests/ui/fail-fixture-args-multiple.rs");
     t.compile_fail("tests/ui/fail-missing-setup.rs");
     t.compile_fail("tests/ui/fail-invalid-generics.rs");
+
+    // --- fixture dependency graph fail cases ---
+    t.compile_fail("tests/ui/fail-fixture-self-cycle.rs");
+    t.compile_fail("tests/ui/fail-fixture-cycle.rs");
+    t.compile_fail("tests/ui/fail-fixture-duplicate-requires.rs");
+    t.compile_fail("tests/ui/fail-fixture-requires-not-a-list.rs");
 
     // --- derive Fixture pass cases ---
     t.pass("tests/ui/pass-derive-fixture-basic.rs");

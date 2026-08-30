@@ -45,5 +45,11 @@ pub use crate::quickcheck::{
     SorobanU32,
 };
 
+pub use crate::fixture_graph::{AcyclicFixture, FixtureDeps};
+
+/// Re-exported so `#[fixture(requires = [..])]` expansions resolve their
+/// generated trait paths wherever the prelude is imported.
+pub use crate::fixture_graph as crucible_fixture_graph;
+
 #[cfg(feature = "derive")]
 pub use crucible_macros::fixture;

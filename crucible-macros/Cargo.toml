@@ -20,4 +20,8 @@ quote = "1"
 syn = { version = "2", features = ["full"] }
 
 [dev-dependencies]
+# The UI tests compile fixtures that use the runtime side of the framework:
+# `MockEnv` and the fixture dependency-graph traits.
+crucible = { path = "../contracts/crucible" }
+soroban-sdk = { workspace = true, features = ["testutils"] }
 trybuild = { version = "1", features = ["diff"] }

@@ -1,0 +1,241 @@
+.cfv-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.cfv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cfv-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #a78bfa;
+}
+
+.cfv-title h2 {
+  margin: 0 0 4px 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.cfv-title p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #94a3b8;
+}
+
+.cfv-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cfv-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast, 150ms) var(--motion-ease-standard, ease);
+}
+
+.cfv-ghost-btn:hover {
+  border-color: #a78bfa;
+  color: #f8fafc;
+}
+
+.cfv-diagram-wrap {
+  padding: 12px;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  background: #0f172a;
+  /* Wide state machines scroll inside the panel rather than the page. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cfv-diagram {
+  min-width: 480px;
+}
+
+.cfv-diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.cfv-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.cfv-panel {
+  padding: 16px;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  background: #0f172a;
+  min-width: 0;
+}
+
+.cfv-panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.cfv-panel h3 code {
+  font-size: 0.8125rem;
+  color: #38bdf8;
+  text-transform: none;
+}
+
+.cfv-state-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cfv-state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.cfv-state-chip:hover {
+  border-color: #a78bfa;
+}
+
+.cfv-state-chip.active {
+  background: #0ea5e9;
+  border-color: #7dd3fc;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.cfv-terminal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f472b6;
+}
+
+.cfv-transition-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cfv-transition-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+
+.cfv-transition-btn:hover {
+  border-color: #38bdf8;
+}
+
+.cfv-transition-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #7dd3fc;
+}
+
+.cfv-transition-target {
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
+.cfv-transition-role {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(167, 139, 250, 0.15);
+  color: #c4b5fd;
+  font-size: 0.6875rem;
+}
+
+.cfv-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.cfv-mermaid {
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  background: #020617;
+  overflow: hidden;
+}
+
+.cfv-mermaid-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #1e293b;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.cfv-mermaid pre {
+  margin: 0;
+  padding: 14px;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: #a5f3fc;
+  overflow-x: auto;
+}
+
+@media (max-width: 768px) {
+  .cfv-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .cfv-transition-role {
+    margin-left: 0;
+  }
+}

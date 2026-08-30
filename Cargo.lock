@@ -1138,8 +1138,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crucible-example-bounty-escrow"
-version = "1.5.0"
 name = "crucible-example-amm-pool"
 version = "1.6.0"
 version = "1.7.0"
@@ -1873,6 +1871,14 @@ checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
 dependencies = [
  "parking",
  "pin-project-lite",
+]
+
+[[package]]
+name = "example-yield-vault"
+version = "1.9.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
 ]
 
 [[package]]

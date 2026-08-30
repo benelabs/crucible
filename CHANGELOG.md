@@ -1,3 +1,9 @@
+## [1.14.0](https://github.com/benelabs/crucible/compare/v1.13.0...v1.14.0) (2026-08-30)
+
+### Features
+
+* **core:** implement LSD protocol, Redlock manager, ingestion pipeline & memory tester ([687d809](https://github.com/benelabs/crucible/commit/687d809425d77f6b64f0adcfa2d56ceff11049c3)), closes [#873](https://github.com/benelabs/crucible/issues/873) [#832](https://github.com/benelabs/crucible/issues/832) [#835](https://github.com/benelabs/crucible/issues/835) [#833](https://github.com/benelabs/crucible/issues/833)
+
 ## [1.13.0](https://github.com/benelabs/crucible/compare/v1.12.0...v1.13.0) (2026-08-30)
 
 ### Features

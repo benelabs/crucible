@@ -108,6 +108,12 @@ impl TracingConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OtlpProtocol {
+    Grpc,
+    HttpBinary,
+}
+
 impl TracingService {
     /// Initialize the global tracer provider with OTLP exporter
     pub fn init(config: TracingConfig) -> anyhow::Result<TracingGuard> {
@@ -299,6 +305,22 @@ impl TracingService {
         let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
         propagator.extract(carrier)
     }
+
+    /// Extract W3C Trace Context headers from HTTP request headers and attach to span
+    pub fn extract_and_attach_trace_context(headers: &axum::http::HeaderMap, span: &tracing::Span) {
+        use opentelemetry::propagation::TextMapPropagator;
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+        let mut carrier = std::collections::HashMap::new();
+        for (name, val) in headers.iter() {
+            if let Ok(v) = val.to_str() {
+                carrier.insert(name.as_str().to_string(), v.to_string());
+            }
+        }
+        let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+        let parent_cx = propagator.extract(&carrier);
+        span.set_parent(parent_cx);
+    }
 }
 
 #[cfg(test)]
@@ -306,7 +328,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tracing_config_default() {
+    fn test_trace_context_extraction_and_injection() {
+        let mut carrier = std::collections::HashMap::new();
+        carrier.insert(
+            "traceparent".to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        );
+        let cx = TracingService::extract_trace_context(&carrier);
+        let injected = TracingService::inject_trace_context(&cx);
+        assert!(injected.contains_key("traceparent"));
+    }
         let config = TracingConfig::default();
         assert_eq!(config.service_name, "crucible-backend");
         assert_eq!(config.sampling_ratio, 1.0);

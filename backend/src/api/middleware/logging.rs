@@ -98,6 +98,7 @@ pub async fn logging_middleware(
 
     let path = sanitize_for_log(uri.path());
     let span = TracingService::http_request_span(method.as_str(), &path, None);
+    TracingService::extract_and_attach_trace_context(request.headers(), &span);
 
     let value = span.clone();
     async move {
@@ -112,6 +113,7 @@ pub async fn logging_middleware(
         value.record("http.status_code", status.as_u16());
         if status.is_server_error() {
             TracingService::record_error(&value, status.as_str(), "http_server_error");
+            crate::services::sys_metrics::record_error_rate("http_gateway", status.as_str());
         }
 
         // Log the response

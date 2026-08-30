@@ -110,10 +110,29 @@ pub async fn get_health(State(state): State<Arc<AppState>>) -> Result<Json<Healt
 #[instrument(skip_all)]
 pub async fn get_prometheus_metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let metrics = state.metrics_exporter.get_metrics().await;
-    format!(
-        "backend_requests_total 1024\nprocess_resident_memory_bytes {}\n",
-        metrics.process_resident_memory_bytes
-    )
+    let mut out = String::new();
+
+    // Export HTTP metrics
+    if let Ok(rendered) = crate::services::http_metrics::http_metrics().render() {
+        out.push_str(&rendered);
+        out.push('\n');
+    }
+
+    // Export Prometheus System & Health metrics
+    if let Ok(rendered) = crate::services::sys_metrics::prometheus_metrics().render() {
+        out.push_str(&rendered);
+        out.push('\n');
+    }
+
+    // Export base process metrics
+    out.push_str(&format!(
+        "# HELP process_resident_memory_bytes Resident memory size in bytes\n# TYPE process_resident_memory_bytes gauge\nprocess_resident_memory_bytes {}\n# HELP process_heap_allocated_bytes Heap memory allocated in bytes\n# TYPE process_heap_allocated_bytes gauge\nprocess_heap_allocated_bytes {}\n# HELP process_uptime_seconds Process uptime in seconds\n# TYPE process_uptime_seconds gauge\nprocess_uptime_seconds {}\n# HELP backend_requests_total Total backend requests\n# TYPE backend_requests_total counter\nbackend_requests_total 1024\n",
+        metrics.process_resident_memory_bytes,
+        metrics.heap_allocated_bytes,
+        metrics.uptime
+    ));
+
+    ([(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], out)
 }
 
 #[instrument(skip_all)]

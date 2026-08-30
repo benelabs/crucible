@@ -12,12 +12,154 @@ use redis::{AsyncCommands, Client as RedisClient};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
 use uuid::Uuid;
+use prometheus::{
+    Encoder, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Opts, Registry, TextEncoder,
+};
 use crate::services::tracing::TracingService;
+
+// ---------------------------------------------------------------------------
+// Prometheus System & Health Metrics Registry
+// ---------------------------------------------------------------------------
+
+pub struct PrometheusMetrics {
+    pub registry: Registry,
+    pub compilation_duration_seconds: HistogramVec,
+    pub gas_usage_total: IntCounterVec,
+    pub gas_usage_average: IntGaugeVec,
+    pub active_websockets: IntGauge,
+    pub error_rates_total: IntCounterVec,
+    pub rpc_latency_seconds: HistogramVec,
+}
+
+static PROMETHEUS_METRICS: OnceLock<PrometheusMetrics> = OnceLock::new();
+
+impl PrometheusMetrics {
+    pub fn new() -> Self {
+        let registry = Registry::new();
+
+        let compilation_duration_seconds = HistogramVec::new(
+            HistogramOpts::new(
+                "compilation_duration_seconds",
+                "Duration of smart contract compilations in seconds",
+            )
+            .buckets(vec![0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0]),
+            &["project", "status"],
+        )
+        .expect("compilation_duration_seconds histogram must be valid");
+
+        let gas_usage_total = IntCounterVec::new(
+            Opts::new("contract_gas_usage_total", "Total contract execution gas consumed"),
+            &["contract_id", "function"],
+        )
+        .expect("contract_gas_usage_total counter must be valid");
+
+        let gas_usage_average = IntGaugeVec::new(
+            Opts::new("contract_gas_usage_average", "Average gas used per invocation"),
+            &["contract_id"],
+        )
+        .expect("contract_gas_usage_average gauge must be valid");
+
+        let active_websockets = IntGauge::new(
+            "active_websocket_connections",
+            "Number of active WebSocket clients",
+        )
+        .expect("active_websocket_connections gauge must be valid");
+
+        let error_rates_total = IntCounterVec::new(
+            Opts::new("application_errors_total", "Total error count by component and error code"),
+            &["component", "error_type"],
+        )
+        .expect("application_errors_total counter must be valid");
+
+        let rpc_latency_seconds = HistogramVec::new(
+            HistogramOpts::new(
+                "rpc_request_latency_seconds",
+                "Stellar/Soroban RPC call latency in seconds",
+            )
+            .buckets(vec![0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]),
+            &["method", "endpoint"],
+        )
+        .expect("rpc_request_latency_seconds histogram must be valid");
+
+        registry.register(Box::new(compilation_duration_seconds.clone())).unwrap();
+        registry.register(Box::new(gas_usage_total.clone())).unwrap();
+        registry.register(Box::new(gas_usage_average.clone())).unwrap();
+        registry.register(Box::new(active_websockets.clone())).unwrap();
+        registry.register(Box::new(error_rates_total.clone())).unwrap();
+        registry.register(Box::new(rpc_latency_seconds.clone())).unwrap();
+
+        Self {
+            registry,
+            compilation_duration_seconds,
+            gas_usage_total,
+            gas_usage_average,
+            active_websockets,
+            error_rates_total,
+            rpc_latency_seconds,
+        }
+    }
+
+    pub fn render(&self) -> Result<String, MetricsError> {
+        let encoder = TextEncoder::new();
+        let mut buffer = Vec::new();
+        encoder
+            .encode(&self.registry.gather(), &mut buffer)
+            .map_err(|e| MetricsError::Internal(e.to_string()))?;
+        String::from_utf8(buffer).map_err(|e| MetricsError::Internal(e.to_string()))
+    }
+}
+
+pub fn prometheus_metrics() -> &'static PrometheusMetrics {
+    PROMETHEUS_METRICS.get_or_init(PrometheusMetrics::new)
+}
+
+pub fn record_compilation_time(project: &str, status: &str, duration_secs: f64) {
+    prometheus_metrics()
+        .compilation_duration_seconds
+        .with_label_values(&[project, status])
+        .observe(duration_secs);
+}
+
+pub fn record_gas_usage(contract_id: &str, function: &str, gas: u64, avg_gas: u64) {
+    prometheus_metrics()
+        .gas_usage_total
+        .with_label_values(&[contract_id, function])
+        .inc_by(gas);
+    if avg_gas > 0 {
+        prometheus_metrics()
+            .gas_usage_average
+            .with_label_values(&[contract_id])
+            .set(avg_gas as i64);
+    }
+}
+
+pub fn record_websocket_conn_change(delta: i64) {
+    if delta > 0 {
+        prometheus_metrics().active_websockets.add(delta);
+    } else {
+        prometheus_metrics().active_websockets.sub(-delta);
+    }
+}
+
+pub fn record_error_rate(component: &str, error_type: &str) {
+    prometheus_metrics()
+        .error_rates_total
+        .with_label_values(&[component, error_type])
+        .inc();
+}
+
+pub fn record_rpc_latency(method: &str, endpoint: &str, duration_secs: f64) {
+    prometheus_metrics()
+        .rpc_latency_seconds
+        .with_label_values(&[method, endpoint])
+        .observe(duration_secs);
+}
 
 // ---------------------------------------------------------------------------
 // MetricsError
@@ -132,6 +274,13 @@ impl BuildMetricsService {
 
     /// Record a build metric.
     pub async fn record_build(&self, metric: BuildMetric) -> Result<Uuid, MetricsError> {
+        let db_span = TracingService::db_query_span(
+            "INSERT INTO build_metrics",
+            "postgres",
+            "INSERT",
+        );
+        let _db_enter = db_span.enter();
+
         let id = Uuid::new_v4();
         let status_str = metric.build_status.as_str();
 
@@ -560,7 +709,39 @@ mod tests {
     }
 
     #[test]
-    fn test_metrics_error_display() {
+    fn test_prometheus_metrics_exposition_format() {
+        let metrics = PrometheusMetrics::new();
+        metrics
+            .compilation_duration_seconds
+            .with_label_values(&["test_contract", "success"])
+            .observe(1.25);
+        metrics
+            .gas_usage_total
+            .with_label_values(&["contract_123", "execute"])
+            .inc_by(5000);
+        metrics
+            .gas_usage_average
+            .with_label_values(&["contract_123"])
+            .set(4500);
+        metrics.active_websockets.set(42);
+        metrics
+            .error_rates_total
+            .with_label_values(&["api_gateway", "http_500"])
+            .inc();
+        metrics
+            .rpc_latency_seconds
+            .with_label_values(&["sendTransaction", "mainnet"])
+            .observe(0.35);
+
+        let rendered = metrics.render().unwrap();
+        assert!(rendered.contains("compilation_duration_seconds_bucket"));
+        assert!(rendered.contains("compilation_duration_seconds_count"));
+        assert!(rendered.contains("contract_gas_usage_total"));
+        assert!(rendered.contains("contract_gas_usage_average"));
+        assert!(rendered.contains("active_websocket_connections 42"));
+        assert!(rendered.contains("application_errors_total"));
+        assert!(rendered.contains("rpc_request_latency_seconds_bucket"));
+    }
         let err = MetricsError::ProjectNotFound("test-project".to_string());
         assert!(err.to_string().contains("test-project"));
 

@@ -6,6 +6,7 @@
 pub use crate::account::AccountBuilder;
 pub use crate::account::AccountHandle;
 pub use crate::assertions::RevertAssertion;
+pub use crate::call_graph::{CallFrame, CallTrace};
 pub use crate::checkpoint::{CheckpointId, CheckpointStats};
 pub use crate::cost::CostReport;
 pub use crate::env::CapturedEvent;

@@ -1360,6 +1360,122 @@ impl MockEnv {
         SimulatedTx::new(fee, instructions, auths, true, Some(result))
     }
 
+    /// Records the cross-contract invocation tree produced by `f`.
+    ///
+    /// The returned [`CallTrace`] mirrors the frames the host actually
+    /// executed: callee address, function symbol, arguments, return value, and
+    /// the gas apportioned to each nested frame. Use it to understand — or to
+    /// assert on — the shape of a multi-contract invocation, and
+    /// [`CallTrace::to_json_pretty`] to export the tree.
+    ///
+    /// State changes made by `f` are **kept**. Unlike
+    /// [`simulate`](Self::simulate), this is an observation of a real call, not
+    /// a dry run, so auth is left exactly as the caller configured it.
+    ///
+    /// A panic inside `f` propagates to the caller. To inspect the tree of a
+    /// call that fails, use [`try_trace`](Self::try_trace), which captures the
+    /// panic and still returns the frames recorded up to the failure.
+    ///
+    /// ```ignore
+    /// let trace = env.trace(|| router.swap(&alice, &100));
+    /// trace.assert_called("transfer");
+    /// assert_eq!(trace.max_depth(), 2);
+    /// ```
+    pub fn trace<F, T>(&self, f: F) -> (T, crate::call_graph::CallTrace)
+    where
+        F: FnOnce() -> T,
+    {
+        let before = self.begin_trace();
+        let result = f();
+        let trace = self.end_trace(before);
+        (result, trace)
+    }
+
+    /// Records the invocation tree of a call that may panic.
+    ///
+    /// Behaves like [`trace`](Self::trace) but captures a panic raised by `f`,
+    /// returning `Err` with the frames recorded up to the failure. The frame
+    /// that panicked has no return value, so
+    /// [`CallTrace::panicked_frames`] identifies exactly where the invocation
+    /// tree broke — which is the case an opaque host panic code leaves
+    /// undiagnosable.
+    ///
+    /// ```ignore
+    /// let (result, trace) = env.try_trace(|| router.swap(&alice, &too_much));
+    /// assert!(result.is_err());
+    /// let failed = trace.panicked_frames();
+    /// assert_eq!(failed[0].function, "transfer");
+    /// ```
+    pub fn try_trace<F, T>(
+        &self,
+        f: F,
+    ) -> (
+        Result<T, Box<dyn std::any::Any + Send>>,
+        crate::call_graph::CallTrace,
+    )
+    where
+        F: FnOnce() -> T,
+    {
+        let before = self.begin_trace();
+        // `MockEnv` holds `Rc<RefCell<..>>` and so is not `RefUnwindSafe`; the
+        // environment is only read after the unwind, never left half-updated by
+        // it, so the assertion is sound here.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        let trace = self.end_trace(before);
+        (result, trace)
+    }
+
+    /// Enables host diagnostics, resets the budget, and snapshots the buffer.
+    ///
+    /// The host clears its diagnostic event buffer at the start of every
+    /// top-level invocation, so after a call the buffer holds exactly that
+    /// call's frames. A closure that invokes no contract leaves the previous
+    /// call's buffer in place, so the snapshot taken here lets `end_trace`
+    /// recognise that nothing new ran and report an empty trace.
+    ///
+    /// The budget is reset so the instruction and fee figures attributed to the
+    /// tree describe this call rather than everything the test has run so far.
+    fn begin_trace(&self) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+        self.inner
+            .host()
+            .enable_debug()
+            .expect("enabling host diagnostics must succeed");
+        self.inner.cost_estimate().budget().reset_default();
+        self.diagnostic_events()
+    }
+
+    /// Builds the call tree from the diagnostic events of the traced call.
+    fn end_trace(
+        &self,
+        before: std::vec::Vec<soroban_sdk::xdr::ContractEvent>,
+    ) -> crate::call_graph::CallTrace {
+        let after = self.diagnostic_events();
+
+        // An unchanged buffer means the closure invoked no contract, so the
+        // events still present belong to an earlier call and are not this
+        // trace's to report. The fee estimate is a running total the budget
+        // reset does not clear, so it is likewise not attributable here.
+        if after == before {
+            return crate::call_graph::build_trace(&self.inner, &[], 0, 0);
+        }
+
+        let instructions = self.inner.cost_estimate().budget().cpu_instruction_cost();
+        let fee = self.inner.cost_estimate().fee().total;
+        crate::call_graph::build_trace(&self.inner, &after, instructions, fee)
+    }
+
+    /// Reads the host's current diagnostic event buffer.
+    fn diagnostic_events(&self) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+        self.inner
+            .host()
+            .get_diagnostic_events()
+            .map(|events| events.0)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|host_event| host_event.event)
+            .collect()
+    }
+
     /// Inspect a contract call without the ability to commit.
     ///
     /// Unlike `simulate`, this method does not require the closure to be `'static`,

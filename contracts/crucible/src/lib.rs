@@ -1,6 +1,7 @@
 pub use soroban_sdk;
 pub mod account;
 pub mod assertions;
+pub mod call_graph;
 pub mod checkpoint;
 pub mod cost;
 pub mod env;

@@ -1,9 +1,9 @@
 use axum::{
-    http::{Request, StatusCode},
+    extract::Request,
+    http::{header, Method},
     middleware::Next,
     response::Response,
 };
-use axum::http::header;
 
 use crate::error::AppError;
 
@@ -15,8 +15,8 @@ use crate::error::AppError;
 ///
 /// Returns `415 Unsupported Media Type` if the Content-Type is missing or
 /// does not start with `application/json`.
-pub async fn require_json_content_type<B>(req: Request<B>, next: Next) -> Result<Response, AppError> {
-    if req.method().is_safe() || req.method() == axum::http::Method::OPTIONS {
+pub async fn require_json_content_type(req: Request, next: Next) -> Result<Response, AppError> {
+    if req.method() == Method::GET || req.method() == Method::HEAD || req.method() == Method::OPTIONS {
         return Ok(next.run(req).await);
     }
 

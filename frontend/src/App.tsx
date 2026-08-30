@@ -1,17 +1,36 @@
 import { useState, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
-import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet, Activity, Layers } from 'lucide-react';
+import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet, Activity, Layers, Puzzle } from 'lucide-react';
+import { COUNTER_CHALLENGE } from './data/challenges';
 import './App.css';
 
-// Lazy-loaded components for better bundle splitting
-const EventListenerDashboard = lazy(() => import('./components/EventListenerDashboard'));
-const TransactionSimulator = lazy(() => import('./components/TransactionSimulator'));
-const GasCostEstimator = lazy(() => import('./components/GasCostEstimator'));
-const MultiChainDashboard = lazy(() => import('./components/MultiChainDashboard'));
-const ContractAbiExplorer = lazy(() => import('./components/ContractAbiExplorer'));
-const DeveloperOnboardingTutorial = lazy(() => import('./components/DeveloperOnboardingTutorial'));
-const WalletConnector = lazy(() => import('./components/WalletConnector'));
+// Lazy-loaded components for better bundle splitting.
+// These modules only have named exports, so each is adapted to the { default } shape lazy() requires.
+const EventListenerDashboard = lazy(() =>
+  import('./components/EventListenerDashboard').then(m => ({ default: m.EventListenerDashboard }))
+);
+const TransactionSimulator = lazy(() =>
+  import('./components/TransactionSimulator').then(m => ({ default: m.TransactionSimulator }))
+);
+const GasCostEstimator = lazy(() =>
+  import('./components/GasCostEstimator').then(m => ({ default: m.GasCostEstimator }))
+);
+const MultiChainDashboard = lazy(() =>
+  import('./components/MultiChainDashboard').then(m => ({ default: m.MultiChainDashboard }))
+);
+const ContractAbiExplorer = lazy(() =>
+  import('./components/ContractAbiExplorer').then(m => ({ default: m.ContractAbiExplorer }))
+);
+const DeveloperOnboardingTutorial = lazy(() =>
+  import('./components/DeveloperOnboardingTutorial').then(m => ({ default: m.DeveloperOnboardingTutorial }))
+);
+const WalletConnector = lazy(() =>
+  import('./components/WalletConnector').then(m => ({ default: m.WalletConnector }))
+);
+const InteractiveChallengeEngine = lazy(() =>
+  import('./components/InteractiveChallengeEngine').then(m => ({ default: m.InteractiveChallengeEngine }))
+);
 
 // Loading fallback component
 function LoadingFallback() {
@@ -23,7 +42,7 @@ function LoadingFallback() {
   );
 }
 
-type Tab = 'tutorial' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'wallet';
+type Tab = 'tutorial' | 'challenges' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'wallet';
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('tutorial');
@@ -105,6 +124,15 @@ function App() {
           </button>
           <button
             type="button"
+            className={`tab-btn ${activeTab === 'challenges' ? 'active' : ''}`}
+            onClick={() => setActiveTab('challenges')}
+            data-testid="tab-challenges"
+          >
+            <Puzzle size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Challenges
+          </button>
+          <button
+            type="button"
             className={`tab-btn ${activeTab === 'events' ? 'active' : ''}`}
             onClick={() => setActiveTab('events')}
             data-testid="tab-events"
@@ -182,6 +210,7 @@ function App() {
         <Suspense fallback={<LoadingFallback />}>
           {activeTab === 'events' && <EventListenerDashboard />}
           {activeTab === 'tutorial' && <DeveloperOnboardingTutorial />}
+          {activeTab === 'challenges' && <InteractiveChallengeEngine challenge={COUNTER_CHALLENGE} />}
           {activeTab === 'simulator' && <TransactionSimulator />}
           {activeTab === 'metrics' && <GasCostEstimator />}
           {activeTab === 'multichain' && <MultiChainDashboard />}

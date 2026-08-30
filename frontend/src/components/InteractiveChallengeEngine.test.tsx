@@ -491,3 +491,4 @@ describe('InteractiveChallengeEngine', () => {
     fireEvent.click(nextBtn);
     expect(screen.getByText(/Step 2 of 2/)).toBeInTheDocument();
   });
+});

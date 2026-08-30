@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { ChevronDown, Check, X, Lightbulb, Play, SkipForward } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { ChevronDown, Check, X, Lightbulb, Play, SkipForward, AlertCircle } from 'lucide-react';
 import './InteractiveChallengeEngine.css';
 
 export interface TestCase {
@@ -51,23 +51,16 @@ export function InteractiveChallengeEngine({ challenge, onComplete, onStepComple
   const [expandedHints, setExpandedHints] = useState<Set<number>>(new Set());
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [revealedHints, setRevealedHints] = useState<Set<number>>(new Set());
-  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [executionError, setExecutionError] = useState<string | null>(null);
 
   const steps = challenge.steps || [];
   const allTestsPassed = results.length > 0 && results.every(r => r.passed);
   const currentStep = steps[currentStepIndex];
   const stepProgress = (completedSteps.size / Math.max(steps.length, 1)) * 100;
 
+  // Only one hint's text is expanded at a time (accordion-style); "revealed" hints stay unlocked.
   const toggleHint = useCallback((hintIndex: number) => {
-    setExpandedHints(prev => {
-      const next = new Set(prev);
-      if (next.has(hintIndex)) {
-        next.delete(hintIndex);
-      } else {
-        next.add(hintIndex);
-      }
-      return next;
-    });
+    setExpandedHints(prev => (prev.has(hintIndex) ? new Set() : new Set([hintIndex])));
   }, []);
 
   const revealHint = useCallback((hintIndex: number) => {
@@ -77,14 +70,16 @@ export function InteractiveChallengeEngine({ challenge, onComplete, onStepComple
 
   const runTests = async () => {
     setRunning(true);
+    setExecutionError(null);
     try {
       const testResults: ChallengeResult[] = await executeTests(code, challenge.testCases);
+
       setResults(testResults);
 
       // Track completed steps based on test results
       if (steps.length > 0) {
         const newCompleted = new Set(completedSteps);
-        steps.forEach((step, idx) => {
+        steps.forEach((step) => {
           if (step.testCaseIndex < testResults.length && testResults[step.testCaseIndex].passed) {
             newCompleted.add(step.id);
             if (!completedSteps.has(step.id) && onStepComplete) {
@@ -95,16 +90,18 @@ export function InteractiveChallengeEngine({ challenge, onComplete, onStepComple
         setCompletedSteps(newCompleted);
       }
 
-      if (allTestsPassed && onComplete) {
+      if (onComplete) {
         onComplete(testResults);
       }
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      setExecutionError(errorMsg);
       const errorResult: ChallengeResult = {
         testName: 'Execution Error',
         passed: false,
         expected: 'Code execution',
         actual: 'Error',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: errorMsg
       };
       setResults([errorResult]);
     } finally {
@@ -116,6 +113,7 @@ export function InteractiveChallengeEngine({ challenge, onComplete, onStepComple
     setCode(challenge.initialCode);
     setResults([]);
     setExpandedHints(new Set());
+    setExecutionError(null);
   };
 
   const skipToNextStep = () => {
@@ -148,7 +146,7 @@ export function InteractiveChallengeEngine({ challenge, onComplete, onStepComple
               data-testid="progress-fill"
             />
           </div>
-          <p>{completedSteps.size > 0 ? `✓ ${completedSteps.size}/${Math.max(steps.length, 1)} Steps Complete` : 'Get Started'}</p>
+          <p>{completedSteps.size > 0 ? '✓ ' : ''}{completedSteps.size}/{Math.max(steps.length, 1)} Steps Complete</p>
           {allTestsPassed && <p className="completion-badge">🎉 Challenge Complete!</p>}
         </div>
       </div>
@@ -259,6 +257,13 @@ export function InteractiveChallengeEngine({ challenge, onComplete, onStepComple
           </div>
         </div>
       </div>
+
+      {executionError && (
+        <div className="error-banner" data-testid="execution-error" role="alert">
+          <AlertCircle size={20} />
+          <span>{executionError}</span>
+        </div>
+      )}
 
       {results.length > 0 && (
         <div className="test-results" data-testid="test-results">

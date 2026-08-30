@@ -24,7 +24,7 @@ export default defineConfig({
         drop_debugger: true,
         pure_funcs: ['console.log', 'console.info'],
       },
-      output: {
+      format: {
         comments: false,
       }
     },
@@ -38,6 +38,8 @@ export default defineConfig({
               return 'vendor-react'
             } else if (id.includes('recharts')) {
               return 'vendor-charts'
+            } else if (id.includes('monaco-editor')) {
+              return 'vendor-editor'
             } else if (id.includes('lucide-react')) {
               return 'vendor-icons'
             } else if (id.includes('i18next')) {
@@ -51,28 +53,17 @@ export default defineConfig({
         entryFileNames: 'js/[name]-[hash].js',
         chunkFileNames: 'js/[name]-[hash].js',
         assetFileNames: ({ name }) => {
-          if (name.endsWith('.css')) return 'css/[name]-[hash][extname]'
-          if (name.match(/\.(png|jpg|jpeg|gif|svg)$/)) return 'images/[name]-[hash][extname]'
+          if (name?.endsWith('.css')) return 'css/[name]-[hash][extname]'
+          if (name?.match(/\.(png|jpg|jpeg|gif|svg)$/)) return 'images/[name]-[hash][extname]'
           return 'assets/[name]-[hash][extname]'
         }
       }
     },
     // Chunk size warnings - enforced max 150KB initial, 300KB total
-    chunkSizeWarningLimit: 300,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          // Split vendor libraries into separate chunks
-          'vendor-react': ['react', 'react-dom', 'react-i18next'],
-          'vendor-charts': ['recharts'],
-          'vendor-icons': ['lucide-react'],
-          'vendor-i18n': ['i18next', 'i18next-browser-languagedetector']
-        }
-      }
-    },
+    chunkSizeWarningLimit: 150,
     // Increase timeout for large builds
     commonjsOptions: {
-      transformMixedEsm: true,
+      transformMixedEsModules: true,
       strictRequires: true
     },
     // CSS code splitting
@@ -93,12 +84,13 @@ export default defineConfig({
       'i18next',
       'i18next-browser-languagedetector'
     ],
-    exclude: ['@testing-library/react']
+    exclude: ['@testing-library/react', 'monaco-editor']
   },
   test: {
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/setupTests.ts',
+    exclude: ['**/node_modules/**', '**/e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],

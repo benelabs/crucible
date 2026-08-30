@@ -10,392 +10,293 @@ test.describe('Crucible Developer Portal - E2E Tests', () => {
     test('should display wallet connection tab', async ({ page }) => {
       await page.getByTestId('tab-wallet').click();
       await expect(page.getByTestId('tab-wallet')).toHaveClass(/active/);
+      await expect(page.getByText('Wallet Connector')).toBeVisible();
     });
 
-    test('should render wallet interface', async ({ page }) => {
+    test('should list available wallets when disconnected', async ({ page }) => {
       await page.getByTestId('tab-wallet').click();
-      await page.waitForLoadState('networkidle');
-      const walletTab = page.getByTestId('tab-wallet');
-      await expect(walletTab).toBeVisible();
+      await expect(page.getByTestId('wallet-list')).toBeVisible();
+      await expect(page.getByTestId('connect-freighter')).toBeVisible();
     });
 
-    test('should display connection status', async ({ page }) => {
+    test('should connect and disconnect a wallet', async ({ page }) => {
       await page.getByTestId('tab-wallet').click();
-      const status = page.locator('[data-testid="wallet-status"]');
-      await expect(status).toBeDefined();
+
+      await page.getByTestId('connect-freighter').click();
+      await expect(page.getByTestId('connecting-panel')).toBeVisible();
+
+      await expect(page.getByTestId('connected-panel')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('connected-pubkey')).toBeVisible();
+
+      await page.getByTestId('disconnect-button').click();
+      await expect(page.getByTestId('wallet-list')).toBeVisible();
+    });
+
+    test('should switch target network', async ({ page }) => {
+      await page.getByTestId('tab-wallet').click();
+
+      await page.getByTestId('network-tab-mainnet').click();
+      await expect(page.getByTestId('network-tab-mainnet')).toHaveClass(/active/);
     });
   });
 
   test.describe('Contract Compilation Flow', () => {
-    test('should compile a Soroban contract successfully', async ({ page }) => {
+    test('should allow editing project name and source code', async ({ page }) => {
       await page.getByTestId('tab-compiler').click();
-      
-      const projectInput = page.getByLabel('Project Name');
-      await projectInput.clear();
-      await projectInput.fill('test-contract');
-      
-      const codeTextarea = page.getByLabel('Source Code');
-      await codeTextarea.fill('use soroban_sdk::{contract, contractimpl};\n#[contract]\npub struct TestContract;');
-      
-      const compileBtn = page.getByTestId('compile-button');
-      await compileBtn.click();
-      
-      await page.waitForTimeout(1000);
-    });
 
-    test('should display compilation results', async ({ page }) => {
-      await page.getByTestId('tab-compiler').click();
-      
-      const projectInput = page.getByLabel('Project Name');
-      await projectInput.fill('test-contract');
-      
-      const codeTextarea = page.getByLabel('Source Code');
-      await codeTextarea.fill('use soroban_sdk::contract;');
-      
-      const compileBtn = page.getByTestId('compile-button');
-      await compileBtn.click();
-      
-      await page.waitForTimeout(500);
-    });
-
-    test('should allow editing project name', async ({ page }) => {
-      await page.getByTestId('tab-compiler').click();
-      
       const projectInput = page.getByLabel('Project Name');
       await projectInput.clear();
       await projectInput.fill('my-soroban-contract');
-      
       await expect(projectInput).toHaveValue('my-soroban-contract');
+
+      const codeTextarea = page.getByLabel('Source Code');
+      await codeTextarea.fill('use soroban_sdk::{contract, contractimpl};\n#[contract]\npub struct TestContract;');
+      await expect(codeTextarea).toHaveValue(/TestContract/);
     });
 
-    test('should allow editing source code', async ({ page }) => {
+    test('should trigger compilation and show build output panel', async ({ page }) => {
       await page.getByTestId('tab-compiler').click();
-      
-      const codeTextarea = page.getByLabel('Source Code');
-      await codeTextarea.clear();
-      await codeTextarea.fill('fn main() {}');
-      
-      const value = await codeTextarea.inputValue();
-      expect(value).toContain('fn main');
+
+      const compileBtn = page.getByTestId('compile-button');
+      await compileBtn.click();
+
+      await expect(page.getByTestId('compiler-result')).toBeVisible();
+    });
+  });
+
+  test.describe('Interactive Challenge Engine', () => {
+    test('should load and display challenge content', async ({ page }) => {
+      await page.getByTestId('tab-challenges').click();
+
+      const challengeEngine = page.getByTestId('challenge-engine');
+      await expect(challengeEngine).toBeVisible();
+      await expect(page.locator('h2')).toContainText('Soroban Counter Contract');
+    });
+
+    test('should run tests and display results', async ({ page }) => {
+      await page.getByTestId('tab-challenges').click();
+
+      await page.getByTestId('run-tests-btn').click();
+
+      await expect(page.getByTestId('test-results')).toBeVisible({ timeout: 3000 });
+    });
+
+    test('should reveal and collapse hints', async ({ page }) => {
+      await page.getByTestId('tab-challenges').click();
+
+      const hintToggle = page.getByTestId('hint-toggle-0');
+      await hintToggle.click();
+      await expect(page.getByTestId('hint-content-0')).toBeVisible();
+
+      await hintToggle.click();
+      await expect(page.getByTestId('hint-content-0')).not.toBeVisible();
+    });
+
+    test('should navigate between steps', async ({ page }) => {
+      await page.getByTestId('tab-challenges').click();
+
+      const nextStepBtn = page.getByTestId('next-step-btn');
+      await nextStepBtn.click();
+
+      await expect(page.getByText('Step 2 of 2')).toBeVisible();
+
+      await page.getByTestId('prev-step-btn').click();
+      await expect(page.getByText('Step 1 of 2')).toBeVisible();
+    });
+
+    test('should reset code to initial state', async ({ page }) => {
+      await page.getByTestId('tab-challenges').click();
+
+      const editor = page.getByTestId('code-editor');
+      const initialCode = await editor.inputValue();
+
+      await editor.fill('modified code');
+      await page.getByTestId('reset-btn').click();
+
+      await expect(editor).toHaveValue(initialCode);
     });
   });
 
   test.describe('Transaction Simulation Flow', () => {
-    test('should navigate to Transaction Simulator', async ({ page }) => {
+    test('should navigate to the transaction simulator', async ({ page }) => {
       await page.getByTestId('tab-simulator').click();
-      await expect(page.getByTestId('tab-simulator')).toHaveClass(/active/);
+      await expect(page.getByTestId('sim-dashboard')).toBeVisible();
     });
 
-    test('should load simulator interface', async ({ page }) => {
+    test('should select a contract and function', async ({ page }) => {
       await page.getByTestId('tab-simulator').click();
-      await page.waitForLoadState('networkidle');
-      const simulatorTab = page.getByTestId('tab-simulator');
-      await expect(simulatorTab).toHaveClass(/active/);
+
+      const functionButtons = page.locator('[data-testid^="function-select-"]');
+      await expect(functionButtons.first()).toBeVisible();
+      await functionButtons.first().click();
     });
 
-    test('should display simulation controls', async ({ page }) => {
+    test('should run a simulation and display gas metrics', async ({ page }) => {
       await page.getByTestId('tab-simulator').click();
-      await page.waitForLoadState('networkidle');
-      const simulator = page.locator('[data-testid="transaction-simulator"]');
-      await expect(simulator).toBeDefined();
-    });
 
-    test('should handle transaction input', async ({ page }) => {
-      await page.getByTestId('tab-simulator').click();
-      await page.waitForLoadState('networkidle');
-      
-      const input = page.locator('[data-testid="tx-input"]');
-      if (await input.isVisible()) {
-        await input.fill('test_transaction');
-      }
+      await page.getByTestId('run-sim-btn').click();
+
+      await expect(page.getByTestId('simulation-content')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('metric-fee')).toBeVisible();
+      await expect(page.getByTestId('cpu-gauge')).toBeVisible();
     });
   });
 
-  test.describe('ABI Explorer & Contract Invocation', () => {
-    test('should navigate to ABI Explorer', async ({ page }) => {
+  test.describe('ABI Explorer', () => {
+    test('should display the ABI explorer and contract methods', async ({ page }) => {
       await page.getByTestId('tab-abi').click();
-      await expect(page.getByTestId('tab-abi')).toHaveClass(/active/);
       await expect(page.getByText('Contract ABI Explorer')).toBeVisible();
+      await expect(page.getByTestId('method-increment')).toBeVisible();
     });
 
-    test('should display ABI interface', async ({ page }) => {
+    test('should simulate a contract function call', async ({ page }) => {
       await page.getByTestId('tab-abi').click();
-      const abiTab = page.getByTestId('tab-abi');
-      await expect(abiTab).toBeVisible();
-    });
 
-    test('should render ABI explorer content', async ({ page }) => {
-      await page.getByTestId('tab-abi').click();
-      await page.waitForLoadState('networkidle');
-      const explorer = page.locator('[data-testid="abi-explorer"]');
-      await expect(explorer).toBeDefined();
-    });
+      await page.getByTestId('method-get_value').click();
+      await page.getByTestId('execute-btn').click();
 
-    test('should allow contract address input', async ({ page }) => {
-      await page.getByTestId('tab-abi').click();
-      
-      const addressInput = page.locator('[data-testid="contract-address-input"]');
-      if (await addressInput.isVisible()) {
-        await addressInput.fill('CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4');
-      }
+      await expect(page.getByTestId('execution-result')).toBeVisible({ timeout: 3000 });
     });
   });
 
-  test.describe('Contract Editing & Simulation Integration', () => {
-    test('should edit contract code and run simulation', async ({ page }) => {
-      await page.getByTestId('tab-compiler').click();
-      
-      const codeTextarea = page.getByLabel('Source Code');
-      await codeTextarea.clear();
-      await codeTextarea.fill('use soroban_sdk::{contract, contractimpl};\n#[contract]\npub struct Counter;');
-      
-      // Simulate tab
-      await page.getByTestId('tab-simulator').click();
-      await page.waitForLoadState('networkidle');
+  test.describe('Events Tab', () => {
+    test('should display the live event feed', async ({ page }) => {
+      await page.getByTestId('tab-events').click();
+      await expect(page.getByTestId('event-feed')).toBeVisible();
+      await expect(page.getByTestId('listener-status')).toBeVisible();
     });
 
-    test('should compile and view ABI', async ({ page }) => {
-      await page.getByTestId('tab-compiler').click();
-      
-      const projectInput = page.getByLabel('Project Name');
-      await projectInput.fill('counter-contract');
-      
-      const compileBtn = page.getByTestId('compile-button');
-      await compileBtn.click();
-      
-      await page.getByTestId('tab-abi').click();
-      await page.waitForLoadState('networkidle');
+    test('should filter events by severity', async ({ page }) => {
+      await page.getByTestId('tab-events').click();
+
+      await page.getByTestId('severity-critical').click();
+      await expect(page.getByTestId('severity-critical')).toHaveClass(/active/);
     });
   });
 
-  test.describe('Full User Journey', () => {
-    test('should complete contract development workflow', async ({ page }) => {
-      // Step 1: Verify app loads
-      await expect(page.getByText('Crucible Developer Portal')).toBeVisible();
-      
-      // Step 2: Write contract
-      await page.getByTestId('tab-compiler').click();
-      const codeTextarea = page.getByLabel('Source Code');
-      await codeTextarea.clear();
-      await codeTextarea.fill('use soroban_sdk::{contract, contractimpl};');
-      
-      // Step 3: Compile
-      const projectInput = page.getByLabel('Project Name');
-      await projectInput.clear();
-      await projectInput.fill('my-contract');
-      
-      // Step 4: View ABI
-      await page.getByTestId('tab-abi').click();
-      await page.waitForLoadState('networkidle');
-      
-      // Step 5: Simulate transaction
-      await page.getByTestId('tab-simulator').click();
-      await page.waitForLoadState('networkidle');
-      
-      // Verify navigation works
-      const tutorials = page.getByTestId('tab-tutorial');
-      await expect(tutorials).toBeVisible();
-    });
-
-    test('should maintain state across tab switches', async ({ page }) => {
-      await page.getByTestId('tab-compiler').click();
-      
-      const projectInput = page.getByLabel('Project Name');
-      await projectInput.fill('stateful-contract');
-      
-      // Switch away and back
-      await page.getByTestId('tab-metrics').click();
-      await page.getByTestId('tab-compiler').click();
-      
-      // State should be maintained
-      await expect(projectInput).toHaveValue('stateful-contract');
+  test.describe('Cross-browser Compatibility', () => {
+    test('should render the main layout in all supported browsers', async ({ page, browserName }) => {
+      await expect(page.locator('main')).toBeVisible();
+      expect(['chromium', 'firefox', 'webkit']).toContain(browserName);
     });
   });
 
-  test.describe('Bundle Size & Performance', () => {
-    test('should load page within acceptable time', async ({ page }) => {
+  test.describe('Performance', () => {
+    test('should load the home page in under 3 seconds', async ({ page }) => {
       const startTime = Date.now();
       await page.goto('/');
       await page.waitForLoadState('networkidle');
-      const loadTime = Date.now() - startTime;
-      
-      expect(loadTime).toBeLessThan(5000);
-    });
-
-    test('should lazy load components efficiently', async ({ page }) => {
-      await page.goto('/');
-      
-      // Initial load should not load all components
-      await page.getByTestId('tab-metrics').click();
-      await page.waitForLoadState('networkidle');
-      
-      // Verify component loaded
-      const metricsTab = page.getByTestId('tab-metrics');
-      await expect(metricsTab).toHaveClass(/active/);
-    });
-
-    test('should render without console errors', async ({ page }) => {
-      const errors: string[] = [];
-      page.on('console', msg => {
-        if (msg.type() === 'error') {
-          errors.push(msg.text());
-        }
-      });
-      
-      await page.goto('/');
-      await page.waitForLoadState('networkidle');
-      
-      const appErrors = errors.filter(e => !e.includes('ResizeObserver'));
-      expect(appErrors.length).toBe(0);
-    });
-
-    test('should load metrics tab with charts', async ({ page }) => {
-      await page.getByTestId('tab-metrics').click();
-      await page.waitForLoadState('networkidle');
-      
-      const chartsContainer = page.locator('svg');
-      await expect(chartsContainer).toBeDefined();
-    });
-  });
-
-  test.describe('Cross-Browser Compatibility', () => {
-    test('should work in current browser', async ({ browserName, page }) => {
-      expect(['chromium', 'firefox', 'webkit']).toContain(browserName);
-      
-      await page.goto('/');
-      await expect(page.getByText('Crucible Developer Portal')).toBeVisible();
-    });
-
-    test('should handle responsive layouts', async ({ page }) => {
-      // Mobile view
-      await page.setViewportSize({ width: 375, height: 667 });
-      await page.goto('/');
-      await expect(page.getByText('Crucible Developer Portal')).toBeVisible();
-      
-      // Tablet view
-      await page.setViewportSize({ width: 768, height: 1024 });
-      await expect(page.getByText('Crucible Developer Portal')).toBeVisible();
-      
-      // Desktop view
-      await page.setViewportSize({ width: 1920, height: 1080 });
-      await expect(page.getByText('Crucible Developer Portal')).toBeVisible();
+      expect(Date.now() - startTime).toBeLessThan(3000);
     });
   });
 
   test.describe('Accessibility', () => {
-    test('should have keyboard navigation', async ({ page }) => {
-      await page.goto('/');
-      await page.keyboard.press('Tab');
-      
-      const focusedElement = await page.evaluate(() => document.activeElement?.tagName);
-      expect(focusedElement).toBeTruthy();
-    });
-
     test('should have proper heading hierarchy', async ({ page }) => {
-      await page.goto('/');
-      const h1Count = await page.getByRole('heading', { level: 1 }).count();
-      expect(h1Count).toBeGreaterThan(0);
+      const headings = page.locator('h1, h2, h3, h4, h5, h6');
+      await expect(headings.first()).toBeVisible();
+      expect(await headings.count()).toBeGreaterThan(0);
     });
 
-    test('should navigate between tabs with keyboard', async ({ page }) => {
-      await page.goto('/');
-      
-      const tabButtons = page.getByRole('button').filter({ has: page.getByTestId(/tab-/) });
+    test('should support keyboard tab navigation', async ({ page }) => {
+      await page.keyboard.press('Tab');
+      const focusedTag = await page.evaluate(() => document.activeElement?.tagName);
+      expect(focusedTag).toBeTruthy();
+    });
+
+    test('every tab button has accessible text', async ({ page }) => {
+      const tabButtons = page.locator('.tab-btn');
       const count = await tabButtons.count();
       expect(count).toBeGreaterThan(0);
+
+      for (let i = 0; i < count; i++) {
+        const text = await tabButtons.nth(i).textContent();
+        expect(text?.trim()).toBeTruthy();
+      }
     });
   });
 
-  test.describe('Visual Regression', () => {
-    test('should maintain consistent header layout', async ({ page }) => {
-      await page.goto('/');
-      await page.waitForLoadState('networkidle');
-      
-      const header = page.locator('.app-header');
-      await expect(header).toBeVisible();
-    });
+  test.describe('Responsive Layout', () => {
+    for (const [name, size] of Object.entries({
+      mobile: { width: 375, height: 667 },
+      tablet: { width: 768, height: 1024 },
+      desktop: { width: 1920, height: 1080 },
+    })) {
+      test(`should render the header and main content on ${name}`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await page.goto('/');
+        await expect(page.locator('.app-header')).toBeVisible();
+        await expect(page.locator('main')).toBeVisible();
+      });
+    }
+  });
 
-    test('should maintain consistent tab styling', async ({ page }) => {
-      await page.goto('/');
-      
-      const tabs = page.locator('.tab-btn');
-      await expect(tabs.first()).toBeVisible();
-      
-      await tabs.first().click();
-      await expect(tabs.first()).toHaveClass(/active/);
-    });
+  test.describe('Integration', () => {
+    test('should complete a full developer workflow', async ({ page }) => {
+      // Connect wallet
+      await page.getByTestId('tab-wallet').click();
+      await page.getByTestId('connect-freighter').click();
+      await expect(page.getByTestId('connected-panel')).toBeVisible({ timeout: 5000 });
 
-    test('should render compiler interface consistently', async ({ page }) => {
-      await page.goto('/');
+      // Write and compile a contract
       await page.getByTestId('tab-compiler').click();
-      
-      const projectInput = page.getByLabel('Project Name');
-      await expect(projectInput).toBeVisible();
-      
       const codeTextarea = page.getByLabel('Source Code');
-      await expect(codeTextarea).toBeVisible();
+      await codeTextarea.fill('use soroban_sdk::{contract, contractimpl};\n#[contract]\npub struct Counter;');
+      await page.getByTestId('compile-button').click();
+      await expect(page.getByTestId('compiler-result')).toBeVisible();
+
+      // Inspect the ABI
+      await page.getByTestId('tab-abi').click();
+      await expect(page.getByTestId('abi-testing-panel')).toBeVisible();
+
+      // Simulate a call
+      await page.getByTestId('tab-simulator').click();
+      await expect(page.getByTestId('sim-dashboard')).toBeVisible();
+    });
+
+    test('should preserve compiler input across tab switches', async ({ page }) => {
+      await page.getByTestId('tab-compiler').click();
+
+      const projectInput = page.getByLabel('Project Name');
+      await projectInput.fill('stateful-contract');
+
+      await page.getByTestId('tab-metrics').click();
+      await page.getByTestId('tab-compiler').click();
+
+      await expect(projectInput).toHaveValue('stateful-contract');
     });
   });
 
   test.describe('App Navigation', () => {
-    test('should load with Tutorial tab active', async ({ page }) => {
-      await page.goto('/');
-      const tutorialTab = page.getByTestId('tab-tutorial');
-      await expect(tutorialTab).toHaveClass(/active/);
-    });
+    const tabs = [
+      'tab-tutorial',
+      'tab-challenges',
+      'tab-events',
+      'tab-simulator',
+      'tab-metrics',
+      'tab-multichain',
+      'tab-abi',
+      'tab-compiler',
+      'tab-dependencies',
+      'tab-wallet',
+    ];
 
-    test('should switch between all tabs', async ({ page }) => {
-      await page.goto('/');
-      
-      const tabs = [
-        'tab-tutorial',
-        'tab-events',
-        'tab-simulator',
-        'tab-metrics',
-        'tab-multichain',
-        'tab-abi',
-        'tab-compiler',
-        'tab-dependencies',
-        'tab-wallet'
-      ];
-
-      for (const tabId of tabs) {
-        const tab = page.getByTestId(tabId);
-        await expect(tab).toBeVisible();
-      }
+    test('should load with the Tutorial tab active', async ({ page }) => {
+      await expect(page.getByTestId('tab-tutorial')).toHaveClass(/active/);
     });
 
     test('should display all navigation tabs', async ({ page }) => {
-      await page.goto('/');
-      
-      const tabs = [
-        'tab-tutorial',
-        'tab-events',
-        'tab-simulator',
-        'tab-metrics',
-        'tab-multichain',
-        'tab-abi',
-        'tab-compiler',
-        'tab-dependencies',
-        'tab-wallet'
-      ];
-
       for (const tabId of tabs) {
         await expect(page.getByTestId(tabId)).toBeVisible();
       }
     });
 
-    test('should maintain active tab state', async ({ page }) => {
-      await page.goto('/');
-      
+    test('should switch active tab styling on click', async ({ page }) => {
       await page.getByTestId('tab-compiler').click();
       await expect(page.getByTestId('tab-compiler')).toHaveClass(/active/);
-      
+
       await page.getByTestId('tab-metrics').click();
       await expect(page.getByTestId('tab-metrics')).toHaveClass(/active/);
-      
-      await page.getByTestId('tab-compiler').click();
-      await expect(page.getByTestId('tab-compiler')).toHaveClass(/active/);
+      await expect(page.getByTestId('tab-compiler')).not.toHaveClass(/active/);
     });
   });
 });

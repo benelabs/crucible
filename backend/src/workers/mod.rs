@@ -8,6 +8,7 @@ pub mod dlq;
 pub mod error;
 pub mod executor;
 pub mod health;
+pub mod ingestion;
 pub mod job_history;
 pub mod priority;
 pub mod progress;

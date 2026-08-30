@@ -1868,6 +1868,7 @@ dependencies = [
 [[package]]
 name = "example-yield-vault"
 version = "1.13.0"
+version = "1.9.0"
 dependencies = [
  "crucible",
  "soroban-sdk",

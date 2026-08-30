@@ -24,12 +24,15 @@ members = [
     "examples/nft-rental",
     "examples/flash-mint",
     "examples/lottery",
+    "examples/gaming-crafting",
+    "examples/smart-wallet",
+    "examples/quadratic-funding",
     "examples/liquid-staking",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "1.14.0"
+version = "1.15.0"
 edition = "2021"
 rust-version = "1.91.0"
 license = "MIT"

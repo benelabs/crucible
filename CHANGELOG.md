@@ -1,3 +1,9 @@
+## [1.13.0](https://github.com/benelabs/crucible/compare/v1.12.0...v1.13.0) (2026-08-30)
+
+### Features
+
+* **crucible:** add crypto signature mock registry ([#820](https://github.com/benelabs/crucible/issues/820)) & event filter simulator ([#817](https://github.com/benelabs/crucible/issues/817)) ([3ecd15b](https://github.com/benelabs/crucible/commit/3ecd15b7f765d72fb687f77963a1476c1b8ffed9))
+
 ## [1.12.0](https://github.com/benelabs/crucible/compare/v1.11.0...v1.12.0) (2026-08-29)
 
 ### Features

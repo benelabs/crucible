@@ -10,6 +10,8 @@ pub use crate::checkpoint::{CheckpointId, CheckpointStats};
 pub use crate::cost::CostReport;
 pub use crate::env::CapturedEvent;
 pub use crate::env::Duration;
+pub use crate::env::EntryTtlSettings;
+pub use crate::env::DEFAULT_SECONDS_PER_LEDGER;
 pub use crate::env::EventMatches;
 pub use crate::env::FailedCallResult;
 pub use crate::env::MockAuthGuard;

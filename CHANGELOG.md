@@ -1,3 +1,9 @@
+## [1.16.0](https://github.com/benelabs/crucible/compare/v1.15.0...v1.16.0) (2026-08-30)
+
+### Features
+
+* implement prometheus metrics, opentelemetry tracing, flash mint, and verifiable lottery ([#839](https://github.com/benelabs/crucible/issues/839), [#838](https://github.com/benelabs/crucible/issues/838), [#883](https://github.com/benelabs/crucible/issues/883), [#881](https://github.com/benelabs/crucible/issues/881)) ([23824ce](https://github.com/benelabs/crucible/commit/23824ce27f1ca9c9e00f926d38acb6574c257d9d))
+
 ## [1.15.0](https://github.com/benelabs/crucible/compare/v1.14.0...v1.15.0) (2026-08-30)
 
 ### Features

@@ -337,6 +337,149 @@ macro_rules! assert_storage_entry_size_limit {
     }};
 }
 
+/// Asserts that the recorded authorization tree matches a declared one exactly.
+///
+/// Soroban Protocol 21+ authorizes an invocation as a tree: a signature on a
+/// root call covers a specific set of sub-invocations. This macro checks the
+/// whole delegation graph — signer, contract, function, `require_auth_for_args`
+/// arguments, and nesting — rather than merely that some address signed
+/// something, which is what lets an under-authorized sub-invocation slip
+/// through a test and fail in production.
+///
+/// On failure it reports each divergence (missing, unexpected, or misplaced)
+/// with its path into the tree, followed by the tree the host actually
+/// recorded.
+///
+/// # Syntax
+///
+/// ```ignore
+/// assert_auth_tree!(env, [
+///     signer => contract.function(arg, ...),
+///     signer => contract.function(arg, ...) => [
+///         sub_contract.sub_function(arg, ...),
+///         sub_contract.other(arg, ...) => [ /* deeper still */ ],
+///     ],
+/// ]);
+/// ```
+///
+/// `signer` and `contract` are [`Address`](soroban_sdk::Address) expressions,
+/// `function` is a bare identifier naming the invoked function, and the
+/// arguments are the values the authorization covers.
+///
+/// # Example
+///
+/// ```ignore
+/// use crucible::prelude::*;
+///
+/// // `alice` signs the escrow release, which in turn moves tokens.
+/// escrow.release(&alice, &amount);
+/// assert_auth_tree!(env, [
+///     alice => escrow_id.release(alice.clone(), amount) => [
+///         token_id.transfer(escrow_id.clone(), bob.clone(), amount),
+///     ],
+/// ]);
+/// ```
+///
+/// # Panics
+///
+/// Panics with a full diagnostic when the recorded tree differs in any way.
+#[macro_export]
+macro_rules! assert_auth_tree {
+    ($env:expr, [ $($tt:tt)* ]) => {{
+        extern crate std;
+        let __env = $crate::assert_auth_tree!(@env $env);
+        let __expected: std::vec::Vec<$crate::auth_tree::ExpectedAuth> =
+            $crate::assert_auth_tree!(@entries __env, [] $($tt)*);
+        $crate::auth_tree::verify_auth_tree(__env, &__expected).assert_matches();
+    }};
+
+    // Accepts either a `MockEnv` or a bare `soroban_sdk::Env`.
+    (@env $env:expr) => {
+        $crate::auth_tree::AsAuthEnv::as_auth_env(&$env)
+    };
+
+    // ── Entry list ──────────────────────────────────────────────────────────
+    // Each entry is `signer => contract.function(args)` with optional
+    // `=> [ sub-invocations ]`, accumulated into `$acc`.
+
+    (@entries $env:expr, [$($acc:expr),*]) => {
+        std::vec![$($acc),*]
+    };
+    (@entries $env:expr, [$($acc:expr),*] $signer:expr => $contract:ident . $function:ident ( $($args:expr),* $(,)? ) => [ $($subs:tt)* ] $(, $($rest:tt)*)?) => {
+        $crate::assert_auth_tree!(@entries $env, [
+            $($acc,)*
+            $crate::auth_tree::ExpectedAuth {
+                address: ::core::clone::Clone::clone(&$signer),
+                invocation: $crate::assert_auth_tree!(
+                    @node $env, $contract . $function ( $($args),* ) => [ $($subs)* ]
+                ),
+            }
+        ] $($($rest)*)?)
+    };
+    (@entries $env:expr, [$($acc:expr),*] $signer:expr => $contract:ident . $function:ident ( $($args:expr),* $(,)? ) $(, $($rest:tt)*)?) => {
+        $crate::assert_auth_tree!(@entries $env, [
+            $($acc,)*
+            $crate::auth_tree::ExpectedAuth {
+                address: ::core::clone::Clone::clone(&$signer),
+                invocation: $crate::assert_auth_tree!(
+                    @node $env, $contract . $function ( $($args),* )
+                ),
+            }
+        ] $($($rest)*)?)
+    };
+
+    // ── Sub-invocation list ─────────────────────────────────────────────────
+
+    (@nodes $env:expr, [$($acc:expr),*]) => {
+        std::vec![$($acc),*]
+    };
+    (@nodes $env:expr, [$($acc:expr),*] $contract:ident . $function:ident ( $($args:expr),* $(,)? ) => [ $($subs:tt)* ] $(, $($rest:tt)*)?) => {
+        $crate::assert_auth_tree!(@nodes $env, [
+            $($acc,)*
+            $crate::assert_auth_tree!(
+                @node $env, $contract . $function ( $($args),* ) => [ $($subs)* ]
+            )
+        ] $($($rest)*)?)
+    };
+    (@nodes $env:expr, [$($acc:expr),*] $contract:ident . $function:ident ( $($args:expr),* $(,)? ) $(, $($rest:tt)*)?) => {
+        $crate::assert_auth_tree!(@nodes $env, [
+            $($acc,)*
+            $crate::assert_auth_tree!(@node $env, $contract . $function ( $($args),* ))
+        ] $($($rest)*)?)
+    };
+
+    // ── Single node ─────────────────────────────────────────────────────────
+
+    (@node $env:expr, $contract:ident . $function:ident ( $($args:expr),* $(,)? ) => [ $($subs:tt)* ]) => {
+        $crate::auth_tree::ExpectedInvocation::new(
+            ::core::clone::Clone::clone(&$contract),
+            soroban_sdk::Symbol::new($env, stringify!($function)),
+            $crate::assert_auth_tree!(@args $env, $($args),*),
+        )
+        .with_sub_invocations($crate::assert_auth_tree!(@nodes $env, [] $($subs)*))
+    };
+    (@node $env:expr, $contract:ident . $function:ident ( $($args:expr),* $(,)? )) => {
+        $crate::auth_tree::ExpectedInvocation::new(
+            ::core::clone::Clone::clone(&$contract),
+            soroban_sdk::Symbol::new($env, stringify!($function)),
+            $crate::assert_auth_tree!(@args $env, $($args),*),
+        )
+    };
+
+    // Arguments are converted individually so each may have its own type.
+    (@args $env:expr, $($args:expr),* $(,)?) => {{
+        #[allow(unused_mut)]
+        let mut __args = soroban_sdk::Vec::<soroban_sdk::Val>::new($env);
+        $(
+            __args.push_back(soroban_sdk::IntoVal::<
+                soroban_sdk::Env,
+                soroban_sdk::Val,
+            >::into_val(&$args, $env));
+        )*
+        __args
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use crate::env::MockEnv;

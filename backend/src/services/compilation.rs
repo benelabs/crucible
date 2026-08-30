@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::time::Instant;
 use uuid::Uuid;
+use crate::services::tracing::TracingService;
 
 /// Configuration options for the contract bytecode optimizer and section stripper
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -74,6 +75,9 @@ impl CompilationService {
         source_code: &str,
         opt_options: BytecodeOptimizationOptions,
     ) -> Result<CompilationResult, sqlx::Error> {
+        let span = TracingService::service_method_span("CompilationService", "compile");
+        let _span_enter = span.enter();
+
         let start = Instant::now();
         let build_id = Uuid::new_v4().to_string();
 
@@ -91,6 +95,12 @@ impl CompilationService {
         } else {
             start.elapsed().as_millis() as i64 + 120
         };
+
+        crate::services::sys_metrics::record_compilation_time(
+            project_name,
+            &status,
+            (compile_time_ms as f64) / 1000.0,
+        );
 
         let logs = if status == "success" {
             format!(
@@ -118,6 +128,13 @@ impl CompilationService {
         let cache_hit_rate = rust_decimal::Decimal::new(852, 1); // 85.2
         let memory_usage_mb = 412 as i64;
         let dependency_count = 12 as i32;
+
+        let span = TracingService::db_query_span(
+            "INSERT INTO build_metrics",
+            "postgres",
+            "INSERT",
+        );
+        let _span_enter = span.enter();
 
         // Perform best-effort insertion of metrics (degrades gracefully in test environments)
         let _ = sqlx::query(

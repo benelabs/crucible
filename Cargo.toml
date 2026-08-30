@@ -21,6 +21,7 @@ members = [
     "examples/yield-vault",
     "examples/bounty-escrow",
     "examples/nft-rental",
+    "examples/liquid-staking",
 ]
 resolver = "2"
 

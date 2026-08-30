@@ -1,3 +1,9 @@
+## [1.15.0](https://github.com/benelabs/crucible/compare/v1.14.0...v1.15.0) (2026-08-30)
+
+### Features
+
+* implement rate limiter tiering, gaming crafting engine, smart wallet, and quadratic funding ([8ce6b3f](https://github.com/benelabs/crucible/commit/8ce6b3f9356f40f08b6285d843e2423d7baab4ea))
+
 ## [1.14.0](https://github.com/benelabs/crucible/compare/v1.13.0...v1.14.0) (2026-08-30)
 
 ### Features

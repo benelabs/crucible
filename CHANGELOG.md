@@ -1,3 +1,9 @@
+## [1.19.0](https://github.com/benelabs/crucible/compare/v1.18.0...v1.19.0) (2026-08-31)
+
+### Features
+
+* **env:** add deterministic seeded test PRNG ([db9b2f8](https://github.com/benelabs/crucible/commit/db9b2f833040ea1174975062ae00e09432acb2e3))
+
 ## [1.18.0](https://github.com/benelabs/crucible/compare/v1.17.0...v1.18.0) (2026-08-31)
 
 ### Features

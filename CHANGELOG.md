@@ -1,3 +1,9 @@
+## [1.25.0](https://github.com/benelabs/crucible/compare/v1.24.0...v1.25.0) (2026-08-31)
+
+### Features
+
+* implement Stellar Wave issues [#908](https://github.com/benelabs/crucible/issues/908), [#910](https://github.com/benelabs/crucible/issues/910), [#917](https://github.com/benelabs/crucible/issues/917), [#918](https://github.com/benelabs/crucible/issues/918) ([a05f148](https://github.com/benelabs/crucible/commit/a05f148efb0e3cdd740ae4cddac914ae5ab749f4))
+
 ## 1.0.0 (2026-08-26)
 
 ### Features

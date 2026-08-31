@@ -5,6 +5,7 @@
 
 pub use crate::account::AccountBuilder;
 pub use crate::account::AccountHandle;
+pub use crate::assertions::RevertAssertion;
 pub use crate::cost::CostReport;
 pub use crate::env::CapturedEvent;
 pub use crate::env::Duration;

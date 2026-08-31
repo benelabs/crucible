@@ -230,19 +230,21 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                         );
                         if let Ok(metas) = meta {
                             for m in metas {
-                                if m.path().is_ident("contract") {
-                                    if let Meta::Path(path) = m {
-                                        contract_ty = Some(path);
-                                // `#[contract_client(contract = T)]` parses as
-                                // a name-value pair whose value is an
-                                // expression, so the type is reached through
-                                // `Expr::Path` — `Meta` itself has no `value`.
-                                if let Meta::NameValue(nv) = &m {
-                                    if nv.path.is_ident("contract") {
+                                // `#[contract_client(contract = T)]` parses as a
+                                // name-value pair whose value is an expression, so
+                                // the type is reached through `Expr::Path`. The bare
+                                // `#[contract_client(contract)]` form is also
+                                // tolerated and handled by the `Meta::Path` arm.
+                                match &m {
+                                    Meta::NameValue(nv) if nv.path.is_ident("contract") => {
                                         if let syn::Expr::Path(expr) = &nv.value {
                                             contract_ty = Some(expr.path.clone());
                                         }
                                     }
+                                    Meta::Path(path) if !path.is_ident("contract") => {
+                                        contract_ty = Some(path.clone());
+                                    }
+                                    _ => {}
                                 }
                             }
                         }

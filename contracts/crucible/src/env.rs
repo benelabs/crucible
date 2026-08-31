@@ -8,6 +8,7 @@
 //! contexts on the host and are not available inside contract WASM builds.
 
 use crate::account::AccountHandle;
+use crate::assertions::RevertAssertion;
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use crate::token::MockToken;
@@ -377,7 +378,7 @@ impl CapturedEvent {
         T::from_val(&self.env, &self.data)
     }
 
-    /// Checks whether the event's topics match the given topic pattern (with wildcard support `*` or `_`).
+    /// Checks whether the event's topics match the given topic pattern (with wildcard support via the `_` symbol).
     pub fn matches_topic_pattern(&self, pattern: &SorobanVec<Val>) -> bool {
         crate::event_topic_match::topics_match(&self.env, pattern, &self.topics)
     }
@@ -464,7 +465,7 @@ impl EventMatches {
         &self.env
     }
 
-    /// Filter matching events by topic pattern supporting wildcards (`*` or `_`).
+    /// Filter matching events by topic pattern supporting wildcards (the `_` symbol).
     pub fn filter_by_topic_pattern<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> EventMatches {
         let pattern_vec = pattern.into_val(&self.env);
         let mut filtered = SorobanVec::new(&self.env);
@@ -868,11 +869,6 @@ impl MockEnv {
         });
     }
 
-    /// Returns the current ledger sequence number.
-    pub fn ledger_sequence(&self) -> u32 {
-        self.inner.ledger().get().sequence_number
-    }
-
     /// Register an account with a name.
     pub fn register_account(&self, name: &str, address: Address) {
         if self.accounts.borrow().contains_key(name) {
@@ -1220,6 +1216,7 @@ impl MockEnv {
             tokens: Rc::new(RefCell::new(self.tokens.borrow().clone())),
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
             track_costs: self.track_costs,
+            crypto_registry: Rc::new(RefCell::new(self.crypto_registry.borrow().clone())),
         }
     }
 
@@ -1382,6 +1379,46 @@ impl MockEnv {
                 message: None,
             },
         }
+    }
+
+    /// Runs `f` and returns a chainable assertion that it reverted.
+    ///
+    /// This is the fluent counterpart to the [`assert_reverts!`](crate::assert_reverts)
+    /// macro. Unlike the macro, the returned [`RevertAssertion`] is a value: it
+    /// can be stored, passed around, and refined with
+    /// [`with_error`](RevertAssertion::with_error),
+    /// [`with_any_error`](RevertAssertion::with_any_error) or
+    /// [`with_message_containing`](RevertAssertion::with_message_containing)
+    /// before being checked with [`verify`](RevertAssertion::verify) or
+    /// [`and_assert`](RevertAssertion::and_assert).
+    ///
+    /// `f` runs immediately, so any state the revert was supposed to leave
+    /// untouched can be inspected inside `and_assert`.
+    ///
+    /// The assertion is `#[must_use]` and panics if dropped unchecked, so a
+    /// forgotten `.verify()` fails the test rather than passing silently.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use crucible::prelude::*;
+    ///
+    /// env.expect_revert(|| client.transfer(&alice.address(), &bob.address(), &200_i128))
+    ///     .with_error(ContractError::Unauthorized)
+    ///     .verify();
+    ///
+    /// env.expect_revert(|| client.withdraw(&alice.address(), &999_i128))
+    ///     .with_any_error()
+    ///     .and_assert(|| {
+    ///         // The failed withdrawal must not have moved any balance.
+    ///         assert_eq!(token.balance(&alice.address()), 500_i128);
+    ///     });
+    /// ```
+    pub fn expect_revert<F, T>(&self, f: F) -> RevertAssertion
+    where
+        F: FnOnce() -> T,
+    {
+        RevertAssertion::capture(f)
     }
 
     /// Returns a mutable reference guard to the mock crypto registry.
@@ -1731,6 +1768,92 @@ impl MockKeyPair {
             .try_into()
             .expect("public key must be 64 bytes");
         soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Returns the public key in SEC-1 uncompressed form as `BytesN<65>`.
+    ///
+    /// The stored `public_key_bytes` holds the 64-byte `X || Y` affine
+    /// coordinates; SEC-1 prefixes those with the `0x04` uncompressed tag.
+    /// This is the encoding [`soroban_sdk::crypto::Crypto::secp256r1_verify`]
+    /// expects.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the keypair is not on an ECDSA curve (i.e. for Ed25519).
+    pub fn public_key_sec1_bytes65(&self, env: &Env) -> soroban_sdk::BytesN<65> {
+        let coords: [u8; 64] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("SEC-1 encoding requires a 64-byte ECDSA public key");
+        let mut sec1 = [0_u8; 65];
+        sec1[0] = 0x04;
+        sec1[1..].copy_from_slice(&coords);
+        soroban_sdk::BytesN::from_array(env, &sec1)
+    }
+
+    /// Signs a pre-computed 32-byte message digest with an ECDSA curve.
+    ///
+    /// Unlike [`sign`](Self::sign), which hashes the message itself, this signs
+    /// the digest as-is. Use it when the digest was produced separately — for
+    /// example by `env.crypto().sha256(..)` — so that the signature matches
+    /// what the Soroban host verifies.
+    ///
+    /// # Panics
+    ///
+    /// Panics for Ed25519 keypairs, which sign whole messages rather than digests.
+    pub fn sign_prehash(&self, env: &Env, message_digest: &[u8; 32]) -> soroban_sdk::BytesN<64> {
+        let sig_bytes = match self.curve {
+            CryptoCurve::Ed25519 => {
+                panic!("Ed25519 signs whole messages; use `sign` instead of `sign_prehash`")
+            }
+            CryptoCurve::Secp256k1 => {
+                let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: k256::ecdsa::Signature = signing_key
+                    .sign_prehash_recoverable(message_digest)
+                    .expect("signing a 32-byte digest cannot fail")
+                    .0;
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256r1 => {
+                use p256::ecdsa::signature::hazmat::PrehashSigner as _;
+                let signing_key = P256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: p256::ecdsa::Signature = signing_key
+                    .sign_prehash(message_digest)
+                    .expect("signing a 32-byte digest cannot fail");
+                signature.to_bytes().to_vec()
+            }
+        };
+        let array: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Signs a 32-byte message digest and returns the signature together with
+    /// the ECDSA recovery id, as required by
+    /// [`soroban_sdk::crypto::Crypto::secp256k1_recover`].
+    ///
+    /// # Panics
+    ///
+    /// Panics unless the keypair is on the secp256k1 curve.
+    pub fn sign_prehash_recoverable(
+        &self,
+        env: &Env,
+        message_digest: &[u8; 32],
+    ) -> (soroban_sdk::BytesN<64>, u32) {
+        assert_eq!(
+            self.curve,
+            CryptoCurve::Secp256k1,
+            "recoverable signatures are only defined for secp256k1"
+        );
+        let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+        let (signature, recovery_id) = signing_key
+            .sign_prehash_recoverable(message_digest)
+            .expect("signing a 32-byte digest cannot fail");
+        let array: [u8; 64] = signature.to_bytes().as_slice().try_into().unwrap();
+        (
+            soroban_sdk::BytesN::from_array(env, &array),
+            recovery_id.to_byte() as u32,
+        )
     }
 
     /// Returns the public key as a Soroban `Bytes`.
@@ -2369,6 +2492,9 @@ mod protocol_version_tests {
         assert_eq!(format!("{}", ProtocolVersion::V20), "Protocol 20");
         assert_eq!(format!("{}", ProtocolVersion::V21), "Protocol 21");
         assert_eq!(format!("{}", ProtocolVersion::V22), "Protocol 22");
+    }
+}
+
 // Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
 #[cfg(test)]
 mod zk_pairing_harness_tests {

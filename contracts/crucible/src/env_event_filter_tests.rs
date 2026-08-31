@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::env::{CapturedEvent, MockEnv};
-    use soroban_sdk::{contract, contractimpl, symbol_short, Env};
+    use soroban_sdk::{contract, contractimpl, symbol_short, Env, FromVal as _};
 
     #[contract]
     #[derive(Default)]
@@ -129,54 +129,65 @@ mod tests {
         let id = env.contract_id::<TokenEventContract>();
         let client = TokenEventContractClient::new(env.inner(), &id);
 
-        let alice = env.create_account("alice");
-        let bob = env.create_account("bob");
+        let alice = crate::account::AccountBuilder::new(&env).name("alice").build();
+        let bob = crate::account::AccountBuilder::new(&env).name("bob").build();
 
-        client.mint(&alice, &1000_i128);
-        client.transfer(&alice, &bob, &300_i128);
-        client.burn(&bob, &50_i128);
+        // The Soroban test host exposes only the most recent invocation's
+        // events through `events().all()`, so each call is asserted in turn
+        // rather than querying a cumulative log at the end.
 
-        // Wildcard match for any transfer event regardless of sender/receiver
+        client.mint(&alice.address(), &1000_i128);
+
+        // Wildcard match using the `_` symbol.
+        let mint_wildcards = env.events_parsed((symbol_short!("mint"), symbol_short!("_")));
+        assert_eq!(mint_wildcards.len(), 1);
+        assert_eq!(mint_wildcards[0].data_as::<i128>(), 1000_i128);
+
+        client.transfer(&alice.address(), &bob.address(), &300_i128);
+
+        // Wildcard match for any transfer event regardless of sender/receiver.
         let transfer_wildcards = env.events_parsed((
             symbol_short!("transfer"),
-            symbol_short!("*"),
-            symbol_short!("*"),
+            symbol_short!("_"),
+            symbol_short!("_"),
         ));
         assert_eq!(transfer_wildcards.len(), 1);
         let ev = &transfer_wildcards[0];
         assert_eq!(ev.contract, id);
         assert_eq!(ev.data_as::<i128>(), 300_i128);
-        assert_eq!(ev.topic_as::<soroban_sdk::Symbol>(0), Some(symbol_short!("transfer")));
+        assert_eq!(
+            ev.topic_as::<soroban_sdk::Symbol>(0),
+            Some(symbol_short!("transfer"))
+        );
         assert_eq!(ev.topic_as::<soroban_sdk::Address>(1), Some(alice.address()));
         assert_eq!(ev.topic_as::<soroban_sdk::Address>(2), Some(bob.address()));
 
-        // Wildcard match using '_' symbol
-        let mint_wildcards = env.events_parsed((symbol_short!("mint"), symbol_short!("_")));
-        assert_eq!(mint_wildcards.len(), 1);
-        assert_eq!(mint_wildcards[0].data_as::<i128>(), 1000_i128);
+        // Schema validation assertions.
+        assert!(ev.assert_schema(3, |data| {
+            i128::from_val(env.inner(), data) == 300_i128
+        }));
 
-        // Test assert_event_matches! macro
+        // A concrete topic segment still has to match exactly alongside a wildcard.
         crate::assert_event_matches!(
             env,
             id,
-            (symbol_short!("transfer"), symbol_short!("*"), bob.address())
+            (symbol_short!("transfer"), symbol_short!("_"), bob.address())
         );
         crate::assert_event_matches!(
             env,
             id,
-            (symbol_short!("transfer"), alice.address(), symbol_short!("*")),
+            (symbol_short!("transfer"), alice.address(), symbol_short!("_")),
             300_i128
         );
+
+        client.burn(&bob.address(), &50_i128);
+
         crate::assert_event_matches!(
             env,
             id,
-            (symbol_short!("burn"), symbol_short!("*")),
+            (symbol_short!("burn"), symbol_short!("_")),
             50_i128
         );
-
-        // Schema validation assertions
-        assert!(ev.assert_schema(3, |data| {
-            soroban_sdk::i128::from_val(env.inner(), data) == 300_i128
-        }));
     }
 }
+

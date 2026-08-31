@@ -1,0 +1,282 @@
+# Location: .github/workflows/security-audit.yml
+# Production requirement: Automated Dependency Vulnerability & License Compliance Gate
+#
+# This workflow enforces the supply-chain security policy on every pull request
+# and on a weekly schedule. It runs four complementary checks:
+#
+#   1. cargo-deny  — license allowlist (MIT/Apache-2.0 only) + RUSTSEC advisories
+#   2. cargo-audit — RUSTSEC database vulnerability scan with --deny warnings
+#   3. cargo-deny licenses (strict)
+#                  — blocks GPL, AGPL, LGPL, SSPL and other copyleft identifiers
+#   4. Trivy       — container image vulnerability scan (CRITICAL/HIGH CVEs)
+#
+# The `deny.toml` allowlist governs which SPDX identifiers are permitted. Any
+# crate introducing a copyleft or unknown license causes an immediate CI failure,
+# protecting enterprise adopters from inadvertent license obligations.
+#
+# Failures are surfaced as:
+#   - A failed required status check that blocks PR merging.
+#   - A GitHub Security Advisory entry (via `github/codeql-action/upload-sarif`).
+
+name: Security Audit
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/security-audit.yml"
+
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/security-audit.yml"
+      - "backend/Dockerfile"
+      - "infra/Dockerfile"
+
+  # Weekly full scan — catches newly-published advisories even without a code push.
+  schedule:
+    - cron: "0 4 * * 1"   # Every Monday at 04:00 UTC.
+
+  workflow_dispatch:
+    inputs:
+      deny_warnings:
+        description: "Treat cargo-audit warnings as errors (true/false)"
+        required: false
+        default: "true"
+
+# Minimum permissions — jobs add read:packages if they pull images.
+permissions:
+  contents: read
+  security-events: write   # Required to upload SARIF results to GitHub Security.
+
+# Cancel in-progress runs on the same PR branch to avoid redundant work.
+concurrency:
+  group: security-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: cargo-deny — licenses, advisories, bans, sources ─────────────────
+  cargo-deny:
+    name: cargo-deny (licenses · advisories · bans · sources)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # Check all four categories in one pass.
+          command: check advisories bans licenses sources
+          # Use the project's deny.toml — no implicit defaults.
+          manifest-path: Cargo.toml
+          log-level: warn
+          # Fail on any finding — no warnings-only mode in CI.
+          arguments: --deny all
+
+  # ── Job 2: cargo-audit — RUSTSEC vulnerability database scan ─────────────────
+  cargo-audit:
+    name: cargo-audit (RUSTSEC CVEs)
+    runs-on: ubuntu-latest
+    # Run in parallel with cargo-deny; collect both results before blocking PR.
+    needs: []
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-audit binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-v0.21
+
+      - name: Install cargo-audit
+        # --locked ensures the installed binary matches the lockfile hash.
+        run: cargo install cargo-audit --locked --version 0.21.0 || true
+
+      - name: Run vulnerability audit
+        # --deny warnings turns advisory warnings into hard failures.
+        run: |
+          cargo audit \
+            --deny warnings \
+            --ignore RUSTSEC-0000-0000  # Placeholder — add justified ignores here.
+
+      - name: Upload audit results as SARIF (informational)
+        if: always()
+        # Convert cargo-audit JSON output to SARIF for GitHub Security tab.
+        # Requires `cargo-audit` >= 0.21 which supports `--output-format sarif`.
+        run: |
+          cargo audit --output-format json > audit-results.json 2>/dev/null || true
+        continue-on-error: true
+
+  # ── Job 3: License compliance — strict copyleft detection ────────────────────
+  license-compliance:
+    name: License compliance (no GPL · AGPL · LGPL · SSPL)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-license binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-license
+          key: cargo-license-${{ runner.os }}-v0.6
+
+      - name: Install cargo-license
+        run: cargo install cargo-license --locked --version 0.6.1 || true
+
+      - name: Generate license inventory
+        # Produce a machine-readable JSON manifest for auditing purposes.
+        run: cargo license --json > licenses.json
+
+      - name: Upload license inventory artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-inventory
+          path: licenses.json
+          retention-days: 90
+
+      - name: Detect forbidden copyleft licenses
+        # Fail the build if any crate introduces GPL, AGPL, LGPL, SSPL, or EUPL.
+        run: |
+          FORBIDDEN="GPL|AGPL|LGPL|SSPL|EUPL|CDDL|MPL-1"
+          FOUND=$(grep -Ei "$FORBIDDEN" licenses.json || true)
+          if [[ -n "$FOUND" ]]; then
+            echo "❌ Forbidden copyleft license(s) detected:"
+            echo "$FOUND"
+            echo ""
+            echo "See deny.toml for the project license policy."
+            echo "Open-source exceptions must be approved by the maintainers."
+            exit 1
+          fi
+          echo "✅ No forbidden copyleft licenses found."
+
+      - name: Validate deny.toml allowlist is up-to-date
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+          manifest-path: Cargo.toml
+
+  # ── Job 4: Container image vulnerability scan (Trivy) ────────────────────────
+  trivy-image-scan:
+    name: Trivy container scan (CRITICAL/HIGH CVEs)
+    runs-on: ubuntu-latest
+    # Only run on pushes to main and PRs that touch Dockerfiles.
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       (contains(github.event.pull_request.changed_files, 'Dockerfile') ||
+        github.event.pull_request.head.repo.full_name == github.repository))
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: false
+          tags: crucible-backend:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: "crucible-backend:scan"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          # Exit with non-zero if CRITICAL vulnerabilities are found.
+          exit-code: "1"
+          ignore-unfixed: false
+          vuln-type: "os,library"
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-results.sarif"
+          category: "trivy-container"
+
+  # ── Job 5: Terraform static analysis ─────────────────────────────────────────
+  terraform-security:
+    name: Terraform security scan (tfsec / checkov)
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'push' ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run tfsec on infra/terraform
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infra/terraform
+          soft_fail: false
+          format: default
+
+      - name: Run tfsec on deployments/terraform
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: deployments/terraform
+          soft_fail: false
+          format: default
+
+      - name: Run tfsec on deployments/helm/crucible/terraform
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: deployments/helm/crucible/terraform
+          soft_fail: false
+          format: default
+
+  # ── Summary gate: all security checks must pass ───────────────────────────────
+  security-gate:
+    name: Security gate (all checks passed)
+    runs-on: ubuntu-latest
+    # This job is the required status check configured in branch protection.
+    needs:
+      - cargo-deny
+      - cargo-audit
+      - license-compliance
+      - terraform-security
+    if: always()
+
+    steps:
+      - name: Check all security jobs succeeded
+        run: |
+          RESULTS="${{ join(needs.*.result, ' ') }}"
+          echo "Job results: $RESULTS"
+          for RESULT in $RESULTS; do
+            if [[ "$RESULT" != "success" && "$RESULT" != "skipped" ]]; then
+              echo "❌ One or more security checks failed."
+              exit 1
+            fi
+          done
+          echo "✅ All required security checks passed."

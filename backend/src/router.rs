@@ -91,6 +91,8 @@ pub fn build_router(
         audit: audit_service,
     } = states;
 
+    let dlq_coordinator = Arc::new(crate::workers::retry::DlqCoordinator::new(Arc::new(redis_client.clone())));
+
     let contracts_router = Router::new()
         .route("/compile", post(contract_handlers::compile_contract))
         .route(
@@ -124,6 +126,15 @@ pub fn build_router(
         .route("/", get(|| async { "Crucible Backend API" }))
         .route("/metrics", get(profiling::get_prometheus_metrics))
         .route("/.well-known/stellar.toml", get(stellar::get_stellar_toml))
+        .route("/api/stellar/faucet", post(stellar::fund_testnet_account))
+        .route("/api/stellar/faucet/status", get(stellar::get_faucet_status))
+        .route("/api/v1/faucet", post(stellar::fund_testnet_account))
+        .route("/api/v1/faucet/status", get(stellar::get_faucet_status))
+        .route(
+            "/api/v1/jobs/dlq/replay",
+            post(crate::workers::retry::handle_dlq_replay),
+        )
+        .with_state(dlq_coordinator)
         .merge(
             Router::new()
                 .route("/api/config", get(handle_get_config))

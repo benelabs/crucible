@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { EventListenerDashboard } from './components/EventListenerDashboard';
@@ -8,10 +8,13 @@ import { MultiChainDashboard } from './components/MultiChainDashboard';
 import { ContractAbiExplorer } from './components/ContractAbiExplorer';
 import { DeveloperOnboardingTutorial } from './components/DeveloperOnboardingTutorial';
 import { WalletConnector } from './components/WalletConnector';
-import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet, Activity, Layers } from 'lucide-react';
+import { DependencyGraphVisualizer } from './components/DependencyGraphVisualizer';
+import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet, Activity, Layers, GitBranch } from 'lucide-react';
 import './App.css';
 
-type Tab = 'tutorial' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'wallet';
+type Tab = 'tutorial' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'graph' | 'wallet';
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('tutorial');
@@ -26,6 +29,9 @@ function App() {
   const [cargoToml, setCargoToml] = useState(`[package]\nname = "my-soroban-contract"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\nsoroban-sdk = "25.0.0"\nserde = { version = "1.0", features = ["derive"] }\nvulnerable-crate = "0.4.2" # triggers security warning`);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeResult, setAnalyzeResult] = useState<any>(null);
+
+  // Command palette + global shortcut state
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const handleCompile = async () => {
     setCompiling(true);
@@ -70,6 +76,34 @@ function App() {
       setAnalyzing(false);
     }
   };
+
+  const handleSaveDraft = () => {
+    try {
+      localStorage.setItem('crucible:compile-draft', compileCode);
+      localStorage.setItem('crucible:cargo-draft', cargoToml);
+      localStorage.setItem('crucible:draft-saved-at', new Date().toISOString());
+    } catch {
+      /* storage may be unavailable; ignore */
+    }
+  };
+
+  // Global keyboard shortcut manager (issue #908): Cmd/Ctrl+Enter compiles,
+  // Cmd/Ctrl+S saves the current draft, Cmd/Ctrl+K toggles the command palette.
+  useKeyboardShortcuts([
+    { id: 'compile', combo: 'mod+enter', description: 'Compile contract source', handler: handleCompile },
+    { id: 'save-draft', combo: 'mod+s', description: 'Save editor draft', handler: handleSaveDraft },
+    { id: 'toggle-palette', combo: 'mod+k', description: 'Toggle command palette', handler: () => setPaletteOpen((o) => !o) },
+  ]);
+
+  const paletteCommands: PaletteCommand[] = [
+    { id: 'compile', title: 'Compile Source', subtitle: 'Build WASM from editor', shortcut: '⌘↵', run: handleCompile },
+    { id: 'save', title: 'Save Draft', subtitle: 'Persist editor contents', shortcut: '⌘S', run: handleSaveDraft },
+    { id: 'graph', title: 'Open Dependency Graph', group: 'Navigate', run: () => setActiveTab('graph') },
+    { id: 'dependencies', title: 'Open Dependency Analyzer', group: 'Navigate', run: () => setActiveTab('dependencies') },
+    { id: 'compiler', title: 'Open Compiler Service', group: 'Navigate', run: () => setActiveTab('compiler') },
+    { id: 'wallet', title: 'Open Wallet', group: 'Navigate', run: () => setActiveTab('wallet') },
+    { id: 'palette', title: 'Toggle Command Palette', group: 'Navigate', shortcut: '⌘K', run: () => setPaletteOpen((o) => !o) },
+  ];
 
   const { t } = useTranslation();
 
@@ -156,6 +190,15 @@ function App() {
           </button>
           <button
             type="button"
+            className={`tab-btn ${activeTab === 'graph' ? 'active' : ''}`}
+            onClick={() => setActiveTab('graph')}
+            data-testid="tab-graph"
+          >
+            <GitBranch size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Dep Graph
+          </button>
+          <button
+            type="button"
             className={`tab-btn ${activeTab === 'wallet' ? 'active' : ''}`}
             onClick={() => setActiveTab('wallet')}
             data-testid="tab-wallet"
@@ -175,6 +218,9 @@ function App() {
         {activeTab === 'multichain' && <MultiChainDashboard />}
         {activeTab === 'abi' && <ContractAbiExplorer />}
         {activeTab === 'wallet' && <WalletConnector />}
+        {activeTab === 'abiform' && <AbiFormGenerator />}
+        {activeTab === 'flowchart' && <ContractFlowchartVisualizer />}
+        {activeTab === 'debugger' && <TransactionTimeTravelDebugger />}
         
         {activeTab === 'compiler' && (
           <div className="compiler-tab-panel container-panel">
@@ -324,7 +370,11 @@ function App() {
             </div>
           </div>
         )}
+
+        {activeTab === 'graph' && <DependencyGraphVisualizer />}
       </main>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={paletteCommands} />
     </div>
   );
 }

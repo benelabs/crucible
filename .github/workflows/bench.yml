@@ -24,7 +24,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -34,7 +34,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Cache cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target
           key: ${{ runner.os }}-bench-${{ hashFiles('**/Cargo.lock') }}
@@ -71,7 +71,7 @@ jobs:
 
       - name: Comment benchmark summary on PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

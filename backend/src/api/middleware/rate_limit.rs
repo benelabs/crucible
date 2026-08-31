@@ -11,6 +11,42 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+/// Tiered rate limit quota configuration based on caller identity/tier
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RateLimitTier {
+    Anonymous,
+    FreeTier,
+    Standard,
+    Enterprise,
+}
+
+impl RateLimitTier {
+    pub fn config(&self) -> RateLimitConfig {
+        match self {
+            RateLimitTier::Anonymous => RateLimitConfig {
+                capacity: 30,
+                refill_rate_per_sec: 2,
+                ttl: Duration::from_secs(3600),
+            },
+            RateLimitTier::FreeTier => RateLimitConfig {
+                capacity: 100,
+                refill_rate_per_sec: 10,
+                ttl: Duration::from_secs(3600),
+            },
+            RateLimitTier::Standard => RateLimitConfig {
+                capacity: 500,
+                refill_rate_per_sec: 50,
+                ttl: Duration::from_secs(3600),
+            },
+            RateLimitTier::Enterprise => RateLimitConfig {
+                capacity: 2000,
+                refill_rate_per_sec: 200,
+                ttl: Duration::from_secs(3600),
+            },
+        }
+    }
+}
+
 /// Configuration for Token Bucket Rate Limiter
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RateLimitConfig {
@@ -21,11 +57,7 @@ pub struct RateLimitConfig {
 
 impl Default for RateLimitConfig {
     fn default() -> Self {
-        Self {
-            capacity: 100,
-            refill_rate_per_sec: 10,
-            ttl: Duration::from_secs(3600),
-        }
+        RateLimitTier::FreeTier.config()
     }
 }
 
@@ -66,8 +98,13 @@ impl TokenBucketRateLimiter {
         &self.config
     }
 
-    /// Check and consume a token for a given key (IP address or API key)
+    /// Check and consume a token for a given key (IP address or API key) with custom or default config
     pub async fn check_and_consume(&self, key: &str) -> Result<RateLimitResult, String> {
+        self.check_and_consume_with_config(key, &self.config).await
+    }
+
+    /// Check and consume a token with specific tiered RateLimitConfig
+    pub async fn check_and_consume_with_config(&self, key: &str, config: &RateLimitConfig) -> Result<RateLimitResult, String> {
         let key_name = format!("rate_limit:{}", key);
 
         if let Some(client) = &self.redis_client {
@@ -115,8 +152,8 @@ impl TokenBucketRateLimiter {
 
                 if let Ok((allowed_int, remaining, capacity)) = script
                     .key(&key_name)
-                    .arg(self.config.capacity)
-                    .arg(self.config.refill_rate_per_sec)
+                    .arg(config.capacity)
+                    .arg(config.refill_rate_per_sec)
                     .arg(now)
                     .invoke_async::<(i32, u64, u64)>(&mut conn)
                     .await
@@ -139,14 +176,14 @@ impl TokenBucketRateLimiter {
 
         let now = Instant::now();
         let bucket = buckets.entry(key.to_string()).or_insert(LocalTokenBucket {
-            tokens: self.config.capacity,
+            tokens: config.capacity,
             last_refill: now,
         });
 
         let elapsed = now.duration_since(bucket.last_refill).as_secs();
         if elapsed > 0 {
-            bucket.tokens = (bucket.tokens + elapsed * self.config.refill_rate_per_sec)
-                .min(self.config.capacity);
+            bucket.tokens = (bucket.tokens + elapsed * config.refill_rate_per_sec)
+                .min(config.capacity);
             bucket.last_refill = now;
         }
 
@@ -159,7 +196,7 @@ impl TokenBucketRateLimiter {
 
         Ok(RateLimitResult {
             allowed,
-            limit: self.config.capacity,
+            limit: config.capacity,
             remaining: bucket.tokens,
             reset_secs: 1,
         })
@@ -215,12 +252,34 @@ pub fn extract_rate_limit_key(headers: &HeaderMap) -> String {
     "ip:anonymous".to_string()
 }
 
-/// Axum Middleware function for Token Bucket Rate Limiting
+/// Resolves the tier from request headers (checking subscription tier, API keys, or fallback to IP/anonymous)
+pub fn resolve_rate_limit_tier(headers: &HeaderMap) -> RateLimitTier {
+    if let Some(tier_str) = headers.get("x-subscription-tier").and_then(|h| h.to_str().ok()) {
+        match tier_str.to_lowercase().as_str() {
+            "enterprise" => return RateLimitTier::Enterprise,
+            "standard" | "pro" => return RateLimitTier::Standard,
+            "free" => return RateLimitTier::FreeTier,
+            _ => {}
+        }
+    }
+
+    if headers.contains_key("x-api-key") || headers.contains_key("authorization") {
+        RateLimitTier::Standard
+    } else if headers.contains_key("x-forwarded-for") || headers.contains_key("x-real-ip") {
+        RateLimitTier::FreeTier
+    } else {
+        RateLimitTier::Anonymous
+    }
+}
+
+/// Axum Middleware function for Token Bucket Rate Limiting with IP & API Key Tiering
 pub async fn rate_limit_middleware(
     request: Request,
     next: Next,
 ) -> Response {
     let key = extract_rate_limit_key(request.headers());
+    let tier = resolve_rate_limit_tier(request.headers());
+    let tier_config = tier.config();
 
     let limiter = request
         .extensions()
@@ -228,7 +287,7 @@ pub async fn rate_limit_middleware(
         .cloned()
         .unwrap_or_else(TokenBucketRateLimiter::global);
 
-    match limiter.check_and_consume(&key).await {
+    match limiter.check_and_consume_with_config(&key, &tier_config).await {
         Ok(result) => {
             if !result.allowed {
                 let mut response = crate::api::errors::make_error_response(
@@ -323,5 +382,27 @@ mod tests {
         assert_eq!(res3.status(), StatusCode::TOO_MANY_REQUESTS);
         assert!(res3.headers().contains_key("X-RateLimit-Limit"));
         assert!(res3.headers().contains_key("Retry-After"));
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_tiering_quota_enforcement() {
+        let mut headers_anon = HeaderMap::new();
+        assert_eq!(resolve_rate_limit_tier(&headers_anon), RateLimitTier::Anonymous);
+        assert_eq!(RateLimitTier::Anonymous.config().capacity, 30);
+
+        let mut headers_ip = HeaderMap::new();
+        headers_ip.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4"));
+        assert_eq!(resolve_rate_limit_tier(&headers_ip), RateLimitTier::FreeTier);
+        assert_eq!(RateLimitTier::FreeTier.config().capacity, 100);
+
+        let mut headers_api = HeaderMap::new();
+        headers_api.insert("x-api-key", HeaderValue::from_static("key-123"));
+        assert_eq!(resolve_rate_limit_tier(&headers_api), RateLimitTier::Standard);
+        assert_eq!(RateLimitTier::Standard.config().capacity, 500);
+
+        let mut headers_ent = HeaderMap::new();
+        headers_ent.insert("x-subscription-tier", HeaderValue::from_static("enterprise"));
+        assert_eq!(resolve_rate_limit_tier(&headers_ent), RateLimitTier::Enterprise);
+        assert_eq!(RateLimitTier::Enterprise.config().capacity, 2000);
     }
 }

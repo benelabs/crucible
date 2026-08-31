@@ -1,4 +1,4 @@
-use redis::Client;
+use redis::{AsyncCommands, Client};
 use sqlx::PgPool;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
@@ -40,7 +40,7 @@ impl CacheWarmWorker {
         info!("Warming cache...");
 
         // Get Redis connection
-        let mut redis_conn = self.redis_client.get_async_connection().await?;
+        let mut redis_conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         // Example: Warm dashboard metrics cache
         // In a real implementation, this would query database and populate Redis

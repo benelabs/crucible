@@ -37,8 +37,11 @@
 
 use std::fmt;
 use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, instrument, warn};
@@ -123,6 +126,122 @@ enum Attempt<T, E> {
     Ok(T),
     Retry(E),
     Abort(E),
+}
+
+/// Serialized DLQ payload stored in Redis for replay.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DlqEntry {
+    pub job_id: String,
+    pub payload: serde_json::Value,
+    pub failure_reason: String,
+    pub failed_at: DateTime<Utc>,
+    pub retry_count: u32,
+}
+
+/// Replay request payload accepted by the DLQ endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct DlqReplayRequest {
+    pub job_ids: Vec<String>,
+}
+
+/// Response payload for the DLQ replay request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct DlqReplayResponse {
+    pub replayed: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// Redis-backed dead-letter queue coordinator for transient job replay.
+#[derive(Debug, Clone)]
+pub struct DlqCoordinator {
+    redis: Arc<redis::Client>,
+    queue_key: String,
+}
+
+impl DlqCoordinator {
+    pub fn new(redis: Arc<redis::Client>) -> Self {
+        Self {
+            redis,
+            queue_key: "dlq:jobs".to_string(),
+        }
+    }
+
+    pub fn with_queue_key(redis: Arc<redis::Client>, queue_key: impl Into<String>) -> Self {
+        Self {
+            redis,
+            queue_key: queue_key.into(),
+        }
+    }
+
+    pub async fn enqueue(
+        &self,
+        job_id: &str,
+        payload: serde_json::Value,
+        failure_reason: impl Into<String>,
+        retry_count: u32,
+    ) -> Result<DlqEntry, redis::RedisError> {
+        let entry = DlqEntry {
+            job_id: job_id.to_string(),
+            payload,
+            failure_reason: failure_reason.into(),
+            failed_at: Utc::now(),
+            retry_count,
+        };
+
+        let hash_key = format!("{}:map", self.queue_key);
+        let mut conn = self.redis.get_multiplexed_async_connection().await?;
+
+        let json = serde_json::to_string(&entry).unwrap_or_else(|_| "{}".to_string());
+        let _: () = conn.hset(&hash_key, job_id, &json).await?;
+        let _: () = conn.lpush(&self.queue_key, job_id).await?;
+
+        Ok(entry)
+    }
+
+    pub async fn replay(
+        &self,
+        job_ids: Vec<String>,
+    ) -> Result<DlqReplayResponse, redis::RedisError> {
+        let mut conn = self.redis.get_multiplexed_async_connection().await?;
+        let hash_key = format!("{}:map", self.queue_key);
+
+        let ids = if job_ids.is_empty() {
+            conn.lrange(&self.queue_key, 0, -1).await?
+        } else {
+            job_ids
+        };
+
+        let mut replayed = Vec::new();
+        let mut failed = Vec::new();
+
+        for job_id in ids {
+            let found: Option<String> = conn.hget(&hash_key, &job_id).await?;
+            if found.is_none() {
+                failed.push(job_id.clone());
+                continue;
+            }
+
+            let _: () = conn.hdel(&hash_key, &job_id).await?;
+            let _: () = conn.lrem(&self.queue_key, 0, &job_id).await?;
+            replayed.push(job_id);
+        }
+
+        Ok(DlqReplayResponse { replayed, failed })
+    }
+}
+
+/// Handler for replaying dead-letter jobs from the DLQ.
+pub async fn handle_dlq_replay(
+    State(store): State<Arc<DlqCoordinator>>,
+    Json(request): Json<DlqReplayRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<DlqReplayResponse>)> {
+    match store.replay(request.job_ids).await {
+        Ok(resp) => Ok((StatusCode::OK, Json(resp))),
+        Err(_) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(DlqReplayResponse::default()),
+        )),
+    }
 }
 
 // ---------------------------------------------------------------------------

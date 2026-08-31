@@ -1,3 +1,9 @@
+## [1.26.0](https://github.com/benelabs/crucible/compare/v1.25.0...v1.26.0) (2026-08-31)
+
+### Features
+
+* **stellar:** ephemeral testnet faucet & account dispenser service (closes [#857](https://github.com/benelabs/crucible/issues/857)) ([f593ce4](https://github.com/benelabs/crucible/commit/f593ce47c044539e0374aabec9b03eb6dfc8d0f8))
+
 ## [1.25.0](https://github.com/benelabs/crucible/compare/v1.24.0...v1.25.0) (2026-08-31)
 
 ### Features

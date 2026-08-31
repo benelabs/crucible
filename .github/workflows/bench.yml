@@ -46,7 +46,7 @@ jobs:
           cargo bench --workspace -- --output-format bencher | tee bench_output.txt
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results-${{ github.sha }}
           path: |

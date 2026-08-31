@@ -1,3 +1,18 @@
+## [1.18.0](https://github.com/benelabs/crucible/compare/v1.17.0...v1.18.0) (2026-08-31)
+
+### Features
+
+* **#909:** Interactive Challenge Engine with step progression and hint system ([f6b6baf](https://github.com/benelabs/crucible/commit/f6b6baf76ceabb54f79cc0b9a603015d815510a4)), closes [#909](https://github.com/benelabs/crucible/issues/909) [#909](https://github.com/benelabs/crucible/issues/909)
+* add #[crucible::quickcheck] property-fuzzing macro ([eeb7549](https://github.com/benelabs/crucible/commit/eeb75498c436d6cca6bb413d8cf75ecffb2f86f8))
+* add env.expect_revert() fluent API and ledger checkpoint engine ([8d21eb7](https://github.com/benelabs/crucible/commit/8d21eb7e81a0df1bfd6b974782967b394740dffc))
+* implement interactive challenge engine with step progression and hint reveal system ([a55d66f](https://github.com/benelabs/crucible/commit/a55d66f733eaa86c9e2c33a111e410371ca7d2c6)), closes [#909](https://github.com/benelabs/crucible/issues/909)
+
+### Bug Fixes
+
+* **#909,#911,#912:** make the challenge engine, bundle splitting, and e2e suite actually work ([35e51ae](https://github.com/benelabs/crucible/commit/35e51aebd7d330105ea4b11539f3c975c4eb3128)), closes [#909](https://github.com/benelabs/crucible/issues/909) [#911](https://github.com/benelabs/crucible/issues/911) [#912](https://github.com/benelabs/crucible/issues/912) [#909](https://github.com/benelabs/crucible/issues/909) [#911](https://github.com/benelabs/crucible/issues/911) [#912](https://github.com/benelabs/crucible/issues/912)
+* **#913:** make the sandbox seccomp profile, Dockerfile, and tests real ([3798742](https://github.com/benelabs/crucible/commit/3798742ff5055b18a3931766c9f25693d8159776)), closes [#913](https://github.com/benelabs/crucible/issues/913)
+* repair unbuildable crucible workspace ([3f7f41b](https://github.com/benelabs/crucible/commit/3f7f41bdaeb4d23f0a1211a2406543437ff3b62a))
+
 ## [1.17.0](https://github.com/benelabs/crucible/compare/v1.16.0...v1.17.0) (2026-08-31)
 
 ### Features

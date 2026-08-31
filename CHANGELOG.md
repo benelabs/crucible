@@ -1,3 +1,9 @@
+## [1.24.0](https://github.com/benelabs/crucible/compare/v1.23.0...v1.24.0) (2026-08-31)
+
+### Features
+
+* **services:** integrate RustSec advisory and deprecated crate scanner (closes [#854](https://github.com/benelabs/crucible/issues/854)) ([e547bf1](https://github.com/benelabs/crucible/commit/e547bf19edaf3e84f0d6f82a1e0e62f25f603289))
+
 ## [1.23.0](https://github.com/benelabs/crucible/compare/v1.22.0...v1.23.0) (2026-08-31)
 
 ### Features

@@ -1,3 +1,9 @@
+## [1.20.0](https://github.com/benelabs/crucible/compare/v1.19.0...v1.20.0) (2026-08-31)
+
+### Features
+
+* **security:** mTLS mesh, Vault secrets, Helm/Terraform IaC, audit CI ([46eb1a5](https://github.com/benelabs/crucible/commit/46eb1a539dc244de3cd916e2eb51ac48126350d3)), closes [#914](https://github.com/benelabs/crucible/issues/914) [#915](https://github.com/benelabs/crucible/issues/915) [#916](https://github.com/benelabs/crucible/issues/916) [#919](https://github.com/benelabs/crucible/issues/919)
+
 ## [1.19.0](https://github.com/benelabs/crucible/compare/v1.18.0...v1.19.0) (2026-08-31)
 
 ### Features

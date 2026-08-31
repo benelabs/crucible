@@ -37,6 +37,19 @@ pub struct AnalyticsSummary {
     pub computed_at: DateTime<Utc>,
 }
 
+/// Anomaly alert for abnormal gas consumption or invocation failure spikes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AnomalyAlert {
+    pub contract_id: String,
+    pub metric: String,
+    pub current_value: f64,
+    pub mean: f64,
+    pub std_dev: f64,
+    pub z_score: f64,
+    pub severity: String,
+    pub timestamp: DateTime<Utc>,
+}
+
 pub struct AnalyticsAggregator {
     db: PgPool,
     redis: redis::Client,
@@ -45,6 +58,50 @@ pub struct AnalyticsAggregator {
 impl AnalyticsAggregator {
     pub fn new(db: PgPool, redis: redis::Client) -> Self {
         Self { db, redis }
+    }
+
+    /// Detects anomalies (gas spikes or error rate spikes) using rolling standard deviation (Z-score).
+    /// Triggers an automatic high-severity alert when Z-score > 3.0 over 1-hour window datasets.
+    pub fn detect_anomaly(
+        &self,
+        contract_id: &str,
+        metric: &str,
+        historical_data: &[f64],
+        current_value: f64,
+    ) -> Option<AnomalyAlert> {
+        if historical_data.is_empty() {
+            return None;
+        }
+
+        let n = historical_data.len() as f64;
+        let mean = historical_data.iter().sum::<f64>() / n;
+        let variance = historical_data
+            .iter()
+            .map(|val| (val - mean).powi(2))
+            .sum::<f64>()
+            / n;
+        let std_dev = variance.sqrt();
+
+        if std_dev.abs() < f64::EPSILON {
+            return None;
+        }
+
+        let z_score = (current_value - mean) / std_dev;
+
+        if z_score > 3.0 {
+            Some(AnomalyAlert {
+                contract_id: contract_id.to_string(),
+                metric: metric.to_string(),
+                current_value,
+                mean,
+                std_dev,
+                z_score,
+                severity: "HIGH".to_string(),
+                timestamp: Utc::now(),
+            })
+        } else {
+            None
+        }
     }
 
     /// Compute and cache analytics for a specific contract.
@@ -280,5 +337,29 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: AnalyticsSummary = serde_json::from_str(&json).unwrap();
         assert_eq!(back.total_contracts, 10);
+    }
+
+    #[test]
+    fn test_detect_anomaly_no_spike() {
+        let aggregator = AnalyticsAggregator::new(lazy_pool(), lazy_redis());
+        let historical_gas = vec![1000.0, 1050.0, 980.0, 1020.0, 1010.0, 990.0];
+        let current_gas = 1040.0;
+        let alert = aggregator.detect_anomaly("C123", "gas_usage", &historical_gas, current_gas);
+        assert!(alert.is_none());
+    }
+
+    #[test]
+    fn test_detect_anomaly_gas_spike() {
+        let aggregator = AnalyticsAggregator::new(lazy_pool(), lazy_redis());
+        // Stable baseline with mean ~1000.0, std dev ~14.14
+        let historical_gas = vec![1000.0, 1010.0, 990.0, 1000.0, 1010.0, 990.0];
+        let current_spike_gas = 1200.0; // Z-score > 10.0
+        let alert = aggregator.detect_anomaly("C123", "gas_usage", &historical_gas, current_spike_gas);
+        assert!(alert.is_some());
+        let alert = alert.unwrap();
+        assert_eq!(alert.contract_id, "C123");
+        assert_eq!(alert.metric, "gas_usage");
+        assert_eq!(alert.severity, "HIGH");
+        assert!(alert.z_score > 3.0);
     }
 }

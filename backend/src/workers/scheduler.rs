@@ -176,7 +176,7 @@ async fn run_job_loop(
         let lock_key = format!("{}:lock", job.name);
         let lock_ttl_ms = (job.timeout_secs + 5) * 1000;
 
-        let mut conn = match redis.get_async_connection().await {
+        let mut conn = match redis.get_multiplexed_async_connection().await {
             Ok(conn) => conn,
             Err(e) => {
                 error!("Failed to connect to Redis for lock acquisition: {}", e);
@@ -194,8 +194,6 @@ async fn run_job_loop(
             .await
         {
             Ok(v) => v,
-            Ok(Some(v)) if v == "OK" => true,
-            Ok(_) => false,
             Err(e) => {
                 error!("Failed to acquire distributed lock: {}", e);
                 continue;

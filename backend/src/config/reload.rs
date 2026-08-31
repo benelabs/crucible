@@ -1,6 +1,8 @@
 use crate::config::{AppConfig as BaseAppConfig, ConfigError, Environment};
 use arc_swap::ArcSwap;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use redis::{AsyncCommands, Client as RedisClient};
+use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{info, instrument};
@@ -10,6 +12,12 @@ use tracing::{info, instrument};
 pub enum ConfigReloadError {
     #[error("Configuration load error: {0}")]
     LoadError(#[from] ConfigError),
+
+    #[error("Redis error: {0}")]
+    Redis(#[from] redis::RedisError),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 impl IntoResponse for ConfigReloadError {
@@ -24,9 +32,34 @@ impl IntoResponse for ConfigReloadError {
     }
 }
 
+/// Hot-reloaded in-memory contract registry backed by an atomic ArcSwap.
+#[derive(Debug, Clone, Default)]
+pub struct ContractRegistry {
+    contracts: ArcSwap<HashMap<String, serde_json::Value>>,
+}
+
+impl ContractRegistry {
+    pub fn new() -> Self {
+        Self {
+            contracts: ArcSwap::from(Arc::new(HashMap::new())),
+        }
+    }
+
+    pub fn load(&self) -> Arc<HashMap<String, serde_json::Value>> {
+        self.contracts.load_full()
+    }
+
+    pub fn update(&self, contracts: HashMap<String, serde_json::Value>) {
+        self.contracts.store(Arc::new(contracts));
+    }
+}
+
 /// Manages hot-reloadable application configuration.
 pub struct ConfigManager {
     current_config: ArcSwap<BaseAppConfig>,
+    contract_registry: ContractRegistry,
+    redis_client: Option<RedisClient>,
+    reload_channel: String,
 }
 
 impl ConfigManager {
@@ -34,7 +67,24 @@ impl ConfigManager {
     pub fn new(initial_config: BaseAppConfig) -> Self {
         Self {
             current_config: ArcSwap::from(Arc::new(initial_config)),
+            contract_registry: ContractRegistry::new(),
+            redis_client: None,
+            reload_channel: "config:reload".to_string(),
         }
+    }
+
+    pub fn with_redis(mut self, redis: RedisClient) -> Self {
+        self.redis_client = Some(redis);
+        self
+    }
+
+    pub fn with_reload_channel(mut self, channel: impl Into<String>) -> Self {
+        self.reload_channel = channel.into();
+        self
+    }
+
+    pub fn contract_registry(&self) -> &ContractRegistry {
+        &self.contract_registry
     }
 
     /// Get a reference to the current configuration.
@@ -47,15 +97,50 @@ impl ConfigManager {
     pub async fn reload(&self) -> Result<(), ConfigReloadError> {
         info!("Starting configuration reload...");
 
-        // Reload the layered config from the environment
         let env = Environment::from_env();
         let new_config = BaseAppConfig::load(env)?;
-
-        // Update the global configuration atomically
         self.current_config.store(Arc::new(new_config));
+
+        if let Some(redis) = &self.redis_client {
+            let mut conn = redis.get_multiplexed_async_connection().await?;
+            let payload = serde_json::to_string(&*self.current_config.load_full())?;
+            let _: () = conn.publish(&self.reload_channel, payload).await?;
+        }
 
         info!("Configuration successfully reloaded");
         Ok(())
+    }
+
+    pub async fn reload_from_redis(&self, redis: &RedisClient) -> Result<(), ConfigReloadError> {
+        let mut conn = redis.get_multiplexed_async_connection().await?;
+        let raw: Option<String> = conn.get("config:current").await?;
+        let json = raw.ok_or_else(|| ConfigReloadError::LoadError(ConfigError::LoadError("config:current missing".to_string())))?;
+        let new_config: BaseAppConfig = serde_json::from_str(&json)?;
+        self.current_config.store(Arc::new(new_config));
+        Ok(())
+    }
+
+    pub async fn watch_redis(self: Arc<Self>, redis: RedisClient) -> tokio::task::JoinHandle<()> {
+        let channel = self.reload_channel.clone();
+        tokio::spawn(async move {
+            #[allow(deprecated)]
+            let conn = match redis.get_async_connection().await {
+                Ok(conn) => conn,
+                Err(_) => return,
+            };
+            let mut pubsub = conn.into_pubsub();
+            let _ = pubsub.subscribe(&channel).await;
+            let mut stream = pubsub.into_on_message();
+            use futures_util::StreamExt;
+            while let Some(msg) = stream.next().await {
+                let payload: String = msg.get_payload().unwrap_or_default();
+                if !payload.is_empty() {
+                    if let Ok(update) = serde_json::from_str::<BaseAppConfig>(&payload) {
+                        self.current_config.store(Arc::new(update));
+                    }
+                }
+            }
+        })
     }
 
     /// Update the configuration with a JSON patch/overlay.
@@ -533,5 +618,35 @@ mod tests {
     fn test_reload_error_deserialise_display() {
         let e = ReloadError::Deserialise(serde_json::from_str::<AppConfig>("bad").unwrap_err());
         assert!(!e.to_string().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_registry_reload_keeps_reads_consistent() {
+        let manager = Arc::new(ConfigManager::new(AppConfig::default()));
+        let mut tasks = Vec::new();
+
+        for _ in 0..8 {
+            let manager = manager.clone();
+            tasks.push(tokio::spawn(async move {
+                for n in 0..100 {
+                    let _ = manager.contract_registry().load();
+                    let reg = manager.contract_registry().load();
+                    let _ = reg.get(&"contract".to_string());
+                    let _ = n;
+                }
+            }));
+        }
+
+        for idx in 0..25 {
+            let mut contracts = HashMap::new();
+            contracts.insert("contract".to_string(), serde_json::json!({ "slot": idx }));
+            manager.contract_registry().update(contracts);
+        }
+
+        for task in tasks {
+            task.await.unwrap();
+        }
+
+        assert_eq!(manager.contract_registry().load().len(), 1);
     }
 }

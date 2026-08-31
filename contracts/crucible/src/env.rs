@@ -324,6 +324,7 @@ pub struct MockEnv {
     contract_ids: Rc<RefCell<HashMap<String, Address>>>,
     tokens: Rc<RefCell<HashMap<String, MockToken>>>,
     xlm_token_address: Rc<RefCell<Option<Address>>>,
+    prng_state: Rc<RefCell<[u8; 32]>>,
     track_costs: bool,
     crypto_registry: Rc<RefCell<MockCryptoRegistry>>,
     checkpoints: Rc<RefCell<CheckpointStack>>,
@@ -617,6 +618,25 @@ impl MockEnv {
     /// Creates a new `MockEnvBuilder` for fluent environment construction.
     pub fn builder() -> MockEnvBuilder {
         MockEnvBuilder::new()
+    }
+
+    /// Set the deterministic pseudo-random seed used by test helpers.
+    pub fn set_prng_seed(&self, seed: [u8; 32]) {
+        *self.prng_state.borrow_mut() = seed;
+    }
+
+    /// Advance and return the deterministic pseudo-random stream.
+    ///
+    /// This is deliberately a test PRNG, not a source of cryptographic
+    /// randomness. Equal seeds produce equal sequences across environments.
+    pub fn next_prng_u64(&self) -> u64 {
+        let mut state = self.prng_state.borrow_mut();
+        let mut value = u64::from_le_bytes(state[..8].try_into().expect("fixed seed width"));
+        value ^= value << 13;
+        value ^= value >> 7;
+        value ^= value << 17;
+        state[..8].copy_from_slice(&value.to_le_bytes());
+        value
     }
 
     /// Get an account handle by name.
@@ -1627,6 +1647,7 @@ impl Default for MockEnv {
             contract_ids: Rc::new(RefCell::new(HashMap::new())),
             tokens: Rc::new(RefCell::new(HashMap::new())),
             xlm_token_address: Rc::new(RefCell::new(None)),
+            prng_state: Rc::new(RefCell::new([0; 32])),
             track_costs: false,
             crypto_registry: Rc::new(RefCell::new(MockCryptoRegistry::new())),
             checkpoints: Rc::new(RefCell::new(CheckpointStack::new())),
@@ -1665,6 +1686,30 @@ mod tests {
     use super::*;
     // Ensure MockEnv does NOT implement Send or Sync.
     static_assertions::assert_not_impl_any!(MockEnv: Send, Sync);
+
+    #[test]
+    fn seeded_prng_is_repeatable_and_advances() {
+        let first = MockEnv::default();
+        let second = MockEnv::default();
+        let seed = [7u8; 32];
+        first.set_prng_seed(seed);
+        second.set_prng_seed(seed);
+
+        let first_values = [first.next_prng_u64(), first.next_prng_u64()];
+        let second_values = [second.next_prng_u64(), second.next_prng_u64()];
+
+        assert_eq!(first_values, second_values);
+        assert_ne!(first_values[0], first_values[1]);
+    }
+
+    #[test]
+    fn different_prng_seeds_produce_different_streams() {
+        let first = MockEnv::default();
+        let second = MockEnv::default();
+        first.set_prng_seed([1u8; 32]);
+        second.set_prng_seed([2u8; 32]);
+        assert_ne!(first.next_prng_u64(), second.next_prng_u64());
+    }
 }
 
 /// Builder for constructing a `MockEnv` with custom configuration.
@@ -2829,4 +2874,3 @@ mod zk_pairing_harness_tests {
         assert!(!ok, "tampered Groth16 proof must fail on-chain");
     }
 }
-

@@ -1,0 +1,253 @@
+# deployments/helm/crucible/values.yaml
+#
+# Default values for the crucible Helm chart.
+# Override per-environment with:
+#   helm install crucible ./deployments/helm/crucible \
+#     -f deployments/helm/crucible/values-production.yaml
+#
+# All secrets (database passwords, JWT keys) must be supplied at install time
+# via --set or a sealed-secrets / ESO operator — never committed to source
+# control. Values marked "[REQUIRED]" have no default and will cause the
+# install to fail if omitted.
+
+# ── Global ─────────────────────────────────────────────────────────────────────
+global:
+  # Image pull policy for all components.
+  imagePullPolicy: IfNotPresent
+
+  # Container image registry prefix.
+  imageRegistry: ""
+
+  # Additional labels added to every resource.
+  commonLabels: {}
+    # team: platform
+
+  # Additional annotations added to every resource.
+  commonAnnotations:
+    # cert-manager.io/rotation-policy: Always  # Enable cert auto-rotation
+
+  # Environment name (development | staging | production).
+  environment: production
+
+# ── Backend ────────────────────────────────────────────────────────────────────
+backend:
+  enabled: true
+
+  image:
+    repository: ghcr.io/your-org/crucible-backend
+    # Defaults to chart appVersion; pin in production values file.
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+    port: 8080
+    grpcPort: 50051
+    annotations: {}
+
+  ingress:
+    enabled: true
+    className: istio
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hosts:
+      - host: api.crucible.example.com  # Replace with real domain.
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: crucible-backend-tls-secret
+        hosts:
+          - api.crucible.example.com
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+    # Scale-down stabilisation window: wait 5 min before removing pods.
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Pod disruption budget — keep at least one pod available during node drains.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Vault integration (see backend/src/config/vault.rs)
+  vault:
+    address: "https://vault.vault.svc.cluster.local:8200"  # Internal cluster URL
+    authMethod: kubernetes
+    role: crucible-backend
+    saTokenPath: "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    # skipVerify: false  # Never set true in production
+
+  # Environment variables injected into the backend container.
+  env:
+    RUST_LOG: "info"
+    DATABASE_MAX_CONNECTIONS: "20"
+    REDIS_POOL_SIZE: "10"
+
+  # Extra environment variables from Kubernetes Secrets / ConfigMaps.
+  envFrom: []
+    # - secretRef:
+    #     name: crucible-backend-secrets
+
+  # Node selector, tolerations, and affinity for pod scheduling.
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: backend
+            topologyKey: kubernetes.io/hostname
+
+  serviceAccount:
+    create: true
+    name: crucible-backend
+    annotations:
+      # AWS EKS — associate the IAM Role for KMS / Secrets Manager.
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/crucible-backend-role"
+
+# ── Frontend ───────────────────────────────────────────────────────────────────
+frontend:
+  enabled: true
+
+  image:
+    repository: ghcr.io/your-org/crucible-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  ingress:
+    enabled: true
+    className: istio
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: crucible.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: crucible-frontend-tls-secret
+        hosts:
+          - crucible.example.com
+
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+  serviceAccount:
+    create: true
+    name: crucible-frontend
+    annotations: {}
+
+# ── PostgreSQL ─────────────────────────────────────────────────────────────────
+# In production, use an external managed database (RDS / Cloud SQL) and set
+# `postgresql.enabled: false`. Supply the connection string via Vault.
+postgresql:
+  enabled: false  # Disabled in production; use RDS/Cloud SQL.
+  # When enabled for dev/staging:
+  auth:
+    database: crucible
+    # username and password injected from Vault dynamic credentials.
+  primary:
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+
+# ── Redis ──────────────────────────────────────────────────────────────────────
+redis:
+  enabled: false  # Disabled in production; use ElastiCache / Memorystore.
+  architecture: replication
+  auth:
+    enabled: true
+    # existingSecret: crucible-redis-secret
+  master:
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+
+# ── cert-manager sub-chart ────────────────────────────────────────────────────
+cert-manager:
+  enabled: true
+  installCRDs: true
+  global:
+    leaderElection:
+      namespace: cert-manager
+
+# ── Vault sub-chart (dev/staging only) ────────────────────────────────────────
+vault:
+  enabled: false  # Enable for local dev; never enable in production.
+  server:
+    dev:
+      enabled: true
+      devRootToken: "root"
+
+# ── metrics-server sub-chart ─────────────────────────────────────────────────
+metrics-server:
+  enabled: false  # Most managed Kubernetes services include metrics-server.
+  args:
+    - --kubelet-insecure-tls
+
+# ── Istio mTLS ────────────────────────────────────────────────────────────────
+istio:
+  # When true, the chart applies the PeerAuthentication / DestinationRule
+  # manifests from deployments/k8s/mtls-policy.yaml as a Helm hook.
+  mtlsEnabled: true
+  # Inject sidecar into every pod in the namespace.
+  injectSidecar: true

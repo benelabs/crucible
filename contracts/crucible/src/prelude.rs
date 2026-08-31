@@ -34,5 +34,10 @@ pub use crate::zk::{
     G1, G2, Groth16Proof, Groth16VerifyingKey, Gt, PairingCurve, PlonkProof,
 };
 
+pub use crate::quickcheck::{
+    Arbitrary, Config as QuickcheckConfig, SorobanAmount, SorobanI128, SorobanTimestamp,
+    SorobanU32,
+};
+
 #[cfg(feature = "derive")]
 pub use crucible_macros::fixture;

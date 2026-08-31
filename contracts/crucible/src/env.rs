@@ -1779,6 +1779,30 @@ impl MockEnvBuilder {
         self
     }
 
+    /// Stops the environment writing a test snapshot file when it is dropped.
+    ///
+    /// The Soroban test host writes a JSON snapshot per `Env` by default, which
+    /// is useful for a handful of hand-written tests but produces one file per
+    /// generated case under
+    /// [`#[crucible::quickcheck]`](crate::quickcheck). Property tests should
+    /// build their environments with this.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// #[crucible::quickcheck]
+    /// fn some_property(amount: SorobanAmount) {
+    ///     let env = MockEnv::builder().without_snapshots().build();
+    ///     // ...
+    /// }
+    /// ```
+    pub fn without_snapshots(mut self) -> Self {
+        self.env.inner.set_config(soroban_sdk::testutils::EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        });
+        self
+    }
+
     /// Enable cost tracking for instruction counting.
     pub fn track_costs(mut self) -> Self {
         self.env.track_costs = true;

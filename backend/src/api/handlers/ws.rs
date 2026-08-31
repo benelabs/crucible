@@ -51,6 +51,7 @@ pub async fn ws_dashboard_handler(
 }
 
 async fn handle_socket(socket: WebSocket, state: Arc<WsState>) {
+    crate::services::sys_metrics::record_websocket_conn_change(1);
     let (mut sender, mut receiver) = socket.split();
 
     info!("WebSocket client connected for dashboard updates");
@@ -107,6 +108,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<WsState>) {
             }
         }
     }
+    crate::services::sys_metrics::record_websocket_conn_change(-1);
 }
 
 #[cfg(test)]

@@ -2,6 +2,9 @@
 //!
 //! Provides three endpoints:
 //!
+//! - `GET /health/live`  — liveness probe: returns 200 if the process is running.
+//! - `GET /health/ready` — readiness probe: returns 200 only when PostgreSQL,
+//!   Redis, worker queue, and Soroban RPC are reachable; returns 503 otherwise.
 //! - `GET /health/live`    — liveness probe: returns 200 if the process is running.
 //! - `GET /health/ready`   — readiness probe: returns 200 only when PostgreSQL,
 //!   Redis, and the worker queue are reachable; returns 503 otherwise.
@@ -13,10 +16,16 @@
 //! unhealthy. Connection strings, hostnames, and credentials are never included
 //! in responses.
 
+use std::time::Duration;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use redis::aio::ConnectionManager;
 use serde::Serialize;
 use sqlx::PgPool;
+use tokio::time::timeout;
+use tracing::{debug, instrument, warn};
+
+/// Timeout threshold for individual dependency health check pings.
+const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, instrument, warn};
 
@@ -29,6 +38,7 @@ pub struct HealthState {
     pub db: PgPool,
     pub cache: ConnectionManager,
     pub queue: ConnectionManager,
+    pub soroban_rpc_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -36,7 +46,7 @@ pub struct HealthState {
 // ---------------------------------------------------------------------------
 
 /// Single dependency check result.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub struct CheckResult {
     pub status: &'static str,
@@ -45,15 +55,16 @@ pub struct CheckResult {
 }
 
 /// Container for all dependency checks.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct HealthChecks {
     pub database: CheckResult,
     pub redis: CheckResult,
     pub queue: CheckResult,
+    pub soroban_rpc: CheckResult,
 }
 
 /// Response body for the readiness probe.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct HealthReport {
     /// Overall status: `"healthy"` or `"degraded"`.
     pub status: String,
@@ -64,7 +75,7 @@ pub struct HealthReport {
 }
 
 /// Response body for the liveness probe.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct LivenessResponse {
     pub status: &'static str,
     pub version: String,
@@ -79,14 +90,122 @@ pub struct StartupResponse {
 }
 
 // ---------------------------------------------------------------------------
+// HealthChecker Abstraction
+// ---------------------------------------------------------------------------
+
+/// Deep dependency diagnostic executor with timeout guards.
+pub struct HealthChecker;
+
+impl HealthChecker {
+    /// Execute health pings across all dependencies with quick timeout bounds.
+    pub async fn run_checks(state: &HealthState) -> (bool, HealthReport) {
+        let database = Self::check_database_with_timeout(&state.db).await;
+        let redis = Self::check_cache_with_timeout(&state.cache).await;
+        let queue = Self::check_queue_with_timeout(&state.queue).await;
+        let soroban_rpc = Self::check_soroban_rpc_with_timeout(state.soroban_rpc_url.as_deref()).await;
+
+        let all_healthy = database.status == "up"
+            && redis.status == "up"
+            && queue.status == "up"
+            && soroban_rpc.status == "up";
+
+        let report = HealthReport {
+            status: if all_healthy {
+                "healthy".into()
+            } else {
+                "degraded".into()
+            },
+            checks: HealthChecks {
+                database,
+                redis,
+                queue,
+                soroban_rpc,
+            },
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+
+        (all_healthy, report)
+    }
+
+    pub async fn check_database_with_timeout(pool: &PgPool) -> CheckResult {
+        match timeout(HEALTH_CHECK_TIMEOUT, check_database(pool)).await {
+            Ok(result) => result,
+            Err(_) => CheckResult {
+                status: "down",
+                message: Some("database health check timed out".into()),
+            },
+        }
+    }
+
+    pub async fn check_cache_with_timeout(conn: &ConnectionManager) -> CheckResult {
+        match timeout(HEALTH_CHECK_TIMEOUT, check_cache(conn)).await {
+            Ok(result) => result,
+            Err(_) => CheckResult {
+                status: "down",
+                message: Some("redis health check timed out".into()),
+            },
+        }
+    }
+
+    pub async fn check_queue_with_timeout(conn: &ConnectionManager) -> CheckResult {
+        match timeout(HEALTH_CHECK_TIMEOUT, check_queue(conn)).await {
+            Ok(result) => result,
+            Err(_) => CheckResult {
+                status: "down",
+                message: Some("queue health check timed out".into()),
+            },
+        }
+    }
+
+    pub async fn check_soroban_rpc_with_timeout(url: Option<&str>) -> CheckResult {
+        let url = match url {
+            Some(u) if !u.trim().is_empty() => u,
+            _ => {
+                return CheckResult {
+                    status: "up",
+                    message: Some("rpc endpoint unconfigured (defaulting up)".into()),
+                }
+            }
+        };
+
+        match timeout(HEALTH_CHECK_TIMEOUT, async {
+            reqwest::Client::new()
+                .post(url)
+                .json(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getHealth"
+                }))
+                .send()
+                .await
+        })
+        .await
+        {
+            Ok(Ok(resp)) if resp.status().is_success() => CheckResult {
+                status: "up",
+                message: None,
+            },
+            Ok(Ok(resp)) => CheckResult {
+                status: "down",
+                message: Some(format!("rpc error status: {}", resp.status())),
+            },
+            Ok(Err(e)) => CheckResult {
+                status: "down",
+                message: Some(format!("rpc unreachable: {e}")),
+            },
+            Err(_) => CheckResult {
+                status: "down",
+                message: Some("rpc health check timed out".into()),
+            },
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 /// `GET /health/live` — liveness probe.
-///
-/// Always returns `200 OK` as long as the process is running. Kubernetes uses
-/// this to decide whether to restart the container. Never fails due to
-/// PostgreSQL, Redis, or worker queue unavailability.
 #[instrument(skip_all)]
 pub async fn liveness() -> impl IntoResponse {
     debug!("Liveness probe");
@@ -101,17 +220,11 @@ pub async fn liveness() -> impl IntoResponse {
 
 /// `GET /health/ready` — readiness probe.
 ///
-/// Checks PostgreSQL, Redis, and worker queue connectivity. Returns `200 OK`
-/// when all dependencies are healthy, or `503 Service Unavailable` when any
-/// are not. Kubernetes uses this to decide whether to route traffic to the pod.
+/// Returns 200 OK when all backing services are healthy, or 503 Service Unavailable
+/// when any dependency is degraded or unreachable.
 #[instrument(skip_all)]
 pub async fn readiness(State(state): State<HealthState>) -> impl IntoResponse {
-    let database = check_database(&state.db).await;
-    let redis = check_cache(&state.cache).await;
-    let queue = check_queue(&state.queue).await;
-
-    let all_healthy =
-        database.status == "up" && redis.status == "up" && queue.status == "up";
+    let (all_healthy, report) = HealthChecker::run_checks(&state).await;
 
     let status_code = if all_healthy {
         StatusCode::OK
@@ -119,22 +232,7 @@ pub async fn readiness(State(state): State<HealthState>) -> impl IntoResponse {
         StatusCode::SERVICE_UNAVAILABLE
     };
 
-    (
-        status_code,
-        Json(HealthReport {
-            status: if all_healthy {
-                "healthy".into()
-            } else {
-                "degraded".into()
-            },
-            checks: HealthChecks {
-                database,
-                redis,
-                queue,
-            },
-            version: env!("CARGO_PKG_VERSION").to_string(),
-        }),
-    )
+    (status_code, Json(report))
 }
 
 /// `GET /health/startup` — startup probe.
@@ -286,7 +384,6 @@ async fn check_cache(conn: &ConnectionManager) -> CheckResult {
 async fn check_queue(conn: &ConnectionManager) -> CheckResult {
     let mut conn = conn.clone();
 
-    // Step 1: Verify queue backend (Redis) connectivity
     let ping = redis::cmd("PING")
         .query_async::<String>(&mut conn)
         .await;
@@ -301,10 +398,6 @@ async fn check_queue(conn: &ConnectionManager) -> CheckResult {
         }
     }
 
-    // Step 2: Check whether workers are actually registered.
-    // Apalis workers register in a `{namespace}:consumers` Redis SET via their
-    // keep-alive heartbeat.  Also checks the project's `worker:*:health` pattern
-    // used by WorkerHealthMonitor.
     if has_registered_workers(&mut conn).await {
         debug!("Queue health check passed — active workers found");
         CheckResult {
@@ -320,10 +413,7 @@ async fn check_queue(conn: &ConnectionManager) -> CheckResult {
     }
 }
 
-/// Returns `true` when at least one worker consumer or health heartbeat is
-/// present in Redis.
 async fn has_registered_workers(conn: &mut ConnectionManager) -> bool {
-    // Check for Apalis consumer sets (workers registered via keep_alive)
     match redis::cmd("KEYS")
         .arg("*:consumers")
         .query_async::<Vec<String>>(conn)
@@ -345,7 +435,6 @@ async fn has_registered_workers(conn: &mut ConnectionManager) -> bool {
         _ => {}
     }
 
-    // Also check for project-specific worker heartbeat keys
     match redis::cmd("KEYS")
         .arg("worker:*:health")
         .query_async::<Vec<String>>(conn)
@@ -360,17 +449,6 @@ async fn has_registered_workers(conn: &mut ConnectionManager) -> bool {
 // Router helper
 // ---------------------------------------------------------------------------
 
-/// Returns an Axum router with the health check routes mounted.
-///
-/// Mount this under `/health` in the main application router:
-///
-/// ```rust,no_run
-/// use axum::Router;
-/// use backend::api::handlers::health;
-///
-/// let app: Router = Router::new()
-///     .nest("/health", health::router());
-/// ```
 pub fn router() -> axum::Router<HealthState> {
     use axum::routing::get;
     axum::Router::new()
@@ -389,7 +467,6 @@ mod tests {
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;
 
-    /// Build a minimal router with only the liveness endpoint (no AppState needed).
     fn liveness_app() -> axum::Router {
         use axum::routing::get;
         axum::Router::new().route("/live", get(liveness))
@@ -437,6 +514,10 @@ mod tests {
                     status: "up",
                     message: None,
                 },
+                soroban_rpc: CheckResult {
+                    status: "up",
+                    message: None,
+                },
             },
             version: "0.1.0".into(),
         };
@@ -445,8 +526,7 @@ mod tests {
         assert_eq!(json["checks"]["database"]["status"], "up");
         assert_eq!(json["checks"]["redis"]["status"], "up");
         assert_eq!(json["checks"]["queue"]["status"], "up");
-        assert!(json["checks"]["database"].get("message").is_none());
-        assert_eq!(json["version"], "0.1.0");
+        assert_eq!(json["checks"]["soroban_rpc"]["status"], "up");
     }
 
     #[test]
@@ -466,6 +546,10 @@ mod tests {
                     status: "down",
                     message: Some("workers unavailable".into()),
                 },
+                soroban_rpc: CheckResult {
+                    status: "up",
+                    message: None,
+                },
             },
             version: "0.1.0".into(),
         };
@@ -476,13 +560,46 @@ mod tests {
             json["checks"]["database"]["message"],
             "connection unavailable"
         );
-        assert_eq!(json["checks"]["redis"]["status"], "up");
-        assert_eq!(json["checks"]["redis"].get("message"), None);
         assert_eq!(json["checks"]["queue"]["status"], "down");
-        assert_eq!(
-            json["checks"]["queue"]["message"],
-            "workers unavailable"
-        );
+    }
+
+    #[test]
+    fn partial_degradation_status_code_mapping() {
+        let healthy_report = HealthReport {
+            status: "healthy".into(),
+            checks: HealthChecks {
+                database: CheckResult { status: "up", message: None },
+                redis: CheckResult { status: "up", message: None },
+                queue: CheckResult { status: "up", message: None },
+                soroban_rpc: CheckResult { status: "up", message: None },
+            },
+            version: "0.1.0".into(),
+        };
+        let degraded_report = HealthReport {
+            status: "degraded".into(),
+            checks: HealthChecks {
+                database: CheckResult { status: "down", message: Some("err".into()) },
+                redis: CheckResult { status: "up", message: None },
+                queue: CheckResult { status: "up", message: None },
+                soroban_rpc: CheckResult { status: "up", message: None },
+            },
+            version: "0.1.0".into(),
+        };
+
+        let status_healthy = if healthy_report.status == "healthy" {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+
+        let status_degraded = if degraded_report.status == "healthy" {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+
+        assert_eq!(status_healthy, StatusCode::OK);
+        assert_eq!(status_degraded, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[test]

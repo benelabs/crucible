@@ -666,6 +666,110 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn sandbox_rejects_oversized_wasm() {
+        let service = ContractSandboxService::default();
+        let mut req = request();
+        // Create oversized WASM (exceeds 2MB limit)
+        req.wasm_base64 = STANDARD.encode(vec![0u8; 2_100_000]);
+
+        let error = service.execute(req).await.unwrap_err();
+        assert!(matches!(error, SandboxError::InvalidRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn sandbox_rejects_too_many_args() {
+        let service = ContractSandboxService::default();
+        let mut req = request();
+        // Exceed max_args (32)
+        req.args_xdr_base64 = vec!["AQID".to_string(); 40];
+
+        let error = service.execute(req).await.unwrap_err();
+        assert!(matches!(error, SandboxError::InvalidRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn sandbox_enforces_memory_budget() {
+        struct MemoryExceededExecutor;
+        impl ContractExecutor for MemoryExceededExecutor {
+            fn execute(&self, execution: PreparedExecution) -> Result<RawExecution, SandboxError> {
+                Ok(RawExecution {
+                    status: ExecutionStatus::Reverted,
+                    contract_id: None,
+                    result_xdr: None,
+                    diagnostics: vec![format!(
+                        "execution exceeded configured memory budget of {} bytes",
+                        execution.limits.max_memory_bytes
+                    )],
+                    cpu_instructions: 100,
+                    memory_bytes: execution.limits.max_memory_bytes,
+                })
+            }
+        }
+
+        let service = ContractSandboxService::with_executor(
+            SandboxLimits::default(),
+            Arc::new(MemoryExceededExecutor),
+        );
+
+        let response = service.execute(request()).await.unwrap();
+        assert_eq!(response.status, ExecutionStatus::Reverted);
+        assert!(response
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("memory budget")));
+    }
+
+    #[tokio::test]
+    async fn sandbox_validates_ledger_state_input() {
+        let service = ContractSandboxService::default();
+        let mut req = request();
+        req.ledger_sequence = Some(42);
+        req.ledger_timestamp = Some(1_700_000_000);
+
+        let response = service.execute(req).await;
+
+        // Valid ledger parameters must not be rejected at the request-validation layer.
+        assert!(
+            response.is_ok(),
+            "expected valid ledger parameters to be accepted, got {response:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sandbox_multiple_concurrent_executions() {
+        let service = ContractSandboxService::with_executor(
+            SandboxLimits::default(),
+            Arc::new(StaticExecutor {
+                raw: RawExecution {
+                    status: ExecutionStatus::Succeeded,
+                    contract_id: None,
+                    result_xdr: None,
+                    diagnostics: Vec::new(),
+                    cpu_instructions: 1,
+                    memory_bytes: 1,
+                },
+            }),
+        );
+
+        // Fire multiple concurrent requests
+        let mut handles = vec![];
+        for _ in 0..5 {
+            let svc = service.clone();
+            let handle = tokio::spawn(async move {
+                svc.execute(request()).await
+            });
+            handles.push(handle);
+        }
+
+        // All should complete successfully
+        for handle in handles {
+            let result = handle.await;
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_ok());
+        }
+    }
+
 
     fn request() -> ContractExecutionRequest {
         ContractExecutionRequest {

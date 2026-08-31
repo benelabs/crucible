@@ -1,3 +1,127 @@
+## [1.23.0](https://github.com/benelabs/crucible/compare/v1.22.0...v1.23.0) (2026-08-31)
+
+### Features
+
+* **services:** contract bytecode decompiler & source code verification service (closes [#848](https://github.com/benelabs/crucible/issues/848)) ([2764d2e](https://github.com/benelabs/crucible/commit/2764d2e1a72b70cd72be61f71ecb9c31c71c417a))
+
+## [1.22.0](https://github.com/benelabs/crucible/compare/v1.21.0...v1.22.0) (2026-08-31)
+
+### Features
+
+* **frontend:** add Monaco editor, deployment wizard, event query console and theme engine ([660964d](https://github.com/benelabs/crucible/commit/660964d13a9068d2e44c4821a28108a1faa9c98d)), closes [#900](https://github.com/benelabs/crucible/issues/900) [#899](https://github.com/benelabs/crucible/issues/899) [#898](https://github.com/benelabs/crucible/issues/898) [#897](https://github.com/benelabs/crucible/issues/897)
+
+## [1.21.0](https://github.com/benelabs/crucible/compare/v1.20.0...v1.21.0) (2026-08-31)
+
+### Features
+
+* **frontend:** add alert studio, gas trend, RPC monitor and audit report export ([5500636](https://github.com/benelabs/crucible/commit/5500636b3d3fb1d9eb652dd3a6351b325cd358d3)), closes [#896](https://github.com/benelabs/crucible/issues/896) [#895](https://github.com/benelabs/crucible/issues/895) [#893](https://github.com/benelabs/crucible/issues/893) [#892](https://github.com/benelabs/crucible/issues/892)
+
+## [1.20.0](https://github.com/benelabs/crucible/compare/v1.19.0...v1.20.0) (2026-08-31)
+
+### Features
+
+* **security:** mTLS mesh, Vault secrets, Helm/Terraform IaC, audit CI ([46eb1a5](https://github.com/benelabs/crucible/commit/46eb1a539dc244de3cd916e2eb51ac48126350d3)), closes [#914](https://github.com/benelabs/crucible/issues/914) [#915](https://github.com/benelabs/crucible/issues/915) [#916](https://github.com/benelabs/crucible/issues/916) [#919](https://github.com/benelabs/crucible/issues/919)
+
+## [1.19.0](https://github.com/benelabs/crucible/compare/v1.18.0...v1.19.0) (2026-08-31)
+
+### Features
+
+* **env:** add deterministic seeded test PRNG ([db9b2f8](https://github.com/benelabs/crucible/commit/db9b2f833040ea1174975062ae00e09432acb2e3))
+
+## [1.18.0](https://github.com/benelabs/crucible/compare/v1.17.0...v1.18.0) (2026-08-31)
+
+### Features
+
+* **#909:** Interactive Challenge Engine with step progression and hint system ([f6b6baf](https://github.com/benelabs/crucible/commit/f6b6baf76ceabb54f79cc0b9a603015d815510a4)), closes [#909](https://github.com/benelabs/crucible/issues/909) [#909](https://github.com/benelabs/crucible/issues/909)
+* add #[crucible::quickcheck] property-fuzzing macro ([eeb7549](https://github.com/benelabs/crucible/commit/eeb75498c436d6cca6bb413d8cf75ecffb2f86f8))
+* add env.expect_revert() fluent API and ledger checkpoint engine ([8d21eb7](https://github.com/benelabs/crucible/commit/8d21eb7e81a0df1bfd6b974782967b394740dffc))
+* implement interactive challenge engine with step progression and hint reveal system ([a55d66f](https://github.com/benelabs/crucible/commit/a55d66f733eaa86c9e2c33a111e410371ca7d2c6)), closes [#909](https://github.com/benelabs/crucible/issues/909)
+
+### Bug Fixes
+
+* **#909,#911,#912:** make the challenge engine, bundle splitting, and e2e suite actually work ([35e51ae](https://github.com/benelabs/crucible/commit/35e51aebd7d330105ea4b11539f3c975c4eb3128)), closes [#909](https://github.com/benelabs/crucible/issues/909) [#911](https://github.com/benelabs/crucible/issues/911) [#912](https://github.com/benelabs/crucible/issues/912) [#909](https://github.com/benelabs/crucible/issues/909) [#911](https://github.com/benelabs/crucible/issues/911) [#912](https://github.com/benelabs/crucible/issues/912)
+* **#913:** make the sandbox seccomp profile, Dockerfile, and tests real ([3798742](https://github.com/benelabs/crucible/commit/3798742ff5055b18a3931766c9f25693d8159776)), closes [#913](https://github.com/benelabs/crucible/issues/913)
+* repair unbuildable crucible workspace ([3f7f41b](https://github.com/benelabs/crucible/commit/3f7f41bdaeb4d23f0a1211a2406543437ff3b62a))
+
+## [1.17.0](https://github.com/benelabs/crucible/compare/v1.16.0...v1.17.0) (2026-08-31)
+
+### Features
+
+* implement webhook engine, granular rbac, automated backup pitr, and simulation cache ([#853](https://github.com/benelabs/crucible/issues/853), [#852](https://github.com/benelabs/crucible/issues/852), [#851](https://github.com/benelabs/crucible/issues/851), [#850](https://github.com/benelabs/crucible/issues/850)) ([82f2fe1](https://github.com/benelabs/crucible/commit/82f2fe178a9f4a94ce854ef6c01e0eff2ae39ea2))
+
+## [1.16.0](https://github.com/benelabs/crucible/compare/v1.15.0...v1.16.0) (2026-08-30)
+
+### Features
+
+* implement prometheus metrics, opentelemetry tracing, flash mint, and verifiable lottery ([#839](https://github.com/benelabs/crucible/issues/839), [#838](https://github.com/benelabs/crucible/issues/838), [#883](https://github.com/benelabs/crucible/issues/883), [#881](https://github.com/benelabs/crucible/issues/881)) ([23824ce](https://github.com/benelabs/crucible/commit/23824ce27f1ca9c9e00f926d38acb6574c257d9d))
+
+## [1.15.0](https://github.com/benelabs/crucible/compare/v1.14.0...v1.15.0) (2026-08-30)
+
+### Features
+
+* implement rate limiter tiering, gaming crafting engine, smart wallet, and quadratic funding ([8ce6b3f](https://github.com/benelabs/crucible/commit/8ce6b3f9356f40f08b6285d843e2423d7baab4ea))
+
+## [1.14.0](https://github.com/benelabs/crucible/compare/v1.13.0...v1.14.0) (2026-08-30)
+
+### Features
+
+* **core:** implement LSD protocol, Redlock manager, ingestion pipeline & memory tester ([687d809](https://github.com/benelabs/crucible/commit/687d809425d77f6b64f0adcfa2d56ceff11049c3)), closes [#873](https://github.com/benelabs/crucible/issues/873) [#832](https://github.com/benelabs/crucible/issues/832) [#835](https://github.com/benelabs/crucible/issues/835) [#833](https://github.com/benelabs/crucible/issues/833)
+
+## [1.13.0](https://github.com/benelabs/crucible/compare/v1.12.0...v1.13.0) (2026-08-30)
+
+### Features
+
+* **crucible:** add crypto signature mock registry ([#820](https://github.com/benelabs/crucible/issues/820)) & event filter simulator ([#817](https://github.com/benelabs/crucible/issues/817)) ([3ecd15b](https://github.com/benelabs/crucible/commit/3ecd15b7f765d72fb687f77963a1476c1b8ffed9))
+
+## [1.12.0](https://github.com/benelabs/crucible/compare/v1.11.0...v1.12.0) (2026-08-29)
+
+### Features
+
+* implement issues [#824](https://github.com/benelabs/crucible/issues/824), [#825](https://github.com/benelabs/crucible/issues/825), [#826](https://github.com/benelabs/crucible/issues/826), [#827](https://github.com/benelabs/crucible/issues/827) ([4da2f0e](https://github.com/benelabs/crucible/commit/4da2f0ed56c04506e5771d658e8c5ae155d3815e))
+
+## [1.11.0](https://github.com/benelabs/crucible/compare/v1.10.0...v1.11.0) (2026-08-29)
+
+### Features
+
+* **examples:** cross-contract rate limiter and security circuit breaker ([#887](https://github.com/benelabs/crucible/issues/887)) ([b2874f2](https://github.com/benelabs/crucible/commit/b2874f29255bd218b90fc7ad3c0bc787a5a85f6c))
+* **frontend:** hardware wallet integration via WebHID ([#891](https://github.com/benelabs/crucible/issues/891)) ([8c96d95](https://github.com/benelabs/crucible/commit/8c96d95f6fe517de78e8ac22264e37a25986a807))
+* **frontend:** real-time storage diff and footprint visualizer ([#889](https://github.com/benelabs/crucible/issues/889)) ([0923e68](https://github.com/benelabs/crucible/commit/0923e680a5c0ddd8b606120db05dd9a3b46acc70))
+* **frontend:** WebAssembly local sandbox execution engine ([#890](https://github.com/benelabs/crucible/issues/890)) ([703daed](https://github.com/benelabs/crucible/commit/703daedbb2621fbe48fd4240a563e62242aa2f7a))
+
+### Bug Fixes
+
+* **build:** make the Cargo workspace resolve and compile again ([ec4fbee](https://github.com/benelabs/crucible/commit/ec4fbeedae9d6673ebce41c9d9e7a34f96574a0b))
+
+## [1.10.0](https://github.com/benelabs/crucible/compare/v1.9.0...v1.10.0) (2026-08-29)
+
+### Features
+
+* **frontend:** ABI form generator, state machine visualizer, mobile nav, time-travel debugger ([ca08c94](https://github.com/benelabs/crucible/commit/ca08c9468d2679d7f41968d24156b93ffe7f374b)), closes [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903)
+
+## [1.9.0](https://github.com/benelabs/crucible/compare/v1.8.0...v1.9.0) (2026-08-29)
+
+### Features
+
+* contract decompiler & source verification, testnet faucet dispenser, bytecode optimizer, and vulnerability scanner ([8d8af5b](https://github.com/benelabs/crucible/commit/8d8af5b4768429bb7bf34e59e2d3931ae94aee81))
+
+## [1.8.0](https://github.com/benelabs/crucible/compare/v1.7.0...v1.8.0) (2026-08-29)
+
+### Features
+
+* resolve issues [#856](https://github.com/benelabs/crucible/issues/856), [#849](https://github.com/benelabs/crucible/issues/849), [#864](https://github.com/benelabs/crucible/issues/864), and [#858](https://github.com/benelabs/crucible/issues/858) ([bdd6a65](https://github.com/benelabs/crucible/commit/bdd6a655ba2db70f23fe281e0dd8458e36e848dc))
+
+## [1.7.0](https://github.com/benelabs/crucible/compare/v1.6.0...v1.7.0) (2026-08-29)
+
+### Features
+
+* add ZK pairing mock harness and reentrancy probe ([dd85de6](https://github.com/benelabs/crucible/commit/dd85de6693b1efae25ec8e95d954f6a7072735eb)), closes [#828](https://github.com/benelabs/crucible/issues/828) [#829](https://github.com/benelabs/crucible/issues/829)
+
+## [1.6.0](https://github.com/benelabs/crucible/compare/v1.5.0...v1.6.0) (2026-08-29)
+
+### Features
+
+* implement issues [#861](https://github.com/benelabs/crucible/issues/861), [#860](https://github.com/benelabs/crucible/issues/860), [#865](https://github.com/benelabs/crucible/issues/865), and [#859](https://github.com/benelabs/crucible/issues/859) ([161f6fa](https://github.com/benelabs/crucible/commit/161f6fa1bac862859ba342bcd4daf52ab506acbf))
+
 ## [1.5.0](https://github.com/benelabs/crucible/compare/v1.4.0...v1.5.0) (2026-08-28)
 
 ### Features

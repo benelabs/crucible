@@ -34,6 +34,9 @@ It is a purpose-built Rust testing library for Soroban — analogous to what jes
   - [AccountBuilder](#accountbuilder)
   - [SimulatedTx](#simulatedtx)
   - [Assertion Macros](#assertion-macros)
+  - [Fluent Revert Assertions](#fluent-revert-assertions)
+  - [Ledger Checkpoints & Rollback](#ledger-checkpoints--rollback)
+  - [Property-Based Fuzzing](#property-based-fuzzing)
   - [Gas Helpers](#gas-helpers)
 - [Examples](#examples)
   - [Testing a Token Contract](#testing-a-token-contract)
@@ -71,6 +74,9 @@ crucible wraps the official `soroban-sdk` test utilities and builds a fluent, er
 - **Transaction simulation helpers** — wrap contract invocations with fee estimation, auth inspection, and rollback-safe dry-runs.
 - **`assert_emitted!` macro** — pattern-match contract events with a concise, readable syntax.
 - **`assert_not_emitted!` macro** — verify silence; confirm events that must _not_ fire.
+- **`env.expect_revert()`** — fluent, storable revert assertions that match a specific contract error and run post-revert checks.
+- **Checkpoints & rollback** — snapshot ledger state and restore it instantly, so speculative execution trees never need a fresh environment.
+- **`#[crucible::quickcheck]`** — property-based fuzzing with automatic shrinking to a minimal reproducing input and a seed to replay it.
 - **Gas & instruction counting** — measure the compute cost of any invocation directly in tests.
 - **Ledger time control** — jump forward in time, set arbitrary sequence numbers, or simulate a full epoch change with one call.
 - **Fixtures** — re-usable test setup structs with derive support for common patterns.
@@ -663,6 +669,149 @@ assert_reverts!(client.call());
 // Assert approximate equality (useful for fee/reward calculations with rounding)
 assert_approx_eq!(actual, expected, tolerance);
 ```
+
+---
+
+### Fluent Revert Assertions
+
+`assert_reverts!` is a statement and cannot be stored or chained.
+`env.expect_revert(..)` is the same assertion as a *value*, which composes with
+fixture-based suites.
+
+```rust
+// Assert a specific #[contracterror] variant.
+env.expect_revert(|| client.transfer(&alice.address(), &bob.address(), &200_i128))
+    .with_error(ContractError::Unauthorized)
+    .verify();
+
+// Assert any revert.
+env.expect_revert(|| client.claim()).with_any_error().verify();
+
+// Match a raw error code, when the error type is not in scope.
+env.expect_revert(|| client.claim()).with_error_code(3).verify();
+
+// Match the panic message instead.
+env.expect_revert(|| helper()).with_message_containing("time lock").verify();
+
+// Check state after confirming the revert rolled everything back.
+env.expect_revert(|| client.withdraw(&alice.address(), &999_i128))
+    .with_any_error()
+    .and_assert(|| {
+        assert_eq!(token.balance(&alice.address()), 500_i128);
+    });
+
+// The assertion is an ordinary value, so it can be inspected first.
+let assertion = env.expect_revert(|| client.admin_only());
+assert_eq!(assertion.error_code(), Some(1));
+assertion.with_error(ContractError::Unauthorized).verify();
+```
+
+The closure runs immediately, so by the time `and_assert` executes the revert has
+already happened — which is what makes checking untouched state meaningful.
+
+`RevertAssertion` is `#[must_use]` and panics if dropped without
+`.verify()` or `.and_assert(..)`, so a forgotten check fails the test rather
+than passing silently. The `assert_reverts!` macro is unchanged.
+
+---
+
+### Ledger Checkpoints & Rollback
+
+`env.checkpoint()` captures instance, persistent and temporary contract data;
+`env.rollback_to(id)` restores it. Contract, account and token registrations are
+deliberately *not* part of the snapshot, so clients taken before a checkpoint
+stay valid afterwards.
+
+```rust
+let before = env.checkpoint();
+
+// Speculatively execute a liquidation path.
+vault.liquidate(&borrower.address());
+assert_eq!(vault.collateral(&borrower.address()), 0);
+
+// Put everything back and try a different path.
+env.rollback_to(before);
+assert_eq!(vault.collateral(&borrower.address()), 1_000);
+```
+
+Entries written since the checkpoint are reverted and entries *created* since it
+are removed. The same checkpoint can be rolled back to repeatedly, which is what
+makes branching from one point practical.
+
+```rust
+env.checkpoint()            -> CheckpointId
+env.rollback_to(id)                          // restore; keeps `id` valid
+env.release_checkpoint(id)                   // drop the snapshot, keep the work
+env.checkpoint_depth()      -> usize
+env.checkpoint_stats(id)    -> CheckpointStats   // counts by durability
+env.speculate(|| ...)       -> T             // run and always roll back
+```
+
+Checkpoints nest. Rolling back to an outer checkpoint invalidates the inner
+ones rather than silently accepting a stale id, and ids are rejected outright by
+any other environment — including a `fork()`.
+
+---
+
+### Property-Based Fuzzing
+
+`#[crucible::quickcheck]` turns a function into a property test: its parameters
+are generated, and a failing case is **shrunk** to a minimal reproduction before
+being reported.
+
+```rust
+use crucible::prelude::*;
+
+#[crucible::quickcheck]
+fn crediting_never_decreases_the_balance(balance: SorobanAmount, amount: SorobanAmount) {
+    let env = MockEnv::builder().without_snapshots().with_contract::<Ledger>().build();
+    let client = LedgerClient::new(env.inner(), &env.contract_id::<Ledger>());
+
+    let balance = balance.get() % 1_000_000_000;
+    let amount = amount.get() % 1_000_000_000;
+    assert!(client.credit(&balance, &amount) >= balance);
+}
+
+#[crucible::quickcheck(cases = 32, seed = 42)]
+fn addition_is_commutative(a: i64, b: i64) {
+    assert_eq!(a.wrapping_add(b), b.wrapping_add(a));
+}
+```
+
+A failure reports the minimal input and the seed that produced it:
+
+```text
+credit_overflow_is_rejected failed on case 1 of 200.
+
+Minimal failing input : (100,)
+Panic                 : value must stay under 100
+Shrink steps          : 29
+Seed                  : 7
+
+Re-run this exact case with CRUCIBLE_QUICKCHECK_SEED=7.
+```
+
+Generators are biased toward the values that actually find bugs — `0`, `1`, and
+the type bounds — rather than spreading uniformly over a range no contract will
+see. Soroban-shaped newtypes narrow this further:
+
+| Type | Range |
+| --- | --- |
+| `SorobanAmount` | `0 ..= i128::MAX` — token amounts |
+| `SorobanI128` | full `i128`, including negatives |
+| `SorobanU32` | ledger sequence numbers |
+| `SorobanTimestamp` | ledger timestamps |
+
+`Arbitrary` is also implemented for the integer primitives, `bool`, `char`,
+`String`, `Option<T>`, `Vec<T>` and tuples up to eight elements.
+
+**Arguments:** `cases`, `shrink`, `seed`, `size`. Unset arguments fall back to
+`CRUCIBLE_QUICKCHECK_CASES`, `CRUCIBLE_QUICKCHECK_SHRINK` and
+`CRUCIBLE_QUICKCHECK_SEED`, then to the defaults (256 cases, 1024 shrink steps).
+
+Because a property builds one environment per case, use
+`MockEnv::builder().without_snapshots()` to stop the Soroban host writing a
+snapshot JSON file per generated input.
 
 ---
 

@@ -127,6 +127,63 @@ macro_rules! assert_emitted {
     }};
 }
 
+/// Asserts that an event matching the given topic pattern (with wildcard support via the `_` symbol)
+/// and optional data payload was emitted by the contract.
+///
+/// Wildcard symbols (`symbol_short!("_")`, `symbol_short!("_")`) match any topic segment.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_event_matches!(
+///     env,
+///     contract_id,
+///     (symbol_short!("transfer"), symbol_short!("_"), symbol_short!("_"))
+/// );
+///
+/// assert_event_matches!(
+///     env,
+///     contract_id,
+///     (symbol_short!("mint"), symbol_short!("_")),
+///     1000_u128
+/// );
+/// ```
+#[macro_export]
+macro_rules! assert_event_matches {
+    ($env:expr, $contract_id:expr, $topics:expr) => {{
+        extern crate std;
+        let __parsed = $env.events_parsed($topics);
+        let __want_contract: soroban_sdk::Address = $contract_id.clone();
+        let __matching = __parsed.iter().any(|ev| ev.contract == __want_contract);
+        assert!(
+            __matching,
+            "assert_event_matches! failed: no matching event found for contract {:?} with topic pattern {:?}",
+            __want_contract,
+            $topics
+        );
+    }};
+    ($env:expr, $contract_id:expr, $topics:expr, $data:expr) => {{
+        extern crate std;
+        use soroban_env_host::Compare as _;
+        use soroban_sdk::IntoVal as _;
+        let __env = $env.inner();
+        let __want_data: soroban_sdk::Val = ($data).into_val(__env);
+        let __parsed = $env.events_parsed($topics);
+        let __want_contract: soroban_sdk::Address = $contract_id.clone();
+        let __matching = __parsed.iter().any(|ev| {
+            ev.contract == __want_contract
+                && __env.compare(&ev.data, &__want_data) == Ok(core::cmp::Ordering::Equal)
+        });
+        assert!(
+            __matching,
+            "assert_event_matches! failed: no matching event found for contract {:?} with topic pattern {:?} and expected data payload {:?}",
+            __want_contract,
+            $topics,
+            __want_data
+        );
+    }};
+}
+
 /// Asserts that no events were emitted.
 ///
 /// # Example
@@ -217,8 +274,65 @@ macro_rules! assert_approx_eq {
              tolerance  = {:?}",
             __actual,
             __expected,
-            __diff,
-            __tolerance,
+             __diff,
+             __tolerance,
+         );
+     }};
+}
+
+/// Asserts that a storage entry does not exceed a configured byte threshold.
+///
+/// This is a best-effort heuristic: it estimates the serialized size of the
+/// value using Soroban's XDR wire-format approximations.  The exact size can
+/// vary slightly depending on the host implementation, but this provides a
+/// useful guard against deploying entries that exceed the 64KB Soroban ledger
+/// entry limit.
+///
+/// A warning is emitted (via `eprintln!`) when the entry exceeds 80% of the
+/// maximum capacity.
+///
+/// # Arguments
+///
+/// * `$value` - The value to assert the size of
+/// * `$max_bytes` - Maximum allowed size in bytes (defaults to 65536 = 64KB)
+///
+/// # Example
+///
+/// ```ignore
+/// use crucible::prelude::*;
+///
+/// let data: Vec<u32> = vec![1, 2, 3];
+/// assert_storage_entry_size_limit!(data, 1024);
+/// ```
+#[macro_export]
+macro_rules! assert_storage_entry_size_limit {
+    ($value:expr) => {{
+        const DEFAULT_MAX: usize = 65536;
+        $crate::assert_storage_entry_size_limit!($value, DEFAULT_MAX);
+    }};
+    ($value:expr, $max_bytes:expr) => {{
+        extern crate std;
+        let __size = $crate::storage_size::estimate_size(&$value);
+        let __max: usize = $max_bytes;
+        let __warn_threshold = (__max as f64 * 0.8) as usize;
+
+        if __size > __warn_threshold {
+            eprintln!(
+                "warning: storage entry size {} bytes exceeds 80% of {} byte limit",
+                __size, __max
+            );
+        }
+
+        assert!(
+            __size <= __max,
+            "assert_storage_entry_size_limit! failed: estimated size {} bytes exceeds {} byte limit.\n\
+             \n\
+             Value type : {ty}\n\
+             Value      : {value:?}",
+            __size,
+            __max,
+            ty = std::any::type_name_of_val(&$value),
+            value = $value,
         );
     }};
 }

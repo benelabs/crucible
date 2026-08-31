@@ -1,3 +1,9 @@
+## [1.17.0](https://github.com/benelabs/crucible/compare/v1.16.0...v1.17.0) (2026-08-31)
+
+### Features
+
+* implement webhook engine, granular rbac, automated backup pitr, and simulation cache ([#853](https://github.com/benelabs/crucible/issues/853), [#852](https://github.com/benelabs/crucible/issues/852), [#851](https://github.com/benelabs/crucible/issues/851), [#850](https://github.com/benelabs/crucible/issues/850)) ([82f2fe1](https://github.com/benelabs/crucible/commit/82f2fe178a9f4a94ce854ef6c01e0eff2ae39ea2))
+
 ## [1.16.0](https://github.com/benelabs/crucible/compare/v1.15.0...v1.16.0) (2026-08-30)
 
 ### Features

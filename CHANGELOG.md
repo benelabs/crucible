@@ -1,3 +1,9 @@
+## [1.21.0](https://github.com/benelabs/crucible/compare/v1.20.0...v1.21.0) (2026-08-31)
+
+### Features
+
+* **frontend:** add alert studio, gas trend, RPC monitor and audit report export ([5500636](https://github.com/benelabs/crucible/commit/5500636b3d3fb1d9eb652dd3a6351b325cd358d3)), closes [#896](https://github.com/benelabs/crucible/issues/896) [#895](https://github.com/benelabs/crucible/issues/895) [#893](https://github.com/benelabs/crucible/issues/893) [#892](https://github.com/benelabs/crucible/issues/892)
+
 ## [1.20.0](https://github.com/benelabs/crucible/compare/v1.19.0...v1.20.0) (2026-08-31)
 
 ### Features

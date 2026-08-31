@@ -1,3 +1,9 @@
+## [1.22.0](https://github.com/benelabs/crucible/compare/v1.21.0...v1.22.0) (2026-08-31)
+
+### Features
+
+* **frontend:** add Monaco editor, deployment wizard, event query console and theme engine ([660964d](https://github.com/benelabs/crucible/commit/660964d13a9068d2e44c4821a28108a1faa9c98d)), closes [#900](https://github.com/benelabs/crucible/issues/900) [#899](https://github.com/benelabs/crucible/issues/899) [#898](https://github.com/benelabs/crucible/issues/898) [#897](https://github.com/benelabs/crucible/issues/897)
+
 ## [1.21.0](https://github.com/benelabs/crucible/compare/v1.20.0...v1.21.0) (2026-08-31)
 
 ### Features

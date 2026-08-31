@@ -310,6 +310,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-lock"
+version = "3.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290f7f2596bd5b78a9fec8088ccd89180d7f9f55b94b0576823bbbdc72ee8311"
+dependencies = [
+ "event-listener",
+ "event-listener-strategy",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -456,7 +467,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "anyhow",
  "apalis",
@@ -472,11 +483,14 @@ dependencies = [
  "csv",
  "dotenvy",
  "futures-util",
+ "hex",
+ "hmac 0.12.1",
  "http",
  "http-body-util",
  "hyper",
  "mime",
  "mockall",
+ "moka",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
@@ -1078,10 +1092,19 @@ dependencies = [
 
 [[package]]
 name = "cross-contract"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
+]
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d85363c37faeca707aef026efa9f3b34d077bce547e48f770770625c6013679e"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -1120,7 +1143,7 @@ checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "crucible"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "arbitrary",
  "crucible-macros",
@@ -1138,7 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-amm-pool"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1146,7 +1169,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-bounty-escrow"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1154,7 +1177,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-counter"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1162,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-circuit-breaker"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1170,7 +1193,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-stop"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1178,7 +1201,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-escrow-multi-arbiter"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1186,7 +1209,15 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-flash-mint"
-version = "1.13.0"
+version = "1.16.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-gaming-crafting"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1194,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-gasless"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1202,7 +1233,15 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lending"
-version = "1.13.0"
+version = "1.16.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-liquid-staking"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1210,7 +1249,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lottery"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1218,7 +1257,15 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-nft-rental"
-version = "1.13.0"
+version = "1.16.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-options-protocol"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1226,7 +1273,23 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-prediction-market"
-version = "1.13.0"
+version = "1.16.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-quadratic-funding"
+version = "1.16.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-smart-wallet"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1234,7 +1297,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-staking"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1242,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-time-locked-vault"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1250,7 +1313,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-token"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1258,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-vesting"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1266,7 +1329,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-macros"
-version = "1.13.0"
+version = "1.16.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1866,9 +1929,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "event-listener-strategy"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
+dependencies = [
+ "event-listener",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "example-yield-vault"
-version = "1.13.0"
-version = "1.9.0"
+version = "1.16.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -3038,6 +3110,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "moka"
+version = "0.12.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4293f18e7567a1caf3c584855554377025c65e0aa445344d04171f5ad63d19b9"
+dependencies = [
+ "async-lock",
+ "crossbeam-channel",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "equivalent",
+ "event-listener",
+ "futures-util",
+ "parking_lot",
+ "portable-atomic",
+ "smallvec",
+ "tagptr",
+ "uuid",
 ]
 
 [[package]]
@@ -5428,6 +5520,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "tagptr"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
 
 [[package]]
 name = "tap"

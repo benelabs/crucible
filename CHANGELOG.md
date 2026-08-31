@@ -1,145 +1,139 @@
-## [1.24.0](https://github.com/benelabs/crucible/compare/v1.23.0...v1.24.0) (2026-08-31)
+## 1.0.0 (2026-08-26)
 
 ### Features
 
-* **services:** integrate RustSec advisory and deprecated crate scanner (closes [#854](https://github.com/benelabs/crucible/issues/854)) ([e547bf1](https://github.com/benelabs/crucible/commit/e547bf19edaf3e84f0d6f82a1e0e62f25f603289))
-
-## [1.23.0](https://github.com/benelabs/crucible/compare/v1.22.0...v1.23.0) (2026-08-31)
-
-### Features
-
-* **services:** contract bytecode decompiler & source code verification service (closes [#848](https://github.com/benelabs/crucible/issues/848)) ([2764d2e](https://github.com/benelabs/crucible/commit/2764d2e1a72b70cd72be61f71ecb9c31c71c417a))
-
-## [1.22.0](https://github.com/benelabs/crucible/compare/v1.21.0...v1.22.0) (2026-08-31)
-
-### Features
-
-* **frontend:** add Monaco editor, deployment wizard, event query console and theme engine ([660964d](https://github.com/benelabs/crucible/commit/660964d13a9068d2e44c4821a28108a1faa9c98d)), closes [#900](https://github.com/benelabs/crucible/issues/900) [#899](https://github.com/benelabs/crucible/issues/899) [#898](https://github.com/benelabs/crucible/issues/898) [#897](https://github.com/benelabs/crucible/issues/897)
-
-## [1.21.0](https://github.com/benelabs/crucible/compare/v1.20.0...v1.21.0) (2026-08-31)
-
-### Features
-
-* **frontend:** add alert studio, gas trend, RPC monitor and audit report export ([5500636](https://github.com/benelabs/crucible/commit/5500636b3d3fb1d9eb652dd3a6351b325cd358d3)), closes [#896](https://github.com/benelabs/crucible/issues/896) [#895](https://github.com/benelabs/crucible/issues/895) [#893](https://github.com/benelabs/crucible/issues/893) [#892](https://github.com/benelabs/crucible/issues/892)
-
-## [1.20.0](https://github.com/benelabs/crucible/compare/v1.19.0...v1.20.0) (2026-08-31)
-
-### Features
-
-* **security:** mTLS mesh, Vault secrets, Helm/Terraform IaC, audit CI ([46eb1a5](https://github.com/benelabs/crucible/commit/46eb1a539dc244de3cd916e2eb51ac48126350d3)), closes [#914](https://github.com/benelabs/crucible/issues/914) [#915](https://github.com/benelabs/crucible/issues/915) [#916](https://github.com/benelabs/crucible/issues/916) [#919](https://github.com/benelabs/crucible/issues/919)
-
-## [1.19.0](https://github.com/benelabs/crucible/compare/v1.18.0...v1.19.0) (2026-08-31)
-
-### Features
-
-* **env:** add deterministic seeded test PRNG ([db9b2f8](https://github.com/benelabs/crucible/commit/db9b2f833040ea1174975062ae00e09432acb2e3))
-
-## [1.18.0](https://github.com/benelabs/crucible/compare/v1.17.0...v1.18.0) (2026-08-31)
-
-### Features
-
-* **#909:** Interactive Challenge Engine with step progression and hint system ([f6b6baf](https://github.com/benelabs/crucible/commit/f6b6baf76ceabb54f79cc0b9a603015d815510a4)), closes [#909](https://github.com/benelabs/crucible/issues/909) [#909](https://github.com/benelabs/crucible/issues/909)
-* add #[crucible::quickcheck] property-fuzzing macro ([eeb7549](https://github.com/benelabs/crucible/commit/eeb75498c436d6cca6bb413d8cf75ecffb2f86f8))
-* add env.expect_revert() fluent API and ledger checkpoint engine ([8d21eb7](https://github.com/benelabs/crucible/commit/8d21eb7e81a0df1bfd6b974782967b394740dffc))
-* implement interactive challenge engine with step progression and hint reveal system ([a55d66f](https://github.com/benelabs/crucible/commit/a55d66f733eaa86c9e2c33a111e410371ca7d2c6)), closes [#909](https://github.com/benelabs/crucible/issues/909)
+*  Build Permission Validation Middleware ([2e77a3b](https://github.com/ayomideadeniran/crucible/commit/2e77a3b4a096fd256083190a4766955cb0ee1a48))
+* **#567:** Add sanitized config dumping for support diagnostics ([249e420](https://github.com/ayomideadeniran/crucible/commit/249e4204bd2063fcb69104de80936799e6dc01dc)), closes [#567](https://github.com/ayomideadeniran/crucible/issues/567)
+* add assert_approx_eq macro and allowance-flow mock tests ([f0035fc](https://github.com/ayomideadeniran/crucible/commit/f0035fc760133bfde6015834d5a7be55eff72178)), closes [#631](https://github.com/ayomideadeniran/crucible/issues/631) [#632](https://github.com/ayomideadeniran/crucible/issues/632)
+* add contract logging, compliance checks, admin APIs, template library and backend build fixes ([4278099](https://github.com/ayomideadeniran/crucible/commit/4278099466d84a3bc7c55848ae8a89210cb4cd89))
+* add cross-contract communication example ([274edcf](https://github.com/ayomideadeniran/crucible/commit/274edcf02e41ad2927fe95b6ba149f3ee29aca1d)), closes [#417](https://github.com/ayomideadeniran/crucible/issues/417)
+* add database backup and restore service binary ([f93c8ad](https://github.com/ayomideadeniran/crucible/commit/f93c8adecace79e75ec7d0677624a4bb9d307f57))
+* add database seeding utilities and feature flag service ([6a3ac74](https://github.com/ayomideadeniran/crucible/commit/6a3ac7474e058a3c601b060d1d5688cd19fd44ee))
+* add deploy_health handler with DB, Redis caching, and tests ([8b806f1](https://github.com/ayomideadeniran/crucible/commit/8b806f1ee131506f4035ce42b650aac492d7ab80))
+* add human-unit helpers for MockToken display amounts ([2d8a02f](https://github.com/ayomideadeniran/crucible/commit/2d8a02f980f634c125df9a4b5e205d0938d71e27))
+* add JSON schema generator to backend ([c5a07c4](https://github.com/ayomideadeniran/crucible/commit/c5a07c40850195028c7be4aa68abe4b9b9c69f31))
+* add request validation and payload size limits for contract endpoints ([69db7ea](https://github.com/ayomideadeniran/crucible/commit/69db7ea73f1cf802b6a7308c4af27b2079481edc)), closes [#569](https://github.com/ayomideadeniran/crucible/issues/569)
+* add safe Stroops constructors and avoid lossy f64 conversion ([ebdaaf1](https://github.com/ayomideadeniran/crucible/commit/ebdaaf16a1fc0b5dbc92662e8d9737916fd2301c))
+* add scoped mock auth API (with_mock_all_auths, mock_all_auths_scoped) ([fda0c77](https://github.com/ayomideadeniran/crucible/commit/fda0c77df0fc8d5c3c95d327219f75a8186cfd00))
+* add structured logger utility ([88813bb](https://github.com/ayomideadeniran/crucible/commit/88813bb7d36c75e99a29c04f65406262b39c026f))
+* added the required contracts ([c5ffee6](https://github.com/ayomideadeniran/crucible/commit/c5ffee638c6ea8ffe2541ddaddeb56a8f172ec96))
+* **api:** implement Build Error Analytics Dashboard API with Axum, SQLx, Redis, tracing, and tests ([#169](https://github.com/ayomideadeniran/crucible/issues/169)) ([ae755c6](https://github.com/ayomideadeniran/crucible/commit/ae755c6168bc67997555061c6811c27db41e2532))
+* **audit:** implement audit log export functionality (Issue [#409](https://github.com/ayomideadeniran/crucible/issues/409)) ([d244764](https://github.com/ayomideadeniran/crucible/commit/d244764ae3241b7b53ab6043ecbc364f67ac25d0))
+* **backend:** add audit logging for security events with Axum, SQLx, Redis, tracing, docs, and tests ([#171](https://github.com/ayomideadeniran/crucible/issues/171)) ([8ec0ced](https://github.com/ayomideadeniran/crucible/commit/8ec0ceddac5350800b74e28b447b6e9afcd3db2f))
+* **backend:** add build dedup and fixture factory ([b1a5d48](https://github.com/ayomideadeniran/crucible/commit/b1a5d489595dcdbdd26af42664db5b233a8aa360))
+* **backend:** add contract execution sandbox service ([995f5c9](https://github.com/ayomideadeniran/crucible/commit/995f5c97c393b1440d8d4f703cbe8c07927bb1a9))
+* **backend:** add contract upgrade path management ([a8038c3](https://github.com/ayomideadeniran/crucible/commit/a8038c349ba64688e91e75a3f299992851b539ea))
+* **backend:** add OpenTelemetry tracing across services ([#251](https://github.com/ayomideadeniran/crucible/issues/251)) ([13b7d7e](https://github.com/ayomideadeniran/crucible/commit/13b7d7ef97f86e22139f4d02477a2e4870f9e1ab))
+* **backend:** add Stellar contract benchmarking service ([2a246a0](https://github.com/ayomideadeniran/crucible/commit/2a246a0322b7998eaee50a92ef14ad4e2faa8228))
+* **backend:** add test coverage reporting with PostgreSQL persistence and Redis caching ([#235](https://github.com/ayomideadeniran/crucible/issues/235)) ([97895c9](https://github.com/ayomideadeniran/crucible/commit/97895c97644035daa96ac6d2890cdd87b82987f9))
+* **backend:** add typed contracts and cache metrics ([054c669](https://github.com/ayomideadeniran/crucible/commit/054c669e244f28fc1f9a042508a76e589935dc31))
+* **backend:** expose cache metrics routes ([1e31c5e](https://github.com/ayomideadeniran/crucible/commit/1e31c5e3c016b06a381a12b8e8645c04b820217d))
+* **backend:** harden CORS configuration for production ([e541266](https://github.com/ayomideadeniran/crucible/commit/e54126692fca51990bfff8aa27452d040d4433ca))
+* **backend:** implement comprehensive request validation (issue [#193](https://github.com/ayomideadeniran/crucible/issues/193)) ([2e50cca](https://github.com/ayomideadeniran/crucible/commit/2e50ccafb35f07cd0338d04636830abbd434b521))
+* **backend:** implement contract test coverage reporting service ([9059176](https://github.com/ayomideadeniran/crucible/commit/9059176e47f83fa87ec33747267fdebdcb8889d0))
+* **backend:** implement database backup and restore (issue [#170](https://github.com/ayomideadeniran/crucible/issues/170)) ([884e440](https://github.com/ayomideadeniran/crucible/commit/884e4407a0aa98597575807c459bfcfc7d95dfaf))
+* **backend:** implement graceful shutdown, concurrent executor, test db utils, and Redis job queue ([402912d](https://github.com/ayomideadeniran/crucible/commit/402912de746a3dc37eb2b1ed738ad6b808daa4d9)), closes [#176](https://github.com/ayomideadeniran/crucible/issues/176) [#186](https://github.com/ayomideadeniran/crucible/issues/186) [#179](https://github.com/ayomideadeniran/crucible/issues/179) [#174](https://github.com/ayomideadeniran/crucible/issues/174)
+* **backend:** implement HTTP 411 Length Required status code handling ([f196c71](https://github.com/ayomideadeniran/crucible/commit/f196c7192b642d768a48334e949387779ff646ca)), closes [#411](https://github.com/ayomideadeniran/crucible/issues/411)
+* **backend:** implement integration test framework ([#225](https://github.com/ayomideadeniran/crucible/issues/225)) ([c89b514](https://github.com/ayomideadeniran/crucible/commit/c89b514e39a70a6602e8924e593048317310ec99))
+* **backend:** implement issues [#214](https://github.com/ayomideadeniran/crucible/issues/214), [#219](https://github.com/ayomideadeniran/crucible/issues/219), [#256](https://github.com/ayomideadeniran/crucible/issues/256), [#264](https://github.com/ayomideadeniran/crucible/issues/264) ([f2abe0b](https://github.com/ayomideadeniran/crucible/commit/f2abe0ba6080f5655856cc1f0dcc03ca2e75ba68))
+* **backend:** implement job priority system (issue [#190](https://github.com/ayomideadeniran/crucible/issues/190)) ([f54d93b](https://github.com/ayomideadeniran/crucible/commit/f54d93bc8059defebe6059d75086ea4cb57c5ee9))
+* **backend:** implement Redis cache invalidation system (issue [#195](https://github.com/ayomideadeniran/crucible/issues/195)) ([402ac9b](https://github.com/ayomideadeniran/crucible/commit/402ac9b072ee053545389778455594e526fe340a))
+* **backend:** implement User factory and standardize test utility APIs ([d0a7f54](https://github.com/ayomideadeniran/crucible/commit/d0a7f54bc8b3e4022478f116ab28c293540f700d))
+* **backend:** require admin auth on privileged admin/config endpoints ([31c1ef8](https://github.com/ayomideadeniran/crucible/commit/31c1ef8afe4e5f16c63442656d173b2e3a8b5294))
+* **backup:** add backup HTTP binary with Redis+SQLx backend and tests ([efa2839](https://github.com/ayomideadeniran/crucible/commit/efa283978ae3f36f94063de072f389e759a66a2e))
+* Build Dashboard Data API ([0455fe1](https://github.com/ayomideadeniran/crucible/commit/0455fe1855dda933c3ff08fa2981eb8eb4116eea))
+* build developer onboarding tutorial interface ([#357](https://github.com/ayomideadeniran/crucible/issues/357)) ([842ff40](https://github.com/ayomideadeniran/crucible/commit/842ff40ac49144775785d05cb59a4d87c74c7118))
+* **ci:** add automated Docker multi-arch build pipeline ([#746](https://github.com/ayomideadeniran/crucible/issues/746)) ([501be57](https://github.com/ayomideadeniran/crucible/commit/501be570a1e3d72fddeec19c750855bd4c0bdf48))
+* **ci:** add cargo-deny license and dependency check workflow ([#745](https://github.com/ayomideadeniran/crucible/issues/745)) ([d72ec64](https://github.com/ayomideadeniran/crucible/commit/d72ec6444ccda06916ba5e10f265dbf870dd80e2))
+* **contracts:** add lending borrowing contract with interest rates ([6e870f1](https://github.com/ayomideadeniran/crucible/commit/6e870f163980a4af86093524d841ebe7de53ea73))
+* **contracts:** add prediction market contract ([dab2f30](https://github.com/ayomideadeniran/crucible/commit/dab2f300f6e28f0f7f383ca4b1eb3de9fb1a4918))
+* **cost:** add plain cost report output ([2f1e229](https://github.com/ayomideadeniran/crucible/commit/2f1e229f18d3ef224747c9d6f0c34ab696bf1120))
+* **crucible:** add 'full' feature flag ([#788](https://github.com/ayomideadeniran/crucible/issues/788)) and MockEnv token accessors ([#786](https://github.com/ayomideadeniran/crucible/issues/786)) ([2469c30](https://github.com/ayomideadeniran/crucible/commit/2469c300a5fec35179db105fe5bcfbb2d1d87fe1))
+* **dashboard:** enhance dashboard metrics and contract stats endpoints ([d6ba30c](https://github.com/ayomideadeniran/crucible/commit/d6ba30c1b0390adf10a26c0e6d43b86f08027e07))
+* enhance MockEnv and MockToken with duration and stroops helpers ([ea4c9dc](https://github.com/ayomideadeniran/crucible/commit/ea4c9dcc5eb9a22c879a5f5ba0a6ab3bfe627072))
+* **errors:** build custom error type hierarchy ([#211](https://github.com/ayomideadeniran/crucible/issues/211)) ([a16c6a1](https://github.com/ayomideadeniran/crucible/commit/a16c6a1383a056df6fb116b42920247a54564e81))
+* expose token admin handles and admin rotation state in MockToken ([9f21e8e](https://github.com/ayomideadeniran/crucible/commit/9f21e8e280c796e83131ab27fd29362db40a291c)), closes [#545](https://github.com/ayomideadeniran/crucible/issues/545)
+* extract router construction into testable build_router function ([bf399f1](https://github.com/ayomideadeniran/crucible/commit/bf399f1888becd0275fb434ba4a801b81b619a0f)), closes [#561](https://github.com/ayomideadeniran/crucible/issues/561)
+* **file-validation:** implement file upload validation ([#206](https://github.com/ayomideadeniran/crucible/issues/206)) ([56730a2](https://github.com/ayomideadeniran/crucible/commit/56730a2afa2940a6bc17ea1bd6254262183d75a1))
+* **frontend:** add event listener dashboard live feed ([1be633e](https://github.com/ayomideadeniran/crucible/commit/1be633ec825825b18cc4fb4419ac7f386263129e))
+* **frontend:** Create gas cost estimator with visualization ([73f3245](https://github.com/ayomideadeniran/crucible/commit/73f3245b28d94d069369e97c18d2a4365aa553c7))
+* **frontend:** implement transaction simulator interface for Soroban contract dry-runs ([dfc0d16](https://github.com/ayomideadeniran/crucible/commit/dfc0d1628570d92cc03d5b05dcf7a54c34fa0ade))
+* implement [#784](https://github.com/ayomideadeniran/crucible/issues/784) - derive macro for typed contract client wrappers ([7a6382c](https://github.com/ayomideadeniran/crucible/commit/7a6382cfa97347aae26344c4095a1d990e881e8e))
+* implement AccountHandle and AccountBuilder for pre-funded test accounts ([2c1f7e3](https://github.com/ayomideadeniran/crucible/commit/2c1f7e37efa03842a7330ea40e59e454963f92a8))
+* implement actual solutions for ADRs, prometheus metrics, argocd manifest and packed state ([d88e528](https://github.com/ayomideadeniran/crucible/commit/d88e5280cffd20bb61bde040dea2502f651ccae8))
+* implement assert_emitted! and assert_not_emitted! macros ([cf22efc](https://github.com/ayomideadeniran/crucible/commit/cf22efc5502fa6b0f7d2150af74e250988471988))
+* implement assert_reverts and assert_approx_eq macros ([417dd9e](https://github.com/ayomideadeniran/crucible/commit/417dd9eef16d07393dbcf4e7c46b25b062cff149))
+* implement audit logging, deploy health, performance profiling, and config hot-reload ([3d70a66](https://github.com/ayomideadeniran/crucible/commit/3d70a6698ece7f576f7196c466e4801868e7a795)), closes [#503](https://github.com/ayomideadeniran/crucible/issues/503) [#487](https://github.com/ayomideadeniran/crucible/issues/487) [#505](https://github.com/ayomideadeniran/crucible/issues/505) [#506](https://github.com/ayomideadeniran/crucible/issues/506) [#503](https://github.com/ayomideadeniran/crucible/issues/503) [#487](https://github.com/ayomideadeniran/crucible/issues/487) [#505](https://github.com/ayomideadeniran/crucible/issues/505) [#506](https://github.com/ayomideadeniran/crucible/issues/506)
+* implement backend service layer and APIs ([99ccbc1](https://github.com/ayomideadeniran/crucible/commit/99ccbc157b749493c59ff40620110897ea3fb6f6)), closes [#215](https://github.com/ayomideadeniran/crucible/issues/215) [#216](https://github.com/ayomideadeniran/crucible/issues/216) [#217](https://github.com/ayomideadeniran/crucible/issues/217) [#218](https://github.com/ayomideadeniran/crucible/issues/218)
+* Implement Build System Metrics Exporter ([#253](https://github.com/ayomideadeniran/crucible/issues/253)) ([49822c7](https://github.com/ayomideadeniran/crucible/commit/49822c7874220b2f4d76547b0339a20803cbfd0b))
+* implement business metrics tracking service ([#220](https://github.com/ayomideadeniran/crucible/issues/220)) ([29a946c](https://github.com/ayomideadeniran/crucible/commit/29a946cf7ee7fba6b0dc2ba9c35eea0a4b0721d6))
+* implement business metrics tracking service ([#220](https://github.com/ayomideadeniran/crucible/issues/220)) ([925a46c](https://github.com/ayomideadeniran/crucible/commit/925a46cbb3360368ac275df787d11cb32f84e0cd))
+* implement config hot-reload and fix corrupted backend files ([69caa37](https://github.com/ayomideadeniran/crucible/commit/69caa37e33d4b4ad426557f8bccfe1043b798dd9))
+* implement contract registry, doc generator, monitor alert, and security scanner services ([4690510](https://github.com/ayomideadeniran/crucible/commit/4690510c5c47f00a4f97375bdfcf991b906d7c2e)), closes [#412](https://github.com/ayomideadeniran/crucible/issues/412) [#384](https://github.com/ayomideadeniran/crucible/issues/384) [#381](https://github.com/ayomideadeniran/crucible/issues/381) [#370](https://github.com/ayomideadeniran/crucible/issues/370) [#412](https://github.com/ayomideadeniran/crucible/issues/412) [#384](https://github.com/ayomideadeniran/crucible/issues/384) [#381](https://github.com/ayomideadeniran/crucible/issues/381) [#370](https://github.com/ayomideadeniran/crucible/issues/370)
+* implement contract rollback, governance, insurance, and oracle contracts ([f715fe0](https://github.com/ayomideadeniran/crucible/commit/f715fe063b11fe636d5f85b0ec70c641ebd0ae15))
+* implement CostReport and MockEnv::measure ([4b05e92](https://github.com/ayomideadeniran/crucible/commit/4b05e92942080a5a31d1a324f264ad29075c8d69))
+* implement env.events_matching() ergonomics ([#630](https://github.com/ayomideadeniran/crucible/issues/630)) and i18n framework ([#714](https://github.com/ayomideadeniran/crucible/issues/714)) ([f08fb85](https://github.com/ayomideadeniran/crucible/commit/f08fb85e9fb86d04c0a94593570894b1181c4182))
+* implement issues [#645](https://github.com/ayomideadeniran/crucible/issues/645), [#646](https://github.com/ayomideadeniran/crucible/issues/646), [#647](https://github.com/ayomideadeniran/crucible/issues/647), [#648](https://github.com/ayomideadeniran/crucible/issues/648) ([d94b9ba](https://github.com/ayomideadeniran/crucible/commit/d94b9ba50f5d998898073caf17bffed9595c09c6))
+* implement issues [#650](https://github.com/ayomideadeniran/crucible/issues/650) [#651](https://github.com/ayomideadeniran/crucible/issues/651) [#652](https://github.com/ayomideadeniran/crucible/issues/652) [#653](https://github.com/ayomideadeniran/crucible/issues/653) ([75de3ca](https://github.com/ayomideadeniran/crucible/commit/75de3cae5b59704711a100f5e213a778260c19f7))
+* implement issues [#783](https://github.com/ayomideadeniran/crucible/issues/783) and [#785](https://github.com/ayomideadeniran/crucible/issues/785) - audit export endpoint and Content-Type middleware ([dee3e2f](https://github.com/ayomideadeniran/crucible/commit/dee3e2fd3d95de6e6a2931b67c941601005e62b0))
+* implement MockEnv and MockToken for Soroban contract testing ([446afc1](https://github.com/ayomideadeniran/crucible/commit/446afc13d20bfdc6a09f2f24e10765b04e229f77))
+* implement multi-chain dashboard, compilation service, ABI explorer and dependency analyzer ([2e54713](https://github.com/ayomideadeniran/crucible/commit/2e54713d639ac8e156372bdc75a94da6a647fccc))
+* implement request id propagation and mock testing utilities ([4b8e1fa](https://github.com/ayomideadeniran/crucible/commit/4b8e1fa18d6d4c0dab64776c46c7d973c9caf46d))
+* implement SimulatedTx for transaction dry-runs and fee estimation ([03d85dd](https://github.com/ayomideadeniran/crucible/commit/03d85dd052fe16d4a7d2fe43b28f2aa40274d6fa))
+* implement structured simulation error reporting ([2e06a03](https://github.com/ayomideadeniran/crucible/commit/2e06a03404a1bd7032537a31758d6732ae766c41))
+* implement system profiling API and build metrics service for performance tracking ([6583943](https://github.com/ayomideadeniran/crucible/commit/6583943d28109ca1771614ee83369aac3d83c563))
+* implement WebSocket dashboard, circuit breaker, event indexer, and analytics aggregator ([a45895f](https://github.com/ayomideadeniran/crucible/commit/a45895fdbb6fa7902f093c6271e55ac5e173db77)), closes [#358](https://github.com/ayomideadeniran/crucible/issues/358) [#364](https://github.com/ayomideadeniran/crucible/issues/364) [#373](https://github.com/ayomideadeniran/crucible/issues/373) [#382](https://github.com/ayomideadeniran/crucible/issues/382) [#358](https://github.com/ayomideadeniran/crucible/issues/358) [#364](https://github.com/ayomideadeniran/crucible/issues/364) [#373](https://github.com/ayomideadeniran/crucible/issues/373) [#382](https://github.com/ayomideadeniran/crucible/issues/382)
+* Implements contract gas optimization service ([bd20d35](https://github.com/ayomideadeniran/crucible/commit/bd20d35786746c19718309a20836d9e4daf35549))
+* improve backend error responses, redis retry strategy, sys metrics, and worker shutdown ([53c94e0](https://github.com/ayomideadeniran/crucible/commit/53c94e0579d2a651743f5feacd4810cf3fa461af))
+* introduce explicit std feature boundary for filesystem and host-only helpers ([#531](https://github.com/ayomideadeniran/crucible/issues/531)) ([d6ab9d1](https://github.com/ayomideadeniran/crucible/commit/d6ab9d174d0c2e54624141fa654e9ce244548cfc))
+* **metrics:** implement Prometheus metrics collection ([#210](https://github.com/ayomideadeniran/crucible/issues/210)) ([7a7bf38](https://github.com/ayomideadeniran/crucible/commit/7a7bf3825c8e8452acfe39350826606d4eb2b69a))
+* **MockToken:** add transfer_from helper and allowance tests ([7fa546d](https://github.com/ayomideadeniran/crucible/commit/7fa546d176f3a47b7f742c43d92c81e268c74b98))
+* **prelude:** export CapturedEvent and add events_parsed doc + tests ([4647778](https://github.com/ayomideadeniran/crucible/commit/46477783277dd2703deddc199f34a61be853296d)), closes [#532](https://github.com/ayomideadeniran/crucible/issues/532)
+* Provide CLI report output for CI integration [#644](https://github.com/ayomideadeniran/crucible/issues/644) ([549ff82](https://github.com/ayomideadeniran/crucible/commit/549ff8211afaf606cfcd50faa0f6af948da6eadb))
+* reconcile auth helper naming ([#670](https://github.com/ayomideadeniran/crucible/issues/670)) and add calendar/time edge case tests ([#669](https://github.com/ayomideadeniran/crucible/issues/669)) ([a05b9bf](https://github.com/ayomideadeniran/crucible/commit/a05b9bfaf3edcba708766cdfa9039b0734235677))
+* relax SimulatedTx closure lifetime requirements ([#547](https://github.com/ayomideadeniran/crucible/issues/547)) ([0d967c8](https://github.com/ayomideadeniran/crucible/commit/0d967c811981d066090caa2ca7f04fea65a4236a))
+* resolve issues [#680](https://github.com/ayomideadeniran/crucible/issues/680), [#683](https://github.com/ayomideadeniran/crucible/issues/683), [#684](https://github.com/ayomideadeniran/crucible/issues/684), [#691](https://github.com/ayomideadeniran/crucible/issues/691) (Governance, GraphQL, Rate Limiting, RSC) ([cb066af](https://github.com/ayomideadeniran/crucible/commit/cb066af846fd4856e1e345b4b9770193cdcef517))
+* resolve issues [#681](https://github.com/ayomideadeniran/crucible/issues/681), [#686](https://github.com/ayomideadeniran/crucible/issues/686), [#687](https://github.com/ayomideadeniran/crucible/issues/687), [#689](https://github.com/ayomideadeniran/crucible/issues/689) ([a7bd8ee](https://github.com/ayomideadeniran/crucible/commit/a7bd8ee436b4777e9b22de77aad3c8e2b496dd66))
+* resolve issues [#699](https://github.com/ayomideadeniran/crucible/issues/699), [#702](https://github.com/ayomideadeniran/crucible/issues/702), [#685](https://github.com/ayomideadeniran/crucible/issues/685), and [#690](https://github.com/ayomideadeniran/crucible/issues/690) ([e3c071b](https://github.com/ayomideadeniran/crucible/commit/e3c071b7749de5c48939d7d743135d5da87f4505))
+* resolve issues [#703](https://github.com/ayomideadeniran/crucible/issues/703), [#693](https://github.com/ayomideadeniran/crucible/issues/693), [#705](https://github.com/ayomideadeniran/crucible/issues/705), and [#707](https://github.com/ayomideadeniran/crucible/issues/707) ([b4b5b85](https://github.com/ayomideadeniran/crucible/commit/b4b5b85f6f2482d78dda998d88e6223d113b136d))
+* resolve issues 697, 700, 696, and 688 ([9bda658](https://github.com/ayomideadeniran/crucible/commit/9bda65841d0a2ad2349b0fcfe0c9b1a807b7f11f)), closes [#697](https://github.com/ayomideadeniran/crucible/issues/697) [#700](https://github.com/ayomideadeniran/crucible/issues/700) [#696](https://github.com/ayomideadeniran/crucible/issues/696) [#688](https://github.com/ayomideadeniran/crucible/issues/688)
+* resolve multiple infrastructure and quality issues ([ff92567](https://github.com/ayomideadeniran/crucible/commit/ff925673f920c80d5cbc90d7962b44ba98c3bb54)), closes [#713](https://github.com/ayomideadeniran/crucible/issues/713) [#711](https://github.com/ayomideadeniran/crucible/issues/711) [#710](https://github.com/ayomideadeniran/crucible/issues/710) [#704](https://github.com/ayomideadeniran/crucible/issues/704)
+* **security,testing:** implement dynamic rate limiting and property tests ([#741](https://github.com/ayomideadeniran/crucible/issues/741), [#740](https://github.com/ayomideadeniran/crucible/issues/740)) ([406ee20](https://github.com/ayomideadeniran/crucible/commit/406ee2072db500ad859186e9dca779219f448297))
+* **security:** add audit log tamper protection hashes with SHA-256 chaining ([#743](https://github.com/ayomideadeniran/crucible/issues/743)) ([c0729de](https://github.com/ayomideadeniran/crucible/commit/c0729dede7cac1b84f78e0addb8d774bf726b836))
+* **security:** sanitize log payload inputs to prevent log injection ([#744](https://github.com/ayomideadeniran/crucible/issues/744)) ([c8a401a](https://github.com/ayomideadeniran/crucible/commit/c8a401a73de8d410c6aab8190eff541306c5867c))
+* split worker startup from http server lifecycle using cancellation token ([659dfed](https://github.com/ayomideadeniran/crucible/commit/659dfedb81e7d8373686c5913d7c737b4c312832))
+* **token:** add token_client/asset_client escape hatches ([#546](https://github.com/ayomideadeniran/crucible/issues/546)) ([0f168e6](https://github.com/ayomideadeniran/crucible/commit/0f168e68f04dab9fa4896c107931e4b86807367c))
+* **vesting:** implement checked arithmetic for vesting schedule boundaries ([0863bc5](https://github.com/ayomideadeniran/crucible/commit/0863bc53b1f43f1fe8a56083d28fa82ad830d909))
 
 ### Bug Fixes
 
-* **#909,#911,#912:** make the challenge engine, bundle splitting, and e2e suite actually work ([35e51ae](https://github.com/benelabs/crucible/commit/35e51aebd7d330105ea4b11539f3c975c4eb3128)), closes [#909](https://github.com/benelabs/crucible/issues/909) [#911](https://github.com/benelabs/crucible/issues/911) [#912](https://github.com/benelabs/crucible/issues/912) [#909](https://github.com/benelabs/crucible/issues/909) [#911](https://github.com/benelabs/crucible/issues/911) [#912](https://github.com/benelabs/crucible/issues/912)
-* **#913:** make the sandbox seccomp profile, Dockerfile, and tests real ([3798742](https://github.com/benelabs/crucible/commit/3798742ff5055b18a3931766c9f25693d8159776)), closes [#913](https://github.com/benelabs/crucible/issues/913)
-* repair unbuildable crucible workspace ([3f7f41b](https://github.com/benelabs/crucible/commit/3f7f41bdaeb4d23f0a1211a2406543437ff3b62a))
-
-## [1.17.0](https://github.com/benelabs/crucible/compare/v1.16.0...v1.17.0) (2026-08-31)
-
-### Features
-
-* implement webhook engine, granular rbac, automated backup pitr, and simulation cache ([#853](https://github.com/benelabs/crucible/issues/853), [#852](https://github.com/benelabs/crucible/issues/852), [#851](https://github.com/benelabs/crucible/issues/851), [#850](https://github.com/benelabs/crucible/issues/850)) ([82f2fe1](https://github.com/benelabs/crucible/commit/82f2fe178a9f4a94ce854ef6c01e0eff2ae39ea2))
-
-## [1.16.0](https://github.com/benelabs/crucible/compare/v1.15.0...v1.16.0) (2026-08-30)
-
-### Features
-
-* implement prometheus metrics, opentelemetry tracing, flash mint, and verifiable lottery ([#839](https://github.com/benelabs/crucible/issues/839), [#838](https://github.com/benelabs/crucible/issues/838), [#883](https://github.com/benelabs/crucible/issues/883), [#881](https://github.com/benelabs/crucible/issues/881)) ([23824ce](https://github.com/benelabs/crucible/commit/23824ce27f1ca9c9e00f926d38acb6574c257d9d))
-
-## [1.15.0](https://github.com/benelabs/crucible/compare/v1.14.0...v1.15.0) (2026-08-30)
-
-### Features
-
-* implement rate limiter tiering, gaming crafting engine, smart wallet, and quadratic funding ([8ce6b3f](https://github.com/benelabs/crucible/commit/8ce6b3f9356f40f08b6285d843e2423d7baab4ea))
-
-## [1.14.0](https://github.com/benelabs/crucible/compare/v1.13.0...v1.14.0) (2026-08-30)
-
-### Features
-
-* **core:** implement LSD protocol, Redlock manager, ingestion pipeline & memory tester ([687d809](https://github.com/benelabs/crucible/commit/687d809425d77f6b64f0adcfa2d56ceff11049c3)), closes [#873](https://github.com/benelabs/crucible/issues/873) [#832](https://github.com/benelabs/crucible/issues/832) [#835](https://github.com/benelabs/crucible/issues/835) [#833](https://github.com/benelabs/crucible/issues/833)
-
-## [1.13.0](https://github.com/benelabs/crucible/compare/v1.12.0...v1.13.0) (2026-08-30)
-
-### Features
-
-* **crucible:** add crypto signature mock registry ([#820](https://github.com/benelabs/crucible/issues/820)) & event filter simulator ([#817](https://github.com/benelabs/crucible/issues/817)) ([3ecd15b](https://github.com/benelabs/crucible/commit/3ecd15b7f765d72fb687f77963a1476c1b8ffed9))
-
-## [1.12.0](https://github.com/benelabs/crucible/compare/v1.11.0...v1.12.0) (2026-08-29)
-
-### Features
-
-* implement issues [#824](https://github.com/benelabs/crucible/issues/824), [#825](https://github.com/benelabs/crucible/issues/825), [#826](https://github.com/benelabs/crucible/issues/826), [#827](https://github.com/benelabs/crucible/issues/827) ([4da2f0e](https://github.com/benelabs/crucible/commit/4da2f0ed56c04506e5771d658e8c5ae155d3815e))
-
-## [1.11.0](https://github.com/benelabs/crucible/compare/v1.10.0...v1.11.0) (2026-08-29)
-
-### Features
-
-* **examples:** cross-contract rate limiter and security circuit breaker ([#887](https://github.com/benelabs/crucible/issues/887)) ([b2874f2](https://github.com/benelabs/crucible/commit/b2874f29255bd218b90fc7ad3c0bc787a5a85f6c))
-* **frontend:** hardware wallet integration via WebHID ([#891](https://github.com/benelabs/crucible/issues/891)) ([8c96d95](https://github.com/benelabs/crucible/commit/8c96d95f6fe517de78e8ac22264e37a25986a807))
-* **frontend:** real-time storage diff and footprint visualizer ([#889](https://github.com/benelabs/crucible/issues/889)) ([0923e68](https://github.com/benelabs/crucible/commit/0923e680a5c0ddd8b606120db05dd9a3b46acc70))
-* **frontend:** WebAssembly local sandbox execution engine ([#890](https://github.com/benelabs/crucible/issues/890)) ([703daed](https://github.com/benelabs/crucible/commit/703daedbb2621fbe48fd4240a563e62242aa2f7a))
-
-### Bug Fixes
-
-* **build:** make the Cargo workspace resolve and compile again ([ec4fbee](https://github.com/benelabs/crucible/commit/ec4fbeedae9d6673ebce41c9d9e7a34f96574a0b))
-
-## [1.10.0](https://github.com/benelabs/crucible/compare/v1.9.0...v1.10.0) (2026-08-29)
-
-### Features
-
-* **frontend:** ABI form generator, state machine visualizer, mobile nav, time-travel debugger ([ca08c94](https://github.com/benelabs/crucible/commit/ca08c9468d2679d7f41968d24156b93ffe7f374b)), closes [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903) [#894](https://github.com/benelabs/crucible/issues/894) [#901](https://github.com/benelabs/crucible/issues/901) [#902](https://github.com/benelabs/crucible/issues/902) [#903](https://github.com/benelabs/crucible/issues/903)
-
-## [1.9.0](https://github.com/benelabs/crucible/compare/v1.8.0...v1.9.0) (2026-08-29)
-
-### Features
-
-* contract decompiler & source verification, testnet faucet dispenser, bytecode optimizer, and vulnerability scanner ([8d8af5b](https://github.com/benelabs/crucible/commit/8d8af5b4768429bb7bf34e59e2d3931ae94aee81))
-
-## [1.8.0](https://github.com/benelabs/crucible/compare/v1.7.0...v1.8.0) (2026-08-29)
-
-### Features
-
-* resolve issues [#856](https://github.com/benelabs/crucible/issues/856), [#849](https://github.com/benelabs/crucible/issues/849), [#864](https://github.com/benelabs/crucible/issues/864), and [#858](https://github.com/benelabs/crucible/issues/858) ([bdd6a65](https://github.com/benelabs/crucible/commit/bdd6a655ba2db70f23fe281e0dd8458e36e848dc))
-
-## [1.7.0](https://github.com/benelabs/crucible/compare/v1.6.0...v1.7.0) (2026-08-29)
-
-### Features
-
-* add ZK pairing mock harness and reentrancy probe ([dd85de6](https://github.com/benelabs/crucible/commit/dd85de6693b1efae25ec8e95d954f6a7072735eb)), closes [#828](https://github.com/benelabs/crucible/issues/828) [#829](https://github.com/benelabs/crucible/issues/829)
-
-## [1.6.0](https://github.com/benelabs/crucible/compare/v1.5.0...v1.6.0) (2026-08-29)
-
-### Features
-
-* implement issues [#861](https://github.com/benelabs/crucible/issues/861), [#860](https://github.com/benelabs/crucible/issues/860), [#865](https://github.com/benelabs/crucible/issues/865), and [#859](https://github.com/benelabs/crucible/issues/859) ([161f6fa](https://github.com/benelabs/crucible/commit/161f6fa1bac862859ba342bcd4daf52ab506acbf))
-
-## [1.5.0](https://github.com/benelabs/crucible/compare/v1.4.0...v1.5.0) (2026-08-28)
-
-### Features
-
-* **examples:** add bounty escrow with milestone payouts and nft rental protocol (closes [#886](https://github.com/benelabs/crucible/issues/886), closes [#885](https://github.com/benelabs/crucible/issues/885)) ([2eafda2](https://github.com/benelabs/crucible/commit/2eafda2fc4f1dee8f615c3ef585fdd0a2046e65f))
-
-## [1.4.0](https://github.com/benelabs/crucible/compare/v1.3.0...v1.4.0) (2026-08-28)
-
-### Features
-
-* add load harness, security disclosure, semantic release, chrony time sync ([8e0cbff](https://github.com/benelabs/crucible/commit/8e0cbff7473159d3bf49ac71d4800ed9bf310267)), closes [#927](https://github.com/benelabs/crucible/issues/927) [#926](https://github.com/benelabs/crucible/issues/926) [#924](https://github.com/benelabs/crucible/issues/924) [#925](https://github.com/benelabs/crucible/issues/925)
-* **frontend:** implement Multi-Language i18n localization engine and micro-animation motion design optimization ([#906](https://github.com/benelabs/crucible/issues/906), [#907](https://github.com/benelabs/crucible/issues/907)) ([5a8f410](https://github.com/benelabs/crucible/commit/5a8f4105dbb5669540649eb8119c132553f07b8e))
+* [#782](https://github.com/ayomideadeniran/crucible/issues/782) - Add Display impl and caching for CostReport::report() ([d9067c1](https://github.com/ayomideadeniran/crucible/commit/d9067c185f927b0b14dc796f119894029df57b95))
+* **#535:** skip events without contract_id to avoid panics ([849bbfb](https://github.com/ayomideadeniran/crucible/commit/849bbfb31cba3588800ce522330bb58a33ec459f)), closes [#535](https://github.com/ayomideadeniran/crucible/issues/535)
+* add prometheus to Cargo.toml, wire router, remove dangling state file ([2f49c95](https://github.com/ayomideadeniran/crucible/commit/2f49c959221aad9e461aba45b439beaf7bf8b00b))
+* assert_emitted! searches for matching event instead of full-log equality ([d5aed26](https://github.com/ayomideadeniran/crucible/commit/d5aed26a052629489febe6da6b91829cf3d35c9a))
+* **backend,contracts:** resolve [#787](https://github.com/ayomideadeniran/crucible/issues/787) 503 pool timeout and [#789](https://github.com/ayomideadeniran/crucible/issues/789) property fuzz tests ([25ec017](https://github.com/ayomideadeniran/crucible/commit/25ec01791ce0f30f4a5485d491b0d5dfdc166e98))
+* **backend:** remove duplicate config and workers module declarations in lib.rs ([62788e3](https://github.com/ayomideadeniran/crucible/commit/62788e3e7f2baa68b24de59892bc0649841b8940))
+* **ci:** Stabilize snapshot CI testing and compilation ([8264dd0](https://github.com/ayomideadeniran/crucible/commit/8264dd0db48ed9105d4e68a94c4a7a327cb81a0c))
+* correctly overwrite files and finalize simulation logic ([c9d45df](https://github.com/ayomideadeniran/crucible/commit/c9d45dfab55dd7fa39ef8219e80afb1d26b74969))
+* create accounts before lookup in reputation contract tests ([#493](https://github.com/ayomideadeniran/crucible/issues/493)) ([aa7732d](https://github.com/ayomideadeniran/crucible/commit/aa7732d0077ee4043480674a70d6ecd187f9c34f))
+* **crucible-macros:** improve fixture reset() diagnostic for missing setup() ([62e5dc8](https://github.com/ayomideadeniran/crucible/commit/62e5dc802424de9fdfb7c935382232132805e691))
+* **crucible:** clear mock_all_auths after simulate() to prevent auth bypass leaking ([7aa6ae2](https://github.com/ayomideadeniran/crucible/commit/7aa6ae279026445d8aacb19f758293fdd7b5ea30))
+* **crucible:** implement real snapshot storage/comparison in CostReport ([0661169](https://github.com/ayomideadeniran/crucible/commit/0661169de8a5ec404d16794c1d693228e21396e8)), closes [#486](https://github.com/ayomideadeniran/crucible/issues/486)
+* **crucible:** remove cdylib crate type - crucible is a test utility library, not a Soroban contract ([73c2338](https://github.com/ayomideadeniran/crucible/commit/73c233811f4eddf6d366768aa697168d9c5b90ea)), closes [#530](https://github.com/ayomideadeniran/crucible/issues/530)
+* **frontend,backend:** resolve syntax errors, duplicate declarations, and test setup localStorage mocks ([60908ed](https://github.com/ayomideadeniran/crucible/commit/60908edd23777454b7a5500205b43b61e93ca190))
+* **frontend:** merge upstream/main — integrate MultiChainDashboard, ContractAbiExplorer, and backend compiler/dependency services; resolve App.tsx and App.css conflicts; fix upstream test assertions ([2200bd8](https://github.com/ayomideadeniran/crucible/commit/2200bd84d139a63d00971913a90150920ebed59a))
+* **frontend:** resolve module resolution errors in App.tsx by removing missing imports ([92fd4ad](https://github.com/ayomideadeniran/crucible/commit/92fd4ad910cab72949d1b12e48d2c511742a20f0))
+* **issue-205:** Add proper error handling and overflow protection in trigger_profile_collection handler ([f2bba7a](https://github.com/ayomideadeniran/crucible/commit/f2bba7af4381cb0084ece3d7e9dad8498850419d))
+* remove crate-wide deprecated API suppression and update SDK calls ([8a8c71a](https://github.com/ayomideadeniran/crucible/commit/8a8c71a129d80f3eaac283604d87ca86348e3e5d))
+* resolve clippy unused variable warning in simulation logic ([cc70bee](https://github.com/ayomideadeniran/crucible/commit/cc70beedf6b7d9b4a98da6cc89b229b3da0e809c))
+* resolve duplicate config imports and add backend check to CI ([2b8e77d](https://github.com/ayomideadeniran/crucible/commit/2b8e77db014d030b5d9bd44d91cef9297c08e60e))
+* resolve issues 695, 682, 698, and 692 ([8e9eaa0](https://github.com/ayomideadeniran/crucible/commit/8e9eaa05c6a1174785cdde3fc300cf4359d57fb2)), closes [#682](https://github.com/ayomideadeniran/crucible/issues/682) [#695](https://github.com/ayomideadeniran/crucible/issues/695) [#698](https://github.com/ayomideadeniran/crucible/issues/698) [#692](https://github.com/ayomideadeniran/crucible/issues/692)
+* **routes:** deduplicate /api/v1/contracts, /networks, /admin, /coverage and define contracts_router ([#560](https://github.com/ayomideadeniran/crucible/issues/560)) ([8e8d76c](https://github.com/ayomideadeniran/crucible/commit/8e8d76c2d4e64df949b76b9303589f3ec63079cc))
+* **snapshots:** fail on missing snapshots instead of writing files silently ([b70a66a](https://github.com/ayomideadeniran/crucible/commit/b70a66a5cb015af9e83b5d929d19ff95d581f586)), closes [#550](https://github.com/ayomideadeniran/crucible/issues/550)
+* **treasury:** require auth from each signer in withdraw ([0c002f6](https://github.com/ayomideadeniran/crucible/commit/0c002f6b246125b1423e54a928538cc0ccaf86cd)), closes [#496](https://github.com/ayomideadeniran/crucible/issues/496)
+* unify event topic comparison strategy across public helpers ([#533](https://github.com/ayomideadeniran/crucible/issues/533)) ([e833486](https://github.com/ayomideadeniran/crucible/commit/e83348674d45d5e2f056fb81192cfbab2faa2372))
+* update simulation test expectations for mocked rollback and fix formatting ([8cfd6ab](https://github.com/ayomideadeniran/crucible/commit/8cfd6abb803565b9980003dee40c063f3cc665a9))
+* **vesting:** validate initialization parameters before transferring funds ([883c79a](https://github.com/ayomideadeniran/crucible/commit/883c79ab9dcfb4bbe826bc181b15b59017dc9f56)), closes [#556](https://github.com/ayomideadeniran/crucible/issues/556)
 
 ## [1.3.0](https://github.com/benelabs/crucible/compare/v1.2.0...v1.3.0) (2026-08-02)
 

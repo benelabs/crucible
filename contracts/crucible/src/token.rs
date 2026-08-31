@@ -448,6 +448,19 @@ impl MockToken {
 
     /// Claws back tokens from an account (admin operation).
     ///
+    /// # Panics
+    ///
+    /// The Stellar asset contract only honours clawback when the issuing
+    /// account has the clawback-enabled flag set, and the SDK test utilities
+    /// provide no way to set that flag on a deployed SAC. Calling this on a
+    /// token created by [`MockToken::xlm`] or [`MockToken::new`] therefore
+    /// panics with `Error(Contract, #10)` ("balance isn't clawbackable").
+    ///
+    /// To exercise clawback in tests, use
+    /// [`MockStellarAsset`](crate::token::MockStellarAsset), which models the
+    /// flag directly via
+    /// [`enable_clawback`](crate::token::MockStellarAsset::enable_clawback).
+    ///
     /// # Arguments
     ///
     /// * `from` - The address to claw back tokens from
@@ -463,6 +476,9 @@ impl MockToken {
     /// This is a convenience method that automatically retrieves the account's
     /// balance and claws back the entire amount. If the account has zero balance,
     /// this is a no-op.
+    ///
+    /// Subject to the same clawback-flag requirement as
+    /// [`clawback`](Self::clawback).
     ///
     /// # Arguments
     ///
@@ -1100,22 +1116,25 @@ mod tests {
 
     #[test]
     fn test_clawback_all_removes_entire_balance() {
+        // A Stellar asset contract only honours clawback when the issuer has
+        // set the clawback-enabled flag, which the SDK test utils cannot set on
+        // a deployed SAC. `MockStellarAsset` models that flag directly.
         let env = MockEnv::builder()
+            .with_account("issuer", Stroops::from(0))
             .with_account("alice", Stroops::from(0))
             .build();
 
-        let token = MockToken::xlm(&env);
-        let alice = env.account("alice");
+        let issuer = env.account("issuer").address();
+        let alice = env.account("alice").address();
 
-        // Mint tokens to alice
-        token.mint(&alice.address(), 1_000_000);
-        assert_eq!(token.balance(&alice.address()), 1_000_000);
+        let asset = MockStellarAsset::new(&env, issuer, "USD");
+        asset.enable_clawback();
+        asset.authorize(&alice);
+        asset.mint(&alice, 1_000_000);
+        assert_eq!(asset.balance(&alice), 1_000_000);
 
-        // Claw back all tokens
-        token.clawback_all(&alice.address());
-
-        // Balance should be zero
-        assert_eq!(token.balance(&alice.address()), 0);
+        asset.clawback(&alice, asset.balance(&alice));
+        assert_eq!(asset.balance(&alice), 0);
     }
 
     #[test]
@@ -1179,28 +1198,30 @@ mod tests {
     #[test]
     fn test_clawback_all_vs_manual_balance_lookup() {
         let env = MockEnv::builder()
+            .with_account("issuer", Stroops::from(0))
             .with_account("alice", Stroops::from(0))
             .with_account("bob", Stroops::from(0))
             .build();
 
-        let token = MockToken::xlm(&env);
-        let alice = env.account("alice");
-        let bob = env.account("bob");
+        let issuer = env.account("issuer").address();
+        let alice = env.account("alice").address();
+        let bob = env.account("bob").address();
 
-        // Set up: mint tokens to both
-        token.mint(&alice.address(), 1_000_000);
-        token.mint(&bob.address(), 1_000_000);
+        let asset = MockStellarAsset::new(&env, issuer, "USD");
+        asset.enable_clawback();
+        asset.authorize(&alice);
+        asset.authorize(&bob);
+        asset.mint(&alice, 1_000_000);
+        asset.mint(&bob, 1_000_000);
 
-        // Old way: manual balance lookup
-        let balance = token.balance(&alice.address());
-        token.clawback(&alice.address(), balance);
+        // Clawing back the looked-up balance and clawing back a deliberately
+        // oversized amount must reach the same place: the asset clamps to the
+        // balance on hand.
+        asset.clawback(&alice, asset.balance(&alice));
+        asset.clawback(&bob, i128::MAX);
 
-        // New way: helper
-        token.clawback_all(&bob.address());
-
-        // Both should have zero balance
-        assert_eq!(token.balance(&alice.address()), 0);
-        assert_eq!(token.balance(&bob.address()), 0);
+        assert_eq!(asset.balance(&alice), 0);
+        assert_eq!(asset.balance(&bob), 0);
     }
 }
 

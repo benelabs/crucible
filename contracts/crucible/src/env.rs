@@ -8,6 +8,8 @@
 //! contexts on the host and are not available inside contract WASM builds.
 
 use crate::account::AccountHandle;
+use crate::assertions::RevertAssertion;
+use crate::checkpoint::{CheckpointId, CheckpointStack, CheckpointStats};
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use crate::token::MockToken;
@@ -324,6 +326,7 @@ pub struct MockEnv {
     xlm_token_address: Rc<RefCell<Option<Address>>>,
     track_costs: bool,
     crypto_registry: Rc<RefCell<MockCryptoRegistry>>,
+    checkpoints: Rc<RefCell<CheckpointStack>>,
 }
 
 // Typed event wrapper to provide ergonomic access to event fields and typed data conversion.
@@ -377,7 +380,7 @@ impl CapturedEvent {
         T::from_val(&self.env, &self.data)
     }
 
-    /// Checks whether the event's topics match the given topic pattern (with wildcard support `*` or `_`).
+    /// Checks whether the event's topics match the given topic pattern (with wildcard support via the `_` symbol).
     pub fn matches_topic_pattern(&self, pattern: &SorobanVec<Val>) -> bool {
         crate::event_topic_match::topics_match(&self.env, pattern, &self.topics)
     }
@@ -464,7 +467,7 @@ impl EventMatches {
         &self.env
     }
 
-    /// Filter matching events by topic pattern supporting wildcards (`*` or `_`).
+    /// Filter matching events by topic pattern supporting wildcards (the `_` symbol).
     pub fn filter_by_topic_pattern<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> EventMatches {
         let pattern_vec = pattern.into_val(&self.env);
         let mut filtered = SorobanVec::new(&self.env);
@@ -868,11 +871,6 @@ impl MockEnv {
         });
     }
 
-    /// Returns the current ledger sequence number.
-    pub fn ledger_sequence(&self) -> u32 {
-        self.inner.ledger().get().sequence_number
-    }
-
     /// Register an account with a name.
     pub fn register_account(&self, name: &str, address: Address) {
         if self.accounts.borrow().contains_key(name) {
@@ -1220,6 +1218,10 @@ impl MockEnv {
             tokens: Rc::new(RefCell::new(self.tokens.borrow().clone())),
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
             track_costs: self.track_costs,
+            crypto_registry: Rc::new(RefCell::new(self.crypto_registry.borrow().clone())),
+            // A fork gets a fresh stack: checkpoints taken in one environment
+            // must never be redeemable in the other.
+            checkpoints: Rc::new(RefCell::new(self.checkpoints.borrow().forked())),
         }
     }
 
@@ -1384,6 +1386,160 @@ impl MockEnv {
         }
     }
 
+    /// Captures the current ledger state and returns a handle to it.
+    ///
+    /// Contract instance, persistent and temporary storage are all captured.
+    /// Registered contracts, accounts and tokens are *not* part of the
+    /// snapshot and are never disturbed by a rollback, so any client or handle
+    /// obtained before the checkpoint stays valid afterwards.
+    ///
+    /// Snapshots share their entries structurally, so a checkpoint is cheap
+    /// enough to take at every node of a speculative execution tree.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let before = env.checkpoint();
+    /// vault.liquidate(&borrower.address());
+    /// env.rollback_to(before);
+    /// ```
+    ///
+    /// See also [`rollback_to`](Self::rollback_to) and
+    /// [`release_checkpoint`](Self::release_checkpoint).
+    pub fn checkpoint(&self) -> CheckpointId {
+        self.checkpoints.borrow_mut().capture(self.inner.host())
+    }
+
+    /// Restores the ledger to the state captured by `id`.
+    ///
+    /// Entries written since the checkpoint are reverted, and entries created
+    /// since the checkpoint are removed. `id` itself remains valid, so the same
+    /// point can be rolled back to repeatedly while exploring alternative
+    /// branches.
+    ///
+    /// Every checkpoint taken *after* `id` is discarded, since the state those
+    /// checkpoints described no longer exists.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` came from a different environment (including a
+    /// [`fork`](Self::fork)), or if it was invalidated by an earlier rollback
+    /// to an older checkpoint.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let before = env.checkpoint();
+    /// counter.increment();
+    /// assert_eq!(counter.value(), 1);
+    ///
+    /// env.rollback_to(before);
+    /// assert_eq!(counter.value(), 0);
+    /// ```
+    pub fn rollback_to(&self, id: CheckpointId) {
+        self.checkpoints
+            .borrow_mut()
+            .rollback(self.inner.host(), id);
+    }
+
+    /// Discards `id` and every checkpoint taken after it without restoring.
+    ///
+    /// Use this when a speculative branch is accepted: the work stays, and the
+    /// snapshots backing it are released.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`rollback_to`](Self::rollback_to).
+    pub fn release_checkpoint(&self, id: CheckpointId) {
+        self.checkpoints.borrow_mut().release(id);
+    }
+
+    /// Returns how many checkpoints are currently live.
+    pub fn checkpoint_depth(&self) -> usize {
+        self.checkpoints.borrow().depth()
+    }
+
+    /// Returns the entry counts captured by `id`, broken down by durability.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`rollback_to`](Self::rollback_to).
+    pub fn checkpoint_stats(&self, id: CheckpointId) -> CheckpointStats {
+        self.checkpoints.borrow().stats(id)
+    }
+
+    /// Runs `f` inside a checkpoint and always rolls back afterwards.
+    ///
+    /// This is the speculative-execution shorthand: whatever `f` writes to the
+    /// ledger is discarded, while its return value is handed back to the
+    /// caller. The rollback also happens if `f` panics, so a reverted
+    /// speculative branch cannot leak state into the rest of the test.
+    ///
+    /// Unlike [`simulate`](Self::simulate), which reports the cost and auth
+    /// profile of a call, this is about ledger state: it answers "what would
+    /// this do?" without leaving any trace.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Find out what the liquidation would pay out, without performing it.
+    /// let payout = env.speculate(|| vault.liquidate(&borrower.address()));
+    /// assert_eq!(vault.collateral(&borrower.address()), 1_000); // untouched
+    /// ```
+    pub fn speculate<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        let id = self.checkpoint();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        self.rollback_to(id);
+        self.release_checkpoint(id);
+        match outcome {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    /// Runs `f` and returns a chainable assertion that it reverted.
+    ///
+    /// This is the fluent counterpart to the [`assert_reverts!`](crate::assert_reverts)
+    /// macro. Unlike the macro, the returned [`RevertAssertion`] is a value: it
+    /// can be stored, passed around, and refined with
+    /// [`with_error`](RevertAssertion::with_error),
+    /// [`with_any_error`](RevertAssertion::with_any_error) or
+    /// [`with_message_containing`](RevertAssertion::with_message_containing)
+    /// before being checked with [`verify`](RevertAssertion::verify) or
+    /// [`and_assert`](RevertAssertion::and_assert).
+    ///
+    /// `f` runs immediately, so any state the revert was supposed to leave
+    /// untouched can be inspected inside `and_assert`.
+    ///
+    /// The assertion is `#[must_use]` and panics if dropped unchecked, so a
+    /// forgotten `.verify()` fails the test rather than passing silently.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use crucible::prelude::*;
+    ///
+    /// env.expect_revert(|| client.transfer(&alice.address(), &bob.address(), &200_i128))
+    ///     .with_error(ContractError::Unauthorized)
+    ///     .verify();
+    ///
+    /// env.expect_revert(|| client.withdraw(&alice.address(), &999_i128))
+    ///     .with_any_error()
+    ///     .and_assert(|| {
+    ///         // The failed withdrawal must not have moved any balance.
+    ///         assert_eq!(token.balance(&alice.address()), 500_i128);
+    ///     });
+    /// ```
+    pub fn expect_revert<F, T>(&self, f: F) -> RevertAssertion
+    where
+        F: FnOnce() -> T,
+    {
+        RevertAssertion::capture(f)
+    }
+
     /// Returns a mutable reference guard to the mock crypto registry.
     pub fn crypto_registry(&self) -> std::cell::RefMut<'_, MockCryptoRegistry> {
         self.crypto_registry.borrow_mut()
@@ -1473,6 +1629,7 @@ impl Default for MockEnv {
             xlm_token_address: Rc::new(RefCell::new(None)),
             track_costs: false,
             crypto_registry: Rc::new(RefCell::new(MockCryptoRegistry::new())),
+            checkpoints: Rc::new(RefCell::new(CheckpointStack::new())),
         }
     }
 }
@@ -1622,6 +1779,30 @@ impl MockEnvBuilder {
         self
     }
 
+    /// Stops the environment writing a test snapshot file when it is dropped.
+    ///
+    /// The Soroban test host writes a JSON snapshot per `Env` by default, which
+    /// is useful for a handful of hand-written tests but produces one file per
+    /// generated case under
+    /// [`#[crucible::quickcheck]`](crate::quickcheck). Property tests should
+    /// build their environments with this.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// #[crucible::quickcheck]
+    /// fn some_property(amount: SorobanAmount) {
+    ///     let env = MockEnv::builder().without_snapshots().build();
+    ///     // ...
+    /// }
+    /// ```
+    pub fn without_snapshots(mut self) -> Self {
+        self.env.inner.set_config(soroban_sdk::testutils::EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        });
+        self
+    }
+
     /// Enable cost tracking for instruction counting.
     pub fn track_costs(mut self) -> Self {
         self.env.track_costs = true;
@@ -1731,6 +1912,92 @@ impl MockKeyPair {
             .try_into()
             .expect("public key must be 64 bytes");
         soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Returns the public key in SEC-1 uncompressed form as `BytesN<65>`.
+    ///
+    /// The stored `public_key_bytes` holds the 64-byte `X || Y` affine
+    /// coordinates; SEC-1 prefixes those with the `0x04` uncompressed tag.
+    /// This is the encoding [`soroban_sdk::crypto::Crypto::secp256r1_verify`]
+    /// expects.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the keypair is not on an ECDSA curve (i.e. for Ed25519).
+    pub fn public_key_sec1_bytes65(&self, env: &Env) -> soroban_sdk::BytesN<65> {
+        let coords: [u8; 64] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("SEC-1 encoding requires a 64-byte ECDSA public key");
+        let mut sec1 = [0_u8; 65];
+        sec1[0] = 0x04;
+        sec1[1..].copy_from_slice(&coords);
+        soroban_sdk::BytesN::from_array(env, &sec1)
+    }
+
+    /// Signs a pre-computed 32-byte message digest with an ECDSA curve.
+    ///
+    /// Unlike [`sign`](Self::sign), which hashes the message itself, this signs
+    /// the digest as-is. Use it when the digest was produced separately — for
+    /// example by `env.crypto().sha256(..)` — so that the signature matches
+    /// what the Soroban host verifies.
+    ///
+    /// # Panics
+    ///
+    /// Panics for Ed25519 keypairs, which sign whole messages rather than digests.
+    pub fn sign_prehash(&self, env: &Env, message_digest: &[u8; 32]) -> soroban_sdk::BytesN<64> {
+        let sig_bytes = match self.curve {
+            CryptoCurve::Ed25519 => {
+                panic!("Ed25519 signs whole messages; use `sign` instead of `sign_prehash`")
+            }
+            CryptoCurve::Secp256k1 => {
+                let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: k256::ecdsa::Signature = signing_key
+                    .sign_prehash_recoverable(message_digest)
+                    .expect("signing a 32-byte digest cannot fail")
+                    .0;
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256r1 => {
+                use p256::ecdsa::signature::hazmat::PrehashSigner as _;
+                let signing_key = P256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: p256::ecdsa::Signature = signing_key
+                    .sign_prehash(message_digest)
+                    .expect("signing a 32-byte digest cannot fail");
+                signature.to_bytes().to_vec()
+            }
+        };
+        let array: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Signs a 32-byte message digest and returns the signature together with
+    /// the ECDSA recovery id, as required by
+    /// [`soroban_sdk::crypto::Crypto::secp256k1_recover`].
+    ///
+    /// # Panics
+    ///
+    /// Panics unless the keypair is on the secp256k1 curve.
+    pub fn sign_prehash_recoverable(
+        &self,
+        env: &Env,
+        message_digest: &[u8; 32],
+    ) -> (soroban_sdk::BytesN<64>, u32) {
+        assert_eq!(
+            self.curve,
+            CryptoCurve::Secp256k1,
+            "recoverable signatures are only defined for secp256k1"
+        );
+        let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+        let (signature, recovery_id) = signing_key
+            .sign_prehash_recoverable(message_digest)
+            .expect("signing a 32-byte digest cannot fail");
+        let array: [u8; 64] = signature.to_bytes().as_slice().try_into().unwrap();
+        (
+            soroban_sdk::BytesN::from_array(env, &array),
+            recovery_id.to_byte() as u32,
+        )
     }
 
     /// Returns the public key as a Soroban `Bytes`.
@@ -2369,6 +2636,9 @@ mod protocol_version_tests {
         assert_eq!(format!("{}", ProtocolVersion::V20), "Protocol 20");
         assert_eq!(format!("{}", ProtocolVersion::V21), "Protocol 21");
         assert_eq!(format!("{}", ProtocolVersion::V22), "Protocol 22");
+    }
+}
+
 // Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
 #[cfg(test)]
 mod zk_pairing_harness_tests {

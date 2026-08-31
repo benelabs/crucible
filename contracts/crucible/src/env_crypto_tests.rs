@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::env::{CryptoCurve, MockCryptoRegistry, MockEnv, MockKeyPair};
-    use soroban_sdk::{contract, contractimpl, symbol_short, Bytes, BytesN, Env};
+    use soroban_sdk::{contract, contractimpl, Bytes, BytesN, Env};
 
     #[contract]
     #[derive(Default)]
@@ -19,23 +19,33 @@ mod tests {
             true
         }
 
+        /// Soroban exposes no `secp256k1_verify` host function; verification is
+        /// expressed as "recover the key from the signature and compare".
         pub fn verify_secp256k1_auth(
             env: Env,
-            public_key: BytesN<64>,
-            message_digest: BytesN<32>,
+            public_key: BytesN<65>,
+            message: Bytes,
             signature: BytesN<64>,
+            recovery_id: u32,
         ) -> bool {
-            env.crypto().secp256k1_verify(&public_key, &message_digest, &signature);
-            true
+            // Hashing in-contract is what yields a trusted `Hash<32>`; the host
+            // refuses to accept one directly as an entrypoint argument.
+            let digest = env.crypto().sha256(&message);
+            let recovered = env
+                .crypto()
+                .secp256k1_recover(&digest, &signature, recovery_id);
+            recovered == public_key
         }
 
         pub fn verify_secp256r1_auth(
             env: Env,
-            public_key: BytesN<64>,
-            message_digest: BytesN<32>,
+            public_key: BytesN<65>,
+            message: Bytes,
             signature: BytesN<64>,
         ) -> bool {
-            env.crypto().secp256r1_verify(&public_key, &message_digest, &signature);
+            let digest = env.crypto().sha256(&message);
+            env.crypto()
+                .secp256r1_verify(&public_key, &digest, &signature);
             true
         }
     }
@@ -74,22 +84,31 @@ mod tests {
         let client = SmartWalletContractClient::new(env.inner(), &id);
 
         let keypair = MockKeyPair::generate_secp256k1(101);
-        let pub_key = keypair.public_key_bytes64(env.inner());
+        let pub_key = keypair.public_key_sec1_bytes65(env.inner());
 
-        let digest_raw = env.inner().crypto().sha256(&Bytes::from_slice(env.inner(), b"tx_hash_secp256k1"));
-        let message_digest = BytesN::from_array(env.inner(), &digest_raw.to_array());
+        let message = Bytes::from_slice(env.inner(), b"tx_hash_secp256k1");
+        let digest_array = env.inner().crypto().sha256(&message).to_array();
 
-        // Valid signature verification
-        let valid_sig = keypair.sign(env.inner(), &digest_raw.to_array());
-        let verified = client.verify_secp256k1_auth(&pub_key, &message_digest, &valid_sig);
+        // Valid signature recovers exactly the signing key.
+        let (valid_sig, recovery_id) =
+            keypair.sign_prehash_recoverable(env.inner(), &digest_array);
+        let verified =
+            client.verify_secp256k1_auth(&pub_key, &message, &valid_sig, &recovery_id);
         assert!(verified, "Valid Secp256k1 signature must pass verification");
 
-        // Corrupt signature injection
-        let corrupt_sig = keypair.corrupt_signature(env.inner(), &digest_raw.to_array());
+        // A corrupt signature must not recover the signing key. The host either
+        // rejects the malformed signature outright (panic) or recovers some
+        // other key; both outcomes count as a failed verification.
+        let mut corrupt_bytes = valid_sig.to_array();
+        corrupt_bytes[63] ^= 0xff;
+        let corrupt_sig = BytesN::from_array(env.inner(), &corrupt_bytes);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.verify_secp256k1_auth(&pub_key, &message_digest, &corrupt_sig);
+            client.verify_secp256k1_auth(&pub_key, &message, &corrupt_sig, &recovery_id)
         }));
-        assert!(result.is_err(), "Corrupt Secp256k1 signature must trigger verification panic");
+        assert!(
+            !matches!(result, Ok(true)),
+            "Corrupt Secp256k1 signature must fail verification"
+        );
     }
 
     #[test]
@@ -101,20 +120,22 @@ mod tests {
         let client = SmartWalletContractClient::new(env.inner(), &id);
 
         let keypair = MockKeyPair::generate_secp256r1(202);
-        let pub_key = keypair.public_key_bytes64(env.inner());
+        let pub_key = keypair.public_key_sec1_bytes65(env.inner());
 
-        let digest_raw = env.inner().crypto().sha256(&Bytes::from_slice(env.inner(), b"tx_hash_secp256r1"));
-        let message_digest = BytesN::from_array(env.inner(), &digest_raw.to_array());
+        let message = Bytes::from_slice(env.inner(), b"tx_hash_secp256r1");
+        let digest_array = env.inner().crypto().sha256(&message).to_array();
 
         // Valid signature verification
-        let valid_sig = keypair.sign(env.inner(), &digest_raw.to_array());
-        let verified = client.verify_secp256r1_auth(&pub_key, &message_digest, &valid_sig);
+        let valid_sig = keypair.sign_prehash(env.inner(), &digest_array);
+        let verified = client.verify_secp256r1_auth(&pub_key, &message, &valid_sig);
         assert!(verified, "Valid Secp256r1 signature must pass verification");
 
         // Corrupt signature injection
-        let corrupt_sig = keypair.corrupt_signature(env.inner(), &digest_raw.to_array());
+        let mut corrupt_bytes = valid_sig.to_array();
+        corrupt_bytes[63] ^= 0xff;
+        let corrupt_sig = BytesN::from_array(env.inner(), &corrupt_bytes);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.verify_secp256r1_auth(&pub_key, &message_digest, &corrupt_sig);
+            client.verify_secp256r1_auth(&pub_key, &message, &corrupt_sig);
         }));
         assert!(result.is_err(), "Corrupt Secp256r1 signature must trigger verification panic");
     }

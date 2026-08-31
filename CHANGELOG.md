@@ -1,3 +1,9 @@
+## [1.23.0](https://github.com/benelabs/crucible/compare/v1.22.0...v1.23.0) (2026-08-31)
+
+### Features
+
+* **services:** contract bytecode decompiler & source code verification service (closes [#848](https://github.com/benelabs/crucible/issues/848)) ([2764d2e](https://github.com/benelabs/crucible/commit/2764d2e1a72b70cd72be61f71ecb9c31c71c417a))
+
 ## [1.22.0](https://github.com/benelabs/crucible/compare/v1.21.0...v1.22.0) (2026-08-31)
 
 ### Features

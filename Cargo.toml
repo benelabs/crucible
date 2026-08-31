@@ -12,19 +12,28 @@ members = [
     "examples/staking",
     "examples/time_locked_vault",
     "examples/emergency_stop",
+    "examples/emergency-circuit-breaker",
     "examples/gasless",
     "examples/cross-contract",
     "examples/lending",
     "examples/prediction-market",
     "examples/escrow-multi-arbiter",
+    "examples/options-protocol",
     "examples/amm-pool",
+    "examples/yield-vault",
     "examples/bounty-escrow",
     "examples/nft-rental",
+    "examples/flash-mint",
+    "examples/lottery",
+    "examples/gaming-crafting",
+    "examples/smart-wallet",
+    "examples/quadratic-funding",
+    "examples/liquid-staking",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "1.6.0"
+version = "1.21.0"
 edition = "2021"
 rust-version = "1.91.0"
 license = "MIT"
@@ -41,4 +50,4 @@ strip = true
 
 [workspace.dependencies]
 soroban-sdk = { version = "26", features = ["testutils"] }
-crucible-macros = { path = "crucible-macros", version = "0.1.0" }
+crucible-macros = { path = "crucible-macros", version = "1.7.0" }

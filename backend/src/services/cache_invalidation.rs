@@ -337,10 +337,125 @@ impl CacheInvalidationManager {
                 .query_async(&mut conn)
                 .await?;
             
-            if !keys.is_empty() {
-                Self::invalidate_keys_impl(redis_client, keys).await?;
+        if !keys.is_empty() {
+            Self::invalidate_keys_impl(redis_client, keys).await?;
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transaction Simulation Cache (Moka L1 + Redis L2)
+// ---------------------------------------------------------------------------
+
+use std::time::Duration;
+
+/// Key structure for transaction simulation caching.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SimulationCacheKey {
+    pub contract_id: String,
+    pub function: String,
+    pub args_hash: String,
+    pub ledger_sequence: u64,
+}
+
+impl SimulationCacheKey {
+    pub fn new(contract_id: impl Into<String>, function: impl Into<String>, args_hash: impl Into<String>, ledger_sequence: u64) -> Self {
+        Self {
+            contract_id: contract_id.into(),
+            function: function.into(),
+            args_hash: args_hash.into(),
+            ledger_sequence,
+        }
+    }
+
+    pub fn to_redis_key(&self) -> String {
+        format!("sim:{}:{}:{}:{}", self.contract_id, self.function, self.args_hash, self.ledger_sequence)
+    }
+}
+
+/// Simulation execution result payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationResult {
+    pub success: bool,
+    pub result_xdr: String,
+    pub cpu_instructions: u64,
+    pub memory_bytes: u64,
+    pub footprint: Vec<String>,
+}
+
+/// Two-tier simulation cache manager (Moka in-memory + Redis cluster).
+#[derive(Clone)]
+pub struct SimulationCacheManager {
+    moka_cache: moka::future::Cache<String, SimulationResult>,
+    redis_client: Arc<redis::Client>,
+    ttl: Duration,
+}
+
+impl SimulationCacheManager {
+    pub fn new(redis_client: Arc<redis::Client>, ttl_secs: u64) -> Self {
+        let moka_cache = moka::future::Cache::builder()
+            .max_capacity(10_000)
+            .time_to_live(Duration::from_secs(ttl_secs))
+            .build();
+
+        Self {
+            moka_cache,
+            redis_client,
+            ttl: Duration::from_secs(ttl_secs),
+        }
+    }
+
+    pub async fn get(&self, key: &SimulationCacheKey) -> Option<SimulationResult> {
+        let redis_key = key.to_redis_key();
+
+        // Level 1: Moka in-memory cache
+        if let Some(res) = self.moka_cache.get(&redis_key).await {
+            debug!(key = %redis_key, "Simulation cache L1 hit (Moka)");
+            return Some(res);
+        }
+
+        // Level 2: Redis cluster cache
+        if let Ok(mut conn) = self.redis_client.get_multiplexed_async_connection().await {
+            if let Ok(Some(cached_json)) = conn.get::<_, Option<String>>(&redis_key).await {
+                if let Ok(res) = serde_json::from_str::<SimulationResult>(&cached_json) {
+                    debug!(key = %redis_key, "Simulation cache L2 hit (Redis)");
+                    self.moka_cache.insert(redis_key, res.clone()).await;
+                    return Some(res);
+                }
             }
         }
+
+        None
+    }
+
+    pub async fn insert(&self, key: &SimulationCacheKey, result: SimulationResult) {
+        let redis_key = key.to_redis_key();
+        self.moka_cache.insert(redis_key.clone(), result.clone()).await;
+
+        if let Ok(mut conn) = self.redis_client.get_multiplexed_async_connection().await {
+            if let Ok(json) = serde_json::to_string(&result) {
+                let _: Result<(), _> = conn.set_ex(redis_key, json, self.ttl.as_secs()).await;
+            }
+        }
+    }
+
+    /// Invalidate simulation cache entries when a ledger modifies the target contract footprint.
+    pub async fn invalidate_contract_footprint(&self, contract_id: &str) -> Result<(), anyhow::Error> {
+        info!(contract_id = %contract_id, "Invalidating simulation cache for updated contract footprint");
+        
+        let pattern = format!("sim:{}*", contract_id);
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
+        let keys: Vec<String> = redis::cmd("KEYS").arg(&pattern).query_async(&mut conn).await?;
+
+        for key in &keys {
+            self.moka_cache.invalidate(key).await;
+        }
+
+        if !keys.is_empty() {
+            redis::cmd("DEL").arg(&keys).query_async::<()>(&mut conn).await?;
+        }
+
         Ok(())
     }
 }
@@ -354,6 +469,7 @@ pub trait CacheAware {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_cache_invalidation_manager_creation() {
@@ -371,5 +487,39 @@ mod tests {
         assert_eq!(InvalidationStrategy::Pattern as i32, 1);
         assert_eq!(InvalidationStrategy::Namespace as i32, 2);
         assert_eq!(InvalidationStrategy::Tag as i32, 3);
+    }
+
+    #[tokio::test]
+    async fn test_simulation_cache_hit_vs_miss_latency() {
+        let client = Arc::new(redis::Client::open("redis://127.0.0.1/").unwrap());
+        let sim_cache = SimulationCacheManager::new(client, 300);
+
+        let key = SimulationCacheKey::new("C123456789", "transfer", "hash_abc_123", 100500);
+        let sim_res = SimulationResult {
+            success: true,
+            result_xdr: "AAAAAAA==".to_string(),
+            cpu_instructions: 150_000,
+            memory_bytes: 4096,
+            footprint: vec!["contract_data".to_string()],
+        };
+
+        // Cache miss timing
+        let t_start_miss = Instant::now();
+        let miss_res = sim_cache.get(&key).await;
+        let miss_duration = t_start_miss.elapsed();
+
+        assert!(miss_res.is_none());
+
+        // Insert into cache
+        sim_cache.insert(&key, sim_res).await;
+
+        // Cache hit timing
+        let t_start_hit = Instant::now();
+        let hit_res = sim_cache.get(&key).await;
+        let hit_duration = t_start_hit.elapsed();
+
+        assert!(hit_res.is_some());
+        assert_eq!(hit_res.unwrap().cpu_instructions, 150_000);
+        assert!(hit_duration < miss_duration + Duration::from_millis(50));
     }
 }

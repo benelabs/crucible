@@ -1,0 +1,433 @@
+# Location: deployments/k8s/mtls-policy.yaml
+# Production requirement: Zero-Trust Mutual TLS (mTLS) Mesh between Microservices
+#
+# This manifest enforces STRICT mTLS for every workload in the `crucible` namespace
+# using Istio (Service Mesh Interface). It is composed of four layers:
+#
+#   1. PeerAuthentication  — forces STRICT mTLS; rejects plain-text traffic
+#   2. DestinationRules    — enables mTLS on the client side for every host
+#   3. AuthorizationPolicy — default-deny ingress + per-service allow rules
+#   4. Certificate-rotation Job — triggers cert rotation via cert-manager annotation
+#
+# Prerequisites:
+#   - Istio >= 1.19 installed with istiod in `istio-system`
+#   - cert-manager >= 1.14 for automatic X.509 issuance and rotation
+#   - Namespace label: `istio-injection: enabled`
+#
+# Apply with:
+#   kubectl apply -f deployments/k8s/mtls-policy.yaml
+# Verify mTLS is active:
+#   istioctl x authz check <pod-name>.<crucible>
+
+---
+# ── Namespace ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crucible
+  labels:
+    # Istio automatically injects the Envoy sidecar in labelled namespaces.
+    istio-injection: "enabled"
+    # PodSecurity admission — no privileged containers allowed.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    environment: production
+
+---
+# ── PeerAuthentication: STRICT mTLS namespace-wide ────────────────────────────
+# Any plain-text (non-mTLS) connection is rejected at the Envoy proxy level.
+# Individual workloads may not downgrade to PERMISSIVE.
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: crucible-mtls-strict
+  namespace: crucible
+  annotations:
+    # Rotates every 90 days; cert-manager handles issuance automatically.
+    cert-manager.io/rotation-policy: Always
+spec:
+  # Apply to every pod in the namespace — no selector means namespace-wide.
+  mtls:
+    mode: STRICT
+
+---
+# ── PeerAuthentication: STRICT mTLS for the backend service ───────────────────
+# Explicit per-workload policy so an accidental namespace-level override cannot
+# silently downgrade the backend API server.
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: crucible-backend-mtls
+  namespace: crucible
+spec:
+  selector:
+    matchLabels:
+      app: crucible-backend
+  mtls:
+    mode: STRICT
+
+---
+# ── PeerAuthentication: STRICT mTLS for the frontend service ──────────────────
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: crucible-frontend-mtls
+  namespace: crucible
+spec:
+  selector:
+    matchLabels:
+      app: crucible-frontend
+  mtls:
+    mode: STRICT
+
+---
+# ── DestinationRule: client-side mTLS for all services in the namespace ───────
+# Tells Envoy to always present a client certificate when connecting to any
+# service inside the mesh. ISTIO_MUTUAL uses the Istio-provisioned workload cert.
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: crucible-default-mtls
+  namespace: crucible
+spec:
+  # Wildcard matches every service in the namespace.
+  host: "*.crucible.svc.cluster.local"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    # Connection pool settings reduce blast radius during cert rotation.
+    connectionPool:
+      tcp:
+        maxConnections: 1000
+        connectTimeout: 10s
+      http:
+        http2MaxRequests: 10000
+        maxRequestsPerConnection: 0   # unlimited (keep-alive)
+    # Circuit breaker — eject unhealthy pods during rollout or cert issues.
+    outlierDetection:
+      consecutiveGatewayErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+---
+# ── DestinationRule: client-side mTLS for the backend ────────────────────────
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: crucible-backend-dr
+  namespace: crucible
+spec:
+  host: crucible-backend.crucible.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: LEAST_CONN
+
+---
+# ── DestinationRule: client-side mTLS for PostgreSQL (TLS passthrough) ────────
+# PostgreSQL listens on port 5432. Istio routes the TCP stream; the database
+# itself enforces TLS with certificates issued by the same cert-manager CA.
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: crucible-postgres-dr
+  namespace: crucible
+spec:
+  host: crucible-postgres.crucible.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 200
+        connectTimeout: 5s
+
+---
+# ── DestinationRule: client-side mTLS for Redis cluster ───────────────────────
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: crucible-redis-dr
+  namespace: crucible
+spec:
+  host: crucible-redis.crucible.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 500
+        connectTimeout: 3s
+
+---
+# ── AuthorizationPolicy: default DENY-ALL ingress ────────────────────────────
+# Zero-trust baseline: no traffic is allowed unless explicitly permitted by a
+# subsequent policy. Applies to every workload in the namespace.
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: crucible-deny-all
+  namespace: crucible
+spec:
+  {}  # Empty spec with no `action` defaults to DENY for all sources.
+
+---
+# ── AuthorizationPolicy: allow ingress to backend from frontend ───────────────
+# The frontend (React) service may call the backend REST / gRPC APIs.
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: crucible
+spec:
+  selector:
+    matchLabels:
+      app: crucible-backend
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            # Istio SPIFFE identity of the frontend workload.
+            principals:
+              - "cluster.local/ns/crucible/sa/crucible-frontend"
+      to:
+        - operation:
+            ports: ["8080", "50051"]  # REST + gRPC
+
+---
+# ── AuthorizationPolicy: allow backend to reach PostgreSQL ────────────────────
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-backend-to-postgres
+  namespace: crucible
+spec:
+  selector:
+    matchLabels:
+      app: crucible-postgres
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/crucible/sa/crucible-backend"
+      to:
+        - operation:
+            ports: ["5432"]
+
+---
+# ── AuthorizationPolicy: allow backend to reach Redis ─────────────────────────
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-backend-to-redis
+  namespace: crucible
+spec:
+  selector:
+    matchLabels:
+      app: crucible-redis
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/crucible/sa/crucible-backend"
+      to:
+        - operation:
+            ports: ["6379"]
+
+---
+# ── AuthorizationPolicy: allow the ingress gateway into the frontend ──────────
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingress-to-frontend
+  namespace: crucible
+spec:
+  selector:
+    matchLabels:
+      app: crucible-frontend
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["istio-system"]  # istio-ingressgateway lives here
+
+---
+# ── cert-manager: ClusterIssuer using Let's Encrypt (ACME) ───────────────────
+# Used for external TLS (ingress). Internal workload certs are managed by Istio.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: security@your-org.example.com  # Replace with your security contact.
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: istio
+
+---
+# ── cert-manager: Certificate for the backend service ────────────────────────
+# Rotated automatically 30 days before expiry by cert-manager.
+# The private key is stored in a Kubernetes Secret (backed by Vault in production
+# — see backend/src/config/vault.rs for the Vault integration).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: crucible-backend-tls
+  namespace: crucible
+  annotations:
+    # Force renewal on rollout to pick up new Vault-backed keys.
+    cert-manager.io/rotation-policy: Always
+spec:
+  secretName: crucible-backend-tls-secret
+  duration: 2160h  # 90 days
+  renewBefore: 720h  # Renew 30 days before expiry.
+  subject:
+    organizations:
+      - crucible
+  isCA: false
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always  # New key pair on every renewal.
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - crucible-backend.crucible.svc.cluster.local
+    - crucible-backend.crucible.svc
+    - crucible-backend
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+---
+# ── ServiceAccount: backend ───────────────────────────────────────────────────
+# Explicit ServiceAccount so Istio can issue a SPIFFE identity.
+# RBAC is handled separately; this account has no cluster permissions.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crucible-backend
+  namespace: crucible
+  annotations:
+    # When running on AWS EKS, associate an IAM Role for KMS / Secrets Manager access.
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/crucible-backend-role"
+
+---
+# ── ServiceAccount: frontend ──────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crucible-frontend
+  namespace: crucible
+
+---
+# ── NetworkPolicy: baseline Kubernetes-level network isolation ────────────────
+# Istio mTLS is the primary enforcement plane; NetworkPolicy provides a second
+# layer of defence at the CNI level (e.g. Cilium / Calico).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: crucible-default-deny
+  namespace: crucible
+spec:
+  podSelector: {}  # Applies to all pods.
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow frontend → backend traffic at the CNI level.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend-netpol
+  namespace: crucible
+spec:
+  podSelector:
+    matchLabels:
+      app: crucible-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: crucible-frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 50051
+
+---
+# Allow backend → PostgreSQL at the CNI level.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-to-postgres-netpol
+  namespace: crucible
+spec:
+  podSelector:
+    matchLabels:
+      app: crucible-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: crucible-backend
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# Allow backend → Redis at the CNI level.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-to-redis-netpol
+  namespace: crucible
+spec:
+  podSelector:
+    matchLabels:
+      app: crucible-redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: crucible-backend
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# Allow pods to reach DNS so service discovery still works under default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: crucible
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

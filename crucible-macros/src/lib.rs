@@ -12,7 +12,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Ident, Meta, Path, Type};
+use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 
 /// Marks a struct as a reusable test fixture.
 ///
@@ -181,7 +181,9 @@ fn has_derive(attrs: &[syn::Attribute], name: &str) -> bool {
 #[proc_macro_derive(Fixture, attributes(contract_client))]
 pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    // Cloned rather than borrowed: `input` is moved into `ast` below, and
+    // `name` is still needed after that move.
+    let name = input.ident.clone();
 
     let mut has_debug = false;
     for attr in &input.attrs {
@@ -228,10 +230,21 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                         );
                         if let Ok(metas) = meta {
                             for m in metas {
-                                if m.path().is_ident("contract") {
-                                    if let Meta::Path(path) = m.value {
-                                        contract_ty = Some(path);
+                                // `#[contract_client(contract = T)]` parses as a
+                                // name-value pair whose value is an expression, so
+                                // the type is reached through `Expr::Path`. The bare
+                                // `#[contract_client(contract)]` form is also
+                                // tolerated and handled by the `Meta::Path` arm.
+                                match &m {
+                                    Meta::NameValue(nv) if nv.path.is_ident("contract") => {
+                                        if let syn::Expr::Path(expr) = &nv.value {
+                                            contract_ty = Some(expr.path.clone());
+                                        }
                                     }
+                                    Meta::Path(path) if !path.is_ident("contract") => {
+                                        contract_ty = Some(path.clone());
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
@@ -283,4 +296,222 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
     };
 
     expanded.into()
+}
+
+/// Turns a function into a property-based fuzz test.
+///
+/// The annotated function's parameters are treated as *generated* inputs: the
+/// macro emits a `#[test]` that runs the body against many random values and,
+/// when the body panics, shrinks the input to a minimal reproducing case before
+/// reporting it.
+///
+/// Every parameter type must implement [`crucible::quickcheck::Arbitrary`],
+/// which is provided for the integer primitives, `bool`, `char`, `String`,
+/// `Option<T>`, `Vec<T>`, tuples, and the Soroban-bounded newtypes such as
+/// `SorobanAmount`.
+///
+/// # Arguments
+///
+/// * `cases = N` — number of inputs to generate (default 256).
+/// * `shrink = N` — maximum shrink steps (default 1024).
+/// * `seed = N` — fix the seed, making the run fully reproducible.
+/// * `size = N` — soft budget bounding generated collection lengths (default 32).
+///
+/// Unset arguments fall back to the `CRUCIBLE_QUICKCHECK_CASES`,
+/// `CRUCIBLE_QUICKCHECK_SHRINK` and `CRUCIBLE_QUICKCHECK_SEED` environment
+/// variables, then to the defaults above.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use crucible::prelude::*;
+///
+/// #[crucible::quickcheck]
+/// fn minting_never_decreases_the_balance(amount: SorobanAmount) {
+///     let amount = amount.get() % 1_000_000;
+///     let env = MockEnv::builder().build();
+///     let token = MockToken::xlm(&env);
+///     let alice = AccountBuilder::new(&env).name("alice").build();
+///
+///     let before = token.balance(&alice.address());
+///     token.mint(&alice.address(), amount);
+///     assert!(token.balance(&alice.address()) >= before);
+/// }
+///
+/// #[crucible::quickcheck(cases = 32, seed = 42)]
+/// fn addition_is_commutative(a: i64, b: i64) {
+///     assert_eq!(a.wrapping_add(b), b.wrapping_add(a));
+/// }
+/// ```
+///
+/// # Generated code
+///
+/// The body is moved into a closure that destructures the generated tuple, so
+/// parameter names and patterns work exactly as written:
+///
+/// ```rust,ignore
+/// #[test]
+/// fn addition_is_commutative() {
+///     crucible::quickcheck::check::<(i64, i64), _>(
+///         "addition_is_commutative",
+///         crucible::quickcheck::Config { cases: 32, seed: Some(42), ..Default::default() },
+///         |(a, b)| { /* original body */ },
+///     );
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn quickcheck(args: TokenStream, input: TokenStream) -> TokenStream {
+    let config = match QuickcheckArgs::parse(args.into()) {
+        Ok(config) => config,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let func = parse_macro_input!(input as syn::ItemFn);
+    match expand_quickcheck(config, func) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// The `cases` / `shrink` / `seed` / `size` arguments of `#[quickcheck]`.
+#[derive(Default)]
+struct QuickcheckArgs {
+    cases: Option<syn::Expr>,
+    shrink: Option<syn::Expr>,
+    seed: Option<syn::Expr>,
+    size: Option<syn::Expr>,
+}
+
+impl QuickcheckArgs {
+    /// Parses a comma-separated list of `name = value` pairs.
+    fn parse(tokens: proc_macro2::TokenStream) -> Result<Self, Error> {
+        let mut parsed = Self::default();
+        if tokens.is_empty() {
+            return Ok(parsed);
+        }
+
+        let metas = syn::parse::Parser::parse2(
+            syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated,
+            tokens,
+        )?;
+
+        for meta in metas {
+            let slot = if meta.path.is_ident("cases") {
+                &mut parsed.cases
+            } else if meta.path.is_ident("shrink") {
+                &mut parsed.shrink
+            } else if meta.path.is_ident("seed") {
+                &mut parsed.seed
+            } else if meta.path.is_ident("size") {
+                &mut parsed.size
+            } else {
+                return Err(Error::new_spanned(
+                    &meta.path,
+                    "unknown #[quickcheck] argument; expected one of `cases`, `shrink`, `seed`, `size`",
+                ));
+            };
+
+            if slot.is_some() {
+                return Err(Error::new_spanned(
+                    &meta.path,
+                    "duplicate #[quickcheck] argument",
+                ));
+            }
+            *slot = Some(meta.value);
+        }
+
+        Ok(parsed)
+    }
+}
+
+/// Builds the `#[test]` function that drives the property.
+fn expand_quickcheck(
+    args: QuickcheckArgs,
+    func: syn::ItemFn,
+) -> Result<proc_macro2::TokenStream, Error> {
+    let syn::ItemFn {
+        attrs,
+        vis,
+        sig,
+        block,
+    } = func;
+
+    if let Some(asyncness) = sig.asyncness {
+        return Err(Error::new_spanned(
+            asyncness,
+            "#[quickcheck] does not support async functions",
+        ));
+    }
+    if !matches!(sig.output, syn::ReturnType::Default) {
+        return Err(Error::new_spanned(
+            &sig.output,
+            "#[quickcheck] properties must return `()`; assert inside the body instead",
+        ));
+    }
+    if sig.inputs.is_empty() {
+        return Err(Error::new_spanned(
+            &sig.ident,
+            "#[quickcheck] requires at least one parameter to generate; \
+             a function with no inputs is an ordinary #[test]",
+        ));
+    }
+
+    // Split the parameter list into the patterns to destructure and the types
+    // to generate. A generated tuple is destructured back into the original
+    // patterns, so the body needs no rewriting.
+    let mut patterns = Vec::new();
+    let mut types = Vec::new();
+    for arg in &sig.inputs {
+        match arg {
+            syn::FnArg::Typed(pat_type) => {
+                patterns.push(pat_type.pat.clone());
+                types.push(pat_type.ty.clone());
+            }
+            syn::FnArg::Receiver(receiver) => {
+                return Err(Error::new_spanned(
+                    receiver,
+                    "#[quickcheck] cannot be applied to methods taking `self`",
+                ));
+            }
+        }
+    }
+
+    let name = &sig.ident;
+    let name_literal = name.to_string();
+    let generics = &sig.generics;
+    let where_clause = &sig.generics.where_clause;
+
+    let field = |value: &Option<syn::Expr>, name: &str| -> proc_macro2::TokenStream {
+        let ident = syn::Ident::new(name, proc_macro2::Span::call_site());
+        match value {
+            Some(expr) => quote! { #ident: #expr, },
+            None => quote! {},
+        }
+    };
+    let cases = field(&args.cases, "cases");
+    let shrink = field(&args.shrink, "shrink_iters");
+    let size = field(&args.size, "size");
+    // `seed` is an `Option<u64>` in the config, so the literal has to be wrapped.
+    let seed = match &args.seed {
+        Some(expr) => quote! { seed: ::core::option::Option::Some(#expr), },
+        None => quote! {},
+    };
+
+    Ok(quote! {
+        #(#attrs)*
+        #[test]
+        #vis fn #name #generics () #where_clause {
+            ::crucible::quickcheck::check::<( #(#types,)* ), _>(
+                #name_literal,
+                ::crucible::quickcheck::Config {
+                    #cases
+                    #shrink
+                    #seed
+                    #size
+                    ..::core::default::Default::default()
+                },
+                |( #(#patterns,)* )| #block,
+            );
+        }
+    })
 }

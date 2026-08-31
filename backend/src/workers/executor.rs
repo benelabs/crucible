@@ -275,8 +275,9 @@ mod tests {
         }
 
         // Immediately call shutdown - it should wait for tasks to complete
+        let executor_shutdown = executor.clone();
         let shutdown_handle = tokio::spawn(async move {
-            executor.shutdown().await;
+            executor_shutdown.shutdown().await;
         });
 
         // Give shutdown a moment to start

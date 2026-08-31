@@ -1,0 +1,176 @@
+{{/*
+  deployments/helm/crucible/templates/backend-deployment.yaml
+  Backend Deployment with HPA, PodDisruptionBudget, and Vault environment injection.
+*/}}
+{{- if .Values.backend.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "crucible.fullname" . }}-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crucible.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+  annotations:
+    {{- toYaml .Values.global.commonAnnotations | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "crucible.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0     # Zero-downtime rolling updates.
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "crucible.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+        app: crucible-backend
+      annotations:
+        # Force pod restart when the ConfigMap changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # Istio sidecar injection.
+        sidecar.istio.io/inject: {{ .Values.istio.injectSidecar | quote }}
+    spec:
+      serviceAccountName: {{ .Values.backend.serviceAccount.name }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: {{ .Values.global.imageRegistry }}{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: grpc
+              containerPort: 50051
+              protocol: TCP
+          env:
+            {{- range $k, $v := .Values.backend.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            # Vault connection
+            - name: VAULT_ADDR
+              value: {{ .Values.backend.vault.address | quote }}
+            - name: VAULT_AUTH_METHOD
+              value: {{ .Values.backend.vault.authMethod | quote }}
+            - name: VAULT_ROLE
+              value: {{ .Values.backend.vault.role | quote }}
+            - name: VAULT_SA_TOKEN_PATH
+              value: {{ .Values.backend.vault.saTokenPath | quote }}
+            # Namespace and environment
+            - name: APP_ENVIRONMENT
+              value: {{ .Values.global.environment | quote }}
+          {{- if .Values.backend.envFrom }}
+          envFrom:
+            {{- toYaml .Values.backend.envFrom | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.backend.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.backend.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: sa-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+                  audience: vault
+      {{- if .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml .Values.backend.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml .Values.backend.tolerations | nindent 8 }}
+      {{- end }}
+      {{- if .Values.backend.affinity }}
+      affinity:
+        {{- toYaml .Values.backend.affinity | nindent 8 }}
+      {{- end }}
+---
+# ── HorizontalPodAutoscaler ─────────────────────────────────────────────────
+{{- if .Values.backend.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "crucible.fullname" . }}-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crucible.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "crucible.fullname" . }}-backend
+  minReplicas: {{ .Values.backend.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.backend.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.backend.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.backend.autoscaling.targetMemoryUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.backend.autoscaling.scaleDown.stabilizationWindowSeconds }}
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+{{- end }}
+---
+# ── PodDisruptionBudget ─────────────────────────────────────────────────────
+{{- if .Values.backend.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "crucible.fullname" . }}-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crucible.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  minAvailable: {{ .Values.backend.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "crucible.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+{{- end }}
+{{- end }}

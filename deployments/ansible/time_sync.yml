@@ -1,0 +1,6 @@
+---
+# Applies the time_sync role to all backend host nodes.
+- hosts: all
+  become: true
+  roles:
+    - time_sync

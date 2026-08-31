@@ -1,0 +1,47 @@
+name: DR Failover Drill
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'deployments/scripts/**'
+      - 'deployments/terraform/**'
+      - '.github/workflows/dr-drill.yml'
+  pull_request:
+    paths:
+      - 'deployments/scripts/**'
+      - 'deployments/terraform/**'
+      - '.github/workflows/dr-drill.yml'
+  schedule:
+    # Weekly drill so RTO regressions surface without a code change.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    name: Mock multi-region failover < 60s
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run mock DR drill
+        run: bash deployments/scripts/dr-failover.sh --drill
+
+      - name: Verify origin IP masking (mock)
+        run: bash deployments/scripts/verify-origin-masking.sh --mock
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Init and validate edge/DR terraform
+        working-directory: deployments/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate

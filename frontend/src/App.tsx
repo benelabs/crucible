@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { EventListenerDashboard } from './components/EventListenerDashboard';
@@ -218,6 +218,9 @@ function App() {
         {activeTab === 'multichain' && <MultiChainDashboard />}
         {activeTab === 'abi' && <ContractAbiExplorer />}
         {activeTab === 'wallet' && <WalletConnector />}
+        {activeTab === 'abiform' && <AbiFormGenerator />}
+        {activeTab === 'flowchart' && <ContractFlowchartVisualizer />}
+        {activeTab === 'debugger' && <TransactionTimeTravelDebugger />}
         
         {activeTab === 'compiler' && (
           <div className="compiler-tab-panel container-panel">

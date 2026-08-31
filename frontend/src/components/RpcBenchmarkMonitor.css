@@ -1,0 +1,242 @@
+.rpc-monitor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.rpc-monitor-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.rpc-monitor-icon-wrapper {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(34, 197, 94, 0.2));
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rpc-monitor-icon {
+  color: #22d3ee;
+}
+
+.rpc-monitor-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.rpc-monitor-header p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.glass-panel {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.rpc-monitor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rpc-monitor-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.rpc-monitor-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.rpc-monitor-summary-value {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.rpc-monitor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rpc-monitor-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(30, 41, 59, 0.6);
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.rpc-monitor-btn:hover {
+  border-color: rgba(6, 182, 212, 0.5);
+}
+
+.rpc-monitor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 900px) {
+  .rpc-monitor-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.rpc-monitor-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rpc-monitor-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rpc-monitor-node-name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.rpc-monitor-node-url {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: #64748b;
+  word-break: break-all;
+}
+
+.rpc-monitor-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.rpc-monitor-badge--pending {
+  background: rgba(148, 163, 184, 0.15);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #cbd5e1;
+}
+
+.rpc-monitor-badge--healthy {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #4ade80;
+}
+
+.rpc-monitor-badge--degraded {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.rpc-monitor-badge--lagging {
+  background: rgba(249, 115, 22, 0.15);
+  border-color: rgba(249, 115, 22, 0.35);
+  color: #fb923c;
+}
+
+.rpc-monitor-badge--offline {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
+}
+
+.rpc-monitor-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 0;
+}
+
+@media (min-width: 600px) {
+  .rpc-monitor-metrics {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.rpc-monitor-metrics dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.rpc-monitor-metrics dd {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.rpc-monitor-drift--high {
+  color: #fb923c;
+}
+
+.rpc-monitor-error {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #f87171;
+}
+
+.rpc-monitor-sparkline {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 40px;
+}
+
+.rpc-monitor-spark {
+  flex: 1;
+  min-width: 3px;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, #22d3ee, rgba(34, 211, 238, 0.2));
+}
+
+.rpc-monitor-footnote {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #64748b;
+}

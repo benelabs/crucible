@@ -1,0 +1,17 @@
+name: Crucible CodeQL
+
+queries:
+  - uses: security-extended
+
+paths:
+  - backend
+  - contracts
+  - frontend/src
+  - examples
+  - crucible-macros
+
+paths-ignore:
+  - examples-copy
+  - "**/test_snapshots/**"
+  - frontend/coverage
+  - "**/* copy/**"

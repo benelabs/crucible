@@ -13,41 +13,60 @@ describe('App Component', () => {
     global.fetch = originalFetch;
     vi.clearAllMocks();
   });
-  it('renders correctly and defaults to tutorial tab', () => {
+  it('renders correctly and defaults to tutorial tab', async () => {
     render(<App />);
     expect(screen.getByText('Crucible Developer Portal')).toBeInTheDocument();
-    
+
     // Check that Tutorial is the active tab by default
     expect(screen.getByTestId('tab-tutorial')).toHaveClass('active');
-    expect(screen.getByTestId('onboarding-tutorial')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('onboarding-tutorial')).toBeInTheDocument();
+    });
   });
 
-  it('switches to Gas Estimator tab', () => {
+  it('switches to Gas Estimator tab', async () => {
     render(<App />);
     const gasTabBtn = screen.getByTestId('tab-metrics');
     fireEvent.click(gasTabBtn);
-    
+
     expect(gasTabBtn).toHaveClass('active');
-    // Gas estimator component should be in document
-    expect(screen.getByText('Gas Cost Estimator')).toBeInTheDocument();
+    // Gas estimator component is lazy-loaded
+    await waitFor(() => {
+      expect(screen.getByText('Gas Cost Estimator')).toBeInTheDocument();
+    });
   });
 
-  it('switches to MultiChain Dashboard tab', () => {
+  it('switches to MultiChain Dashboard tab', async () => {
     render(<App />);
     const multiChainBtn = screen.getByTestId('tab-multichain');
     fireEvent.click(multiChainBtn);
-    
+
     expect(multiChainBtn).toHaveClass('active');
-    expect(screen.getByText('Multi-Chain Support')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Multi-Chain Support')).toBeInTheDocument();
+    });
   });
 
-  it('switches to ABI Explorer tab', () => {
+  it('switches to ABI Explorer tab', async () => {
     render(<App />);
     const abiBtn = screen.getByTestId('tab-abi');
     fireEvent.click(abiBtn);
-    
+
     expect(abiBtn).toHaveClass('active');
-    expect(screen.getByText('Contract ABI Explorer')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Contract ABI Explorer')).toBeInTheDocument();
+    });
+  });
+
+  it('switches to Challenges tab', async () => {
+    render(<App />);
+    const challengesBtn = screen.getByTestId('tab-challenges');
+    fireEvent.click(challengesBtn);
+
+    expect(challengesBtn).toHaveClass('active');
+    await waitFor(() => {
+      expect(screen.getByTestId('challenge-engine')).toBeInTheDocument();
+    });
   });
 
   it('switches to Compiler Service tab', () => {

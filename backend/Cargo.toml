@@ -106,6 +106,9 @@ http-body-util = "0.1"
 toml = "0.8"
 temp-env = "0.3"
 prometheus = "0.14.0"
+moka = { version = "0.12", features = ["future"] }
+hmac = "0.12"
+hex = "0.4"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

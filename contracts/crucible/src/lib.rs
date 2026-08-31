@@ -1,10 +1,13 @@
 pub use soroban_sdk;
 pub mod account;
 pub mod assertions;
+pub mod checkpoint;
 pub mod cost;
 pub mod env;
 #[cfg(test)]
 mod assertions_tests;
+#[cfg(test)]
+mod checkpoint_tests;
 #[cfg(test)]
 mod env_crypto_tests;
 #[cfg(test)]

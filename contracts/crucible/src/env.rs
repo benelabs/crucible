@@ -9,6 +9,7 @@
 
 use crate::account::AccountHandle;
 use crate::assertions::RevertAssertion;
+use crate::checkpoint::{CheckpointId, CheckpointStack, CheckpointStats};
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use crate::token::MockToken;
@@ -325,6 +326,7 @@ pub struct MockEnv {
     xlm_token_address: Rc<RefCell<Option<Address>>>,
     track_costs: bool,
     crypto_registry: Rc<RefCell<MockCryptoRegistry>>,
+    checkpoints: Rc<RefCell<CheckpointStack>>,
 }
 
 // Typed event wrapper to provide ergonomic access to event fields and typed data conversion.
@@ -1217,6 +1219,9 @@ impl MockEnv {
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
             track_costs: self.track_costs,
             crypto_registry: Rc::new(RefCell::new(self.crypto_registry.borrow().clone())),
+            // A fork gets a fresh stack: checkpoints taken in one environment
+            // must never be redeemable in the other.
+            checkpoints: Rc::new(RefCell::new(self.checkpoints.borrow().forked())),
         }
     }
 
@@ -1381,6 +1386,120 @@ impl MockEnv {
         }
     }
 
+    /// Captures the current ledger state and returns a handle to it.
+    ///
+    /// Contract instance, persistent and temporary storage are all captured.
+    /// Registered contracts, accounts and tokens are *not* part of the
+    /// snapshot and are never disturbed by a rollback, so any client or handle
+    /// obtained before the checkpoint stays valid afterwards.
+    ///
+    /// Snapshots share their entries structurally, so a checkpoint is cheap
+    /// enough to take at every node of a speculative execution tree.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let before = env.checkpoint();
+    /// vault.liquidate(&borrower.address());
+    /// env.rollback_to(before);
+    /// ```
+    ///
+    /// See also [`rollback_to`](Self::rollback_to) and
+    /// [`release_checkpoint`](Self::release_checkpoint).
+    pub fn checkpoint(&self) -> CheckpointId {
+        self.checkpoints.borrow_mut().capture(self.inner.host())
+    }
+
+    /// Restores the ledger to the state captured by `id`.
+    ///
+    /// Entries written since the checkpoint are reverted, and entries created
+    /// since the checkpoint are removed. `id` itself remains valid, so the same
+    /// point can be rolled back to repeatedly while exploring alternative
+    /// branches.
+    ///
+    /// Every checkpoint taken *after* `id` is discarded, since the state those
+    /// checkpoints described no longer exists.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` came from a different environment (including a
+    /// [`fork`](Self::fork)), or if it was invalidated by an earlier rollback
+    /// to an older checkpoint.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let before = env.checkpoint();
+    /// counter.increment();
+    /// assert_eq!(counter.value(), 1);
+    ///
+    /// env.rollback_to(before);
+    /// assert_eq!(counter.value(), 0);
+    /// ```
+    pub fn rollback_to(&self, id: CheckpointId) {
+        self.checkpoints
+            .borrow_mut()
+            .rollback(self.inner.host(), id);
+    }
+
+    /// Discards `id` and every checkpoint taken after it without restoring.
+    ///
+    /// Use this when a speculative branch is accepted: the work stays, and the
+    /// snapshots backing it are released.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`rollback_to`](Self::rollback_to).
+    pub fn release_checkpoint(&self, id: CheckpointId) {
+        self.checkpoints.borrow_mut().release(id);
+    }
+
+    /// Returns how many checkpoints are currently live.
+    pub fn checkpoint_depth(&self) -> usize {
+        self.checkpoints.borrow().depth()
+    }
+
+    /// Returns the entry counts captured by `id`, broken down by durability.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`rollback_to`](Self::rollback_to).
+    pub fn checkpoint_stats(&self, id: CheckpointId) -> CheckpointStats {
+        self.checkpoints.borrow().stats(id)
+    }
+
+    /// Runs `f` inside a checkpoint and always rolls back afterwards.
+    ///
+    /// This is the speculative-execution shorthand: whatever `f` writes to the
+    /// ledger is discarded, while its return value is handed back to the
+    /// caller. The rollback also happens if `f` panics, so a reverted
+    /// speculative branch cannot leak state into the rest of the test.
+    ///
+    /// Unlike [`simulate`](Self::simulate), which reports the cost and auth
+    /// profile of a call, this is about ledger state: it answers "what would
+    /// this do?" without leaving any trace.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Find out what the liquidation would pay out, without performing it.
+    /// let payout = env.speculate(|| vault.liquidate(&borrower.address()));
+    /// assert_eq!(vault.collateral(&borrower.address()), 1_000); // untouched
+    /// ```
+    pub fn speculate<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        let id = self.checkpoint();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        self.rollback_to(id);
+        self.release_checkpoint(id);
+        match outcome {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
     /// Runs `f` and returns a chainable assertion that it reverted.
     ///
     /// This is the fluent counterpart to the [`assert_reverts!`](crate::assert_reverts)
@@ -1510,6 +1629,7 @@ impl Default for MockEnv {
             xlm_token_address: Rc::new(RefCell::new(None)),
             track_costs: false,
             crypto_registry: Rc::new(RefCell::new(MockCryptoRegistry::new())),
+            checkpoints: Rc::new(RefCell::new(CheckpointStack::new())),
         }
     }
 }

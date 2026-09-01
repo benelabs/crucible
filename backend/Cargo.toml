@@ -1,6 +1,6 @@
 [package]
 name = "backend"
-version = "1.16.0"
+version = "1.26.0"
 edition = "2021"
 description = "Backend API server for the Crucible smart contract testing platform"
 license = "MIT"
@@ -108,6 +108,9 @@ toml = "0.8"
 temp-env = "0.3"
 prometheus = "0.14.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+moka = { version = "0.12", features = ["future"] }
+hmac = "0.12"
+hex = "0.4"
 
 [dev-dependencies]
 tokio-test = "0.4"

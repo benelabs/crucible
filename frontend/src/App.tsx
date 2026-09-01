@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { EventListenerDashboard } from './components/EventListenerDashboard';
@@ -8,43 +8,13 @@ import { MultiChainDashboard } from './components/MultiChainDashboard';
 import { ContractAbiExplorer } from './components/ContractAbiExplorer';
 import { DeveloperOnboardingTutorial } from './components/DeveloperOnboardingTutorial';
 import { WalletConnector } from './components/WalletConnector';
-import { AbiFormGenerator } from './components/AbiFormGenerator';
-import { ContractFlowchartVisualizer } from './components/ContractFlowchartVisualizer';
-import { TransactionTimeTravelDebugger } from './components/TransactionTimeTravelDebugger';
-import { PortalNav } from './components/PortalNav';
-import type { PortalTab } from './components/PortalNav';
-import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet, Activity, Layers, FileJson, Workflow, History } from 'lucide-react';
+import { DependencyGraphVisualizer } from './components/DependencyGraphVisualizer';
+import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { Terminal, ShieldAlert, Cpu, Globe, Zap, Settings, RefreshCw, BookOpen, Wallet, Activity, Layers, GitBranch } from 'lucide-react';
 import './App.css';
 
-type Tab =
-  | 'tutorial'
-  | 'events'
-  | 'simulator'
-  | 'metrics'
-  | 'multichain'
-  | 'abi'
-  | 'abiform'
-  | 'flowchart'
-  | 'debugger'
-  | 'compiler'
-  | 'dependencies'
-  | 'wallet';
-
-/** Single source of truth for the portal's views, shared by both nav layouts. */
-const PORTAL_TABS: PortalTab[] = [
-  { id: 'tutorial', label: 'Tutorial', icon: <BookOpen size={15} /> },
-  { id: 'events', label: 'Event Listener', icon: <Activity size={15} /> },
-  { id: 'simulator', label: 'Tx Simulator', icon: <Layers size={15} /> },
-  { id: 'debugger', label: 'Time Travel', icon: <History size={15} /> },
-  { id: 'metrics', label: 'Gas Estimator', icon: <Zap size={15} /> },
-  { id: 'multichain', label: 'Node Manager', icon: <Globe size={15} /> },
-  { id: 'abi', label: 'ABI Explorer', icon: <Cpu size={15} /> },
-  { id: 'abiform', label: 'ABI Forms', icon: <FileJson size={15} /> },
-  { id: 'flowchart', label: 'State Machine', icon: <Workflow size={15} /> },
-  { id: 'compiler', label: 'Compiler Service', icon: <Terminal size={15} /> },
-  { id: 'dependencies', label: 'Dep Analyzer', icon: <ShieldAlert size={15} /> },
-  { id: 'wallet', label: 'Wallet', icon: <Wallet size={15} /> },
-];
+type Tab = 'tutorial' | 'events' | 'simulator' | 'metrics' | 'multichain' | 'abi' | 'compiler' | 'dependencies' | 'graph' | 'wallet';
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('tutorial');
@@ -59,6 +29,9 @@ function App() {
   const [cargoToml, setCargoToml] = useState(`[package]\nname = "my-soroban-contract"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\nsoroban-sdk = "25.0.0"\nserde = { version = "1.0", features = ["derive"] }\nvulnerable-crate = "0.4.2" # triggers security warning`);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeResult, setAnalyzeResult] = useState<any>(null);
+
+  // Command palette + global shortcut state
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const handleCompile = async () => {
     setCompiling(true);
@@ -104,6 +77,34 @@ function App() {
     }
   };
 
+  const handleSaveDraft = () => {
+    try {
+      localStorage.setItem('crucible:compile-draft', compileCode);
+      localStorage.setItem('crucible:cargo-draft', cargoToml);
+      localStorage.setItem('crucible:draft-saved-at', new Date().toISOString());
+    } catch {
+      /* storage may be unavailable; ignore */
+    }
+  };
+
+  // Global keyboard shortcut manager (issue #908): Cmd/Ctrl+Enter compiles,
+  // Cmd/Ctrl+S saves the current draft, Cmd/Ctrl+K toggles the command palette.
+  useKeyboardShortcuts([
+    { id: 'compile', combo: 'mod+enter', description: 'Compile contract source', handler: handleCompile },
+    { id: 'save-draft', combo: 'mod+s', description: 'Save editor draft', handler: handleSaveDraft },
+    { id: 'toggle-palette', combo: 'mod+k', description: 'Toggle command palette', handler: () => setPaletteOpen((o) => !o) },
+  ]);
+
+  const paletteCommands: PaletteCommand[] = [
+    { id: 'compile', title: 'Compile Source', subtitle: 'Build WASM from editor', shortcut: '⌘↵', run: handleCompile },
+    { id: 'save', title: 'Save Draft', subtitle: 'Persist editor contents', shortcut: '⌘S', run: handleSaveDraft },
+    { id: 'graph', title: 'Open Dependency Graph', group: 'Navigate', run: () => setActiveTab('graph') },
+    { id: 'dependencies', title: 'Open Dependency Analyzer', group: 'Navigate', run: () => setActiveTab('dependencies') },
+    { id: 'compiler', title: 'Open Compiler Service', group: 'Navigate', run: () => setActiveTab('compiler') },
+    { id: 'wallet', title: 'Open Wallet', group: 'Navigate', run: () => setActiveTab('wallet') },
+    { id: 'palette', title: 'Toggle Command Palette', group: 'Navigate', shortcut: '⌘K', run: () => setPaletteOpen((o) => !o) },
+  ];
+
   const { t } = useTranslation();
 
   return (
@@ -114,11 +115,98 @@ function App() {
           <div className="header-badge">Soroban Toolchain</div>
           <LanguageSwitcher />
         </div>
-        <PortalNav
-          tabs={PORTAL_TABS}
-          activeTab={activeTab}
-          onSelect={(id) => setActiveTab(id as Tab)}
-        />
+        <nav className="header-tabs" aria-label="Dashboard views">
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'tutorial' ? 'active' : ''}`}
+            onClick={() => setActiveTab('tutorial')}
+            data-testid="tab-tutorial"
+          >
+            <BookOpen size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Tutorial
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'events' ? 'active' : ''}`}
+            onClick={() => setActiveTab('events')}
+            data-testid="tab-events"
+          >
+            <Activity size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Event Listener
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'simulator' ? 'active' : ''}`}
+            onClick={() => setActiveTab('simulator')}
+            data-testid="tab-simulator"
+          >
+            <Layers size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Tx Simulator
+          </button>
+          <button 
+            type="button"
+            className={`tab-btn ${activeTab === 'metrics' ? 'active' : ''}`}
+            onClick={() => setActiveTab('metrics')}
+            data-testid="tab-metrics"
+          >
+            <Zap size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Gas Estimator
+          </button>
+          <button 
+            type="button"
+            className={`tab-btn ${activeTab === 'multichain' ? 'active' : ''}`}
+            onClick={() => setActiveTab('multichain')}
+            data-testid="tab-multichain"
+          >
+            <Globe size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Node Manager
+          </button>
+          <button 
+            type="button"
+            className={`tab-btn ${activeTab === 'abi' ? 'active' : ''}`}
+            onClick={() => setActiveTab('abi')}
+            data-testid="tab-abi"
+          >
+            <Cpu size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            ABI Explorer
+          </button>
+          <button 
+            type="button"
+            className={`tab-btn ${activeTab === 'compiler' ? 'active' : ''}`}
+            onClick={() => setActiveTab('compiler')}
+            data-testid="tab-compiler"
+          >
+            <Terminal size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Compiler Service
+          </button>
+          <button 
+            type="button"
+            className={`tab-btn ${activeTab === 'dependencies' ? 'active' : ''}`}
+            onClick={() => setActiveTab('dependencies')}
+            data-testid="tab-dependencies"
+          >
+            <ShieldAlert size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Dep Analyzer
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'graph' ? 'active' : ''}`}
+            onClick={() => setActiveTab('graph')}
+            data-testid="tab-graph"
+          >
+            <GitBranch size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Dep Graph
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'wallet' ? 'active' : ''}`}
+            onClick={() => setActiveTab('wallet')}
+            data-testid="tab-wallet"
+          >
+            <Wallet size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+            Wallet
+          </button>
+        </nav>
       </header>
       
       <main className="app-main">
@@ -282,7 +370,11 @@ function App() {
             </div>
           </div>
         )}
+
+        {activeTab === 'graph' && <DependencyGraphVisualizer />}
       </main>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={paletteCommands} />
     </div>
   );
 }

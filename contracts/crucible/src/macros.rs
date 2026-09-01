@@ -127,10 +127,10 @@ macro_rules! assert_emitted {
     }};
 }
 
-/// Asserts that an event matching the given topic pattern (with wildcard support `*` or `_`)
+/// Asserts that an event matching the given topic pattern (with wildcard support via the `_` symbol)
 /// and optional data payload was emitted by the contract.
 ///
-/// Wildcard symbols (`symbol_short!("*")`, `symbol_short!("_")`) match any topic segment.
+/// Wildcard symbols (`symbol_short!("_")`, `symbol_short!("_")`) match any topic segment.
 ///
 /// # Example
 ///
@@ -138,13 +138,13 @@ macro_rules! assert_emitted {
 /// assert_event_matches!(
 ///     env,
 ///     contract_id,
-///     (symbol_short!("transfer"), symbol_short!("*"), symbol_short!("*"))
+///     (symbol_short!("transfer"), symbol_short!("_"), symbol_short!("_"))
 /// );
 ///
 /// assert_event_matches!(
 ///     env,
 ///     contract_id,
-///     (symbol_short!("mint"), symbol_short!("*")),
+///     (symbol_short!("mint"), symbol_short!("_")),
 ///     1000_u128
 /// );
 /// ```

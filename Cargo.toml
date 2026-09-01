@@ -18,6 +18,7 @@ members = [
     "examples/lending",
     "examples/prediction-market",
     "examples/escrow-multi-arbiter",
+    "examples/options-protocol",
     "examples/amm-pool",
     "examples/yield-vault",
     "examples/bounty-escrow",
@@ -35,7 +36,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.16.0"
+version = "1.26.0"
 edition = "2021"
 rust-version = "1.91.0"
 license = "MIT"

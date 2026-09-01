@@ -7,6 +7,28 @@
     <meta name="theme-color" content="#1f6feb" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Crucible Dashboard</title>
+    <script>
+      /* Runs before first paint to avoid a flash of the wrong theme. Mirrors
+         applyTheme() in src/components/theme.ts — keep the two in sync. */
+      (function () {
+        try {
+          var stored = localStorage.getItem('crucible.theme');
+          var preference = stored === 'light' || stored === 'dark' ? stored : 'system';
+          var resolved =
+            preference === 'system'
+              ? window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark'
+              : preference;
+          var root = document.documentElement;
+          root.classList.add('theme-' + resolved);
+          if (preference !== 'system') root.setAttribute('data-theme', preference);
+          root.style.colorScheme = resolved;
+        } catch (error) {
+          /* Storage or matchMedia unavailable: fall through to the CSS default. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

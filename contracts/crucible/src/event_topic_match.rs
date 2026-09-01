@@ -15,12 +15,11 @@ pub(crate) fn is_wildcard_topic(env: &Env, filter_topic: &Val) -> bool {
     if filter_topic.is_void() {
         return true;
     }
+    // `*` is not a legal Soroban `Symbol` character (symbols are restricted to
+    // `[a-zA-Z0-9_]`), so the underscore symbol is the wildcard placeholder.
     if let Ok(sym) = Symbol::try_from_val(env, filter_topic) {
-        let star = Symbol::new(env, "*");
         let underscore = symbol_short!("_");
-        if env.compare(&sym.to_val(), &star.to_val()) == Ok(core::cmp::Ordering::Equal)
-            || env.compare(&sym.to_val(), &underscore.to_val()) == Ok(core::cmp::Ordering::Equal)
-        {
+        if env.compare(&sym.to_val(), &underscore.to_val()) == Ok(core::cmp::Ordering::Equal) {
             return true;
         }
     }

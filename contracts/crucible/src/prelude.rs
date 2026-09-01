@@ -5,6 +5,8 @@
 
 pub use crate::account::AccountBuilder;
 pub use crate::account::AccountHandle;
+pub use crate::assertions::RevertAssertion;
+pub use crate::checkpoint::{CheckpointId, CheckpointStats};
 pub use crate::cost::CostReport;
 pub use crate::env::CapturedEvent;
 pub use crate::env::Duration;
@@ -30,6 +32,11 @@ pub use crate::token::MockToken;
 pub use crate::profiler::{export_flamegraph_svg, export_speedscope, Frame, GasProfiler, Profile, Sample};
 pub use crate::zk::{
     G1, G2, Groth16Proof, Groth16VerifyingKey, Gt, PairingCurve, PlonkProof,
+};
+
+pub use crate::quickcheck::{
+    Arbitrary, Config as QuickcheckConfig, SorobanAmount, SorobanI128, SorobanTimestamp,
+    SorobanU32,
 };
 
 #[cfg(feature = "derive")]

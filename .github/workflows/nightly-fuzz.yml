@@ -1,0 +1,131 @@
+name: Nightly Differential Fuzz
+
+# Automated nightly pipeline executing differential fuzzing between the Crucible
+# test framework and the official soroban-sdk host.
+#
+# See tests/fuzz/differential_fuzz.py for the harness implementation and the
+# issue that tracks this work: https://github.com/benelabs/crucible/issues/918
+
+on:
+  schedule:
+    # Every night at 03:17 UTC (offset to avoid the top-of-hour rush).
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      op_count:
+        description: 'Number of randomized operations to generate'
+        required: false
+        default: '10000'
+      seed:
+        description: 'Deterministic RNG seed'
+        required: false
+        default: '12620'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  differential-fuzz:
+    name: Differential fuzz vs soroban-sdk
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install soroban CLI (official host oracle)
+        # Best-effort: when present the harness runs *real* differential fuzzing
+        # against the upstream soroban host instead of the embedded reference.
+        continue-on-error: true
+        run: |
+          cargo install soroban-cli --locked || echo "soroban-cli install skipped"
+
+      - name: Start standalone Soroban network
+        id: network
+        continue-on-error: true
+        run: |
+          if command -v soroban >/dev/null 2>&1; then
+            soroban network container start >/dev/null 2>&1 || true
+            RPC=$(soroban network container rpc-url 2>/dev/null || echo "")
+            if [ -n "$RPC" ]; then
+              echo "rpc_url=$RPC" >> "$GITHUB_OUTPUT"
+              echo "live_soroban=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Run differential fuzzer
+        id: fuzz
+        env:
+          SOROBAN_BIN: ${{ steps.network.outputs.live_soroban == 'true' && 'soroban' || '' }}
+          STELLAR_RPC_URL: ${{ steps.network.outputs.rpc_url || '' }}
+          OP_COUNT: ${{ github.event.inputs.op_count || '10000' }}
+          FUZZ_SEED: ${{ github.event.inputs.seed || '12620' }}
+        run: |
+          python3 tests/fuzz/differential_fuzz.py \
+            --count "${OP_COUNT}" \
+            --seed "${FUZZ_SEED}" \
+            --out "${{ github.workspace }}/tests/fuzz/artifacts"
+
+      - name: Upload fuzz report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-fuzz-report-${{ github.run_id }}
+          path: tests/fuzz/artifacts/
+          retention-days: 30
+
+      - name: Open issue on divergence
+        if: ${{ failure() && steps.fuzz.outcome == 'failure' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = `${process.env.GITHUB_WORKSPACE}/tests/fuzz/artifacts/differential_fuzz_report.json`;
+            let report = { divergences: 0, operations_checked: 0, items: [] };
+            try { report = JSON.parse(fs.readFileSync(reportPath, 'utf8')); } catch (e) {}
+            const items = (report.items || []).slice(0, 25)
+              .map(d => `- op #${d.op_index} \`${d.contract_id}.${d.function}\` :: error_code ${JSON.stringify(d.error_code)} gas ${JSON.stringify(d.gas)}`)
+              .join('\n');
+            const body = `## :warning: Differential fuzzing divergence detected
+
+            The nightly differential fuzzing run found **${report.divergences}** divergence(s) between the Crucible test framework and the official soroban-sdk host out of **${report.operations_checked}** operations.
+
+            <details><summary>Sample divergences</summary>
+
+            ${items || '_No sample available_'}
+
+            </details>
+
+            Full report: see the \`differential-fuzz-report\` workflow artifact from run [${context.runId}](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).
+
+            cc @benelabs`;
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'fuzz-divergence',
+            });
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🧬 Differential fuzzing divergence (${new Date().toISOString().slice(0,10)})`,
+                body,
+                labels: ['fuzz-divergence', 'Stellar Wave', 'bug'],
+              });
+            }

@@ -1,3 +1,9 @@
+## [1.30.0](https://github.com/benelabs/crucible/compare/v1.29.0...v1.30.0) (2026-09-03)
+
+### Features
+
+* **compilation:** integrate contract bytecode optimizer and custom section stripping (closes [#855](https://github.com/benelabs/crucible/issues/855)) ([#934](https://github.com/benelabs/crucible/issues/934)) ([c46f0c5](https://github.com/benelabs/crucible/commit/c46f0c58c4d0c4fb0416a0447c8afb481ab56435))
+
 ## [1.29.0](https://github.com/benelabs/crucible/compare/v1.28.0...v1.29.0) (2026-09-03)
 
 ### Features

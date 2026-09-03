@@ -30,6 +30,26 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration as StdDuration;
 
+/// The ledger's storage time-to-live settings.
+///
+/// Soroban ties a storage entry's lifetime to the ledger sequence: a temporary
+/// entry lives at least `min_temp` ledgers, a persistent one at least
+/// `min_persistent`, and no entry may be extended beyond `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryTtlSettings {
+    /// Minimum lifetime, in ledgers, of a temporary storage entry.
+    pub min_temp: u32,
+    /// Minimum lifetime, in ledgers, of a persistent storage entry.
+    pub min_persistent: u32,
+    /// Maximum lifetime, in ledgers, any entry may be extended to.
+    pub max: u32,
+}
+
+/// Nominal seconds between Stellar ledger closes.
+///
+/// Used as the default cadence by [`MockEnv::advance_ledgers`].
+pub const DEFAULT_SECONDS_PER_LEDGER: u64 = 5;
+
 /// A duration helper type for time-based test operations.
 #[derive(Debug, Clone, Copy)]
 pub struct Duration {
@@ -841,7 +861,155 @@ impl MockEnv {
         });
     }
 
+    /// Advances the ledger clock by `ledgers`, moving time and sequence together.
+    ///
+    /// Time-dependent contracts — vesting schedules, auctions, timelocks — read
+    /// both the ledger timestamp and its sequence number, and Soroban ties
+    /// storage entry lifetimes to the sequence. Advancing only the timestamp
+    /// with [`advance_time`](Self::advance_time) leaves the sequence behind, so
+    /// entries never age; advancing only the sequence with
+    /// [`advance_sequence`](Self::advance_sequence) ages entries while the clock
+    /// stands still. Either produces a ledger state that cannot occur on the
+    /// network, and the resulting TTL expirations are artefacts of the test
+    /// rather than behaviour of the contract.
+    ///
+    /// This method moves both in step: the sequence advances by `ledgers` and
+    /// the timestamp by `ledgers * seconds_per_ledger`. Soroban's own close
+    /// time is roughly 5 seconds, which [`advance_ledgers`](Self::advance_ledgers)
+    /// uses as its default.
+    ///
+    /// Temporary storage whose time-to-live elapses over the advance is
+    /// collected by the host exactly as it would be on-chain, so a test can
+    /// assert that a temporary entry is gone and a persistent one survives.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the timestamp or sequence number overflows.
+    ///
+    /// ```ignore
+    /// // Roll a vesting schedule forward one full day of ledgers.
+    /// env.advance_ledger(17_280, 5);
+    /// assert!(vesting.claimable(&alice) > 0);
+    /// ```
+    pub fn advance_ledger(&self, ledgers: u32, seconds_per_ledger: u64) {
+        if ledgers == 0 {
+            return;
+        }
+
+        let info = self.inner.ledger().get();
+        let elapsed = (ledgers as u64)
+            .checked_mul(seconds_per_ledger)
+            .expect("elapsed seconds overflow in advance_ledger");
+        let timestamp = info
+            .timestamp
+            .checked_add(elapsed)
+            .expect("timestamp overflow in advance_ledger");
+        let sequence_number = info
+            .sequence_number
+            .checked_add(ledgers)
+            .expect("sequence number overflow in advance_ledger");
+
+        self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
+            sequence_number,
+            timestamp,
+            protocol_version: info.protocol_version,
+            base_reserve: info.base_reserve,
+            network_id: info.network_id,
+            min_temp_entry_ttl: info.min_temp_entry_ttl,
+            min_persistent_entry_ttl: info.min_persistent_entry_ttl,
+            max_entry_ttl: info.max_entry_ttl,
+        });
+    }
+
+    /// Advances the ledger clock by `ledgers` at Soroban's nominal close time.
+    ///
+    /// Shorthand for [`advance_ledger(ledgers, 5)`](Self::advance_ledger); the
+    /// Stellar network closes a ledger roughly every 5 seconds.
+    pub fn advance_ledgers(&self, ledgers: u32) {
+        self.advance_ledger(ledgers, DEFAULT_SECONDS_PER_LEDGER);
+    }
+
+    /// Advances the ledger clock far enough to cover `duration`.
+    ///
+    /// The complement of [`advance_ledger`](Self::advance_ledger) for tests
+    /// expressed in wall-clock terms: it derives the ledger count from the
+    /// duration so the sequence still moves with the timestamp, rather than
+    /// leaving it behind as [`advance_time`](Self::advance_time) does.
+    ///
+    /// The ledger count is rounded up, so the clock never stops short of
+    /// `duration`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `seconds_per_ledger` is zero, or if the ledger count exceeds
+    /// [`u32::MAX`].
+    ///
+    /// ```ignore
+    /// // Cross a 30-day cliff with a consistent sequence number.
+    /// env.advance_ledger_time(Duration::days(30), 5);
+    /// ```
+    pub fn advance_ledger_time(&self, duration: Duration, seconds_per_ledger: u64) {
+        assert!(
+            seconds_per_ledger > 0,
+            "seconds_per_ledger must be greater than zero"
+        );
+
+        let seconds = duration.as_seconds();
+        if seconds == 0 {
+            return;
+        }
+
+        // Round up so the clock never stops short of the requested duration.
+        let ledgers = seconds.div_ceil(seconds_per_ledger);
+        let ledgers = u32::try_from(ledgers)
+            .expect("advance_ledger_time requires at most u32::MAX ledgers");
+        self.advance_ledger(ledgers, seconds_per_ledger);
+    }
+
+    /// Returns the ledger's time-to-live settings.
+    ///
+    /// These bound how long storage entries survive: a temporary entry starts
+    /// with at least `min_temp`, a persistent entry with at least
+    /// `min_persistent`, and neither may be extended past `max`.
+    pub fn entry_ttl_settings(&self) -> EntryTtlSettings {
+        let info = self.inner.ledger().get();
+        EntryTtlSettings {
+            min_temp: info.min_temp_entry_ttl,
+            min_persistent: info.min_persistent_entry_ttl,
+            max: info.max_entry_ttl,
+        }
+    }
+
+    /// Overrides the ledger's time-to-live settings.
+    ///
+    /// Lower the minimums to reach an expiry in a handful of ledgers rather
+    /// than the thousands the network defaults to, so a test for expiring
+    /// escrow or vesting state stays fast and readable.
+    ///
+    /// ```ignore
+    /// // A temporary entry now lapses after 4 ledgers instead of 16.
+    /// env.set_entry_ttl_settings(EntryTtlSettings { min_temp: 4, ..env.entry_ttl_settings() });
+    /// ```
+    pub fn set_entry_ttl_settings(&self, settings: EntryTtlSettings) {
+        let info = self.inner.ledger().get();
+        self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
+            sequence_number: info.sequence_number,
+            timestamp: info.timestamp,
+            protocol_version: info.protocol_version,
+            base_reserve: info.base_reserve,
+            network_id: info.network_id,
+            min_temp_entry_ttl: settings.min_temp,
+            min_persistent_entry_ttl: settings.min_persistent,
+            max_entry_ttl: settings.max,
+        });
+    }
+
     /// Advance the ledger sequence number by n.
+    ///
+    /// This moves the sequence without moving the clock, which ages storage
+    /// entries while the timestamp stands still. Prefer
+    /// [`advance_ledger`](Self::advance_ledger) unless a test specifically
+    /// needs the two to diverge.
     pub fn advance_sequence(&self, n: u32) {
         // Guard: zero is a no-op
         if n == 0 {

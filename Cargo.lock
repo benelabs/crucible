@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "apalis",
@@ -533,7 +533,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "url",
- "utoipa",
+ "utoipa 5.5.0",
  "utoipa-swagger-ui",
  "uuid",
  "validator",
@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "cross-contract"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1150,7 +1150,7 @@ checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "crucible"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "arbitrary",
  "crucible-macros",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-amm-pool"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1176,7 +1176,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-bounty-escrow"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-counter"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1192,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-circuit-breaker"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1200,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-stop"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1208,7 +1208,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-escrow-multi-arbiter"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1216,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-flash-mint"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1224,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-gaming-crafting"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1232,7 +1232,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-gasless"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1240,7 +1240,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-insurance-mutual"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1248,7 +1248,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lending"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-liquid-staking"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1264,7 +1264,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lottery"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1272,7 +1272,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-nft-rental"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-options-protocol"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1288,7 +1288,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-payment-streaming"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1296,7 +1296,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-portfolio-index"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1304,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-prediction-market"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1312,7 +1312,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-quadratic-funding"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1320,7 +1320,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-smart-wallet"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1328,7 +1328,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-staking"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-time-locked-vault"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1344,7 +1344,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-token"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1352,7 +1352,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-vesting"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1360,7 +1360,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-macros"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "proc-macro2",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "example-yield-vault"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -6299,7 +6299,19 @@ dependencies = [
  "indexmap 2.14.1",
  "serde",
  "serde_json",
- "utoipa-gen",
+ "utoipa-gen 4.3.1",
+]
+
+[[package]]
+name = "utoipa"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bde15df68e80b16c7d16b9616e80770ad158988daa56a27dccd1e55558b0160"
+dependencies = [
+ "indexmap 2.14.1",
+ "serde",
+ "serde_json",
+ "utoipa-gen 5.5.0",
 ]
 
 [[package]]
@@ -6309,6 +6321,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20c24e8ab68ff9ee746aad22d39b5535601e6416d1b0feeabf78be986a5c4392"
 dependencies = [
  "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba0b99ee52df3028635d93840c797102da61f8a7bb3cf751032455895b52ef8"
+dependencies = [
  "proc-macro2",
  "quote",
  "regex",
@@ -6330,7 +6353,7 @@ dependencies = [
  "serde",
  "serde_json",
  "url",
- "utoipa",
+ "utoipa 4.2.3",
  "utoipa-swagger-ui-vendored",
  "zip",
 ]

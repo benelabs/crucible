@@ -82,7 +82,7 @@ async-trait = "0.1"
 url = { version = "2", features = ["serde"] }
 
 # API documentation
-utoipa = { version = "4.2", features = ["axum_extras", "chrono", "uuid", "decimal"] }
+utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid", "decimal"] }
 utoipa-swagger-ui = { version = "7.1", features = ["axum", "vendored"] }
 
 # Background jobs

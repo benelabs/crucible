@@ -742,6 +742,9 @@ mod tests {
         assert!(rendered.contains("application_errors_total"));
         assert!(rendered.contains("rpc_request_latency_seconds_bucket"));
     }
+
+    #[test]
+    fn test_metrics_error_formatting() {
         let err = MetricsError::ProjectNotFound("test-project".to_string());
         assert!(err.to_string().contains("test-project"));
 

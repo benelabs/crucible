@@ -1237,6 +1237,7 @@ impl MockEnv {
             contract_ids: Rc::new(RefCell::new(self.contract_ids.borrow().clone())),
             tokens: Rc::new(RefCell::new(self.tokens.borrow().clone())),
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
+            prng_state: Rc::new(RefCell::new(*self.prng_state.borrow())),
             track_costs: self.track_costs,
             crypto_registry: Rc::new(RefCell::new(self.crypto_registry.borrow().clone())),
             // A fork gets a fresh stack: checkpoints taken in one environment

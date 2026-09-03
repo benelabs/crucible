@@ -26,8 +26,8 @@ use tracing::{debug, instrument, warn};
 
 /// Timeout threshold for individual dependency health check pings.
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
+
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{debug, instrument, warn};
 
 /// Tracks whether the application has completed its initial startup sequence.
 static STARTUP_COMPLETE: AtomicBool = AtomicBool::new(false);

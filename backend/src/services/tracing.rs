@@ -338,6 +338,9 @@ mod tests {
         let injected = TracingService::inject_trace_context(&cx);
         assert!(injected.contains_key("traceparent"));
     }
+
+    #[test]
+    fn test_tracing_config_default() {
         let config = TracingConfig::default();
         assert_eq!(config.service_name, "crucible-backend");
         assert_eq!(config.sampling_ratio, 1.0);

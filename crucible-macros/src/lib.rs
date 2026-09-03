@@ -181,8 +181,6 @@ fn has_derive(attrs: &[syn::Attribute], name: &str) -> bool {
 #[proc_macro_derive(Fixture, attributes(contract_client))]
 pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    // Cloned rather than borrowed: `input` is moved into `ast` below, and
-    // `name` is still needed after that move.
     let name = input.ident.clone();
 
     let mut has_debug = false;
@@ -248,6 +246,7 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                                 }
                             }
                         }
+
                     }
                 }
 

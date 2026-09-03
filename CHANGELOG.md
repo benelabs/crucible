@@ -1,3 +1,9 @@
+## [1.27.0](https://github.com/benelabs/crucible/compare/v1.26.0...v1.27.0) (2026-09-03)
+
+### Features
+
+* payment streaming, insurance mutual, prediction market, rebalancer ([#945](https://github.com/benelabs/crucible/issues/945)) ([781e90a](https://github.com/benelabs/crucible/commit/781e90ae54eb070254fcc362ca575dc1038090c0)), closes [#872](https://github.com/benelabs/crucible/issues/872) [#875](https://github.com/benelabs/crucible/issues/875) [#876](https://github.com/benelabs/crucible/issues/876) [#878](https://github.com/benelabs/crucible/issues/878)
+
 ## [1.26.0](https://github.com/benelabs/crucible/compare/v1.25.0...v1.26.0) (2026-08-31)
 
 ### Features

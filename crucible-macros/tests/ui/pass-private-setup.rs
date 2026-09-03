@@ -1,5 +1,5 @@
 // A fixture with a private setup() in the same module must still compile and reset.
-use crucible_macros::fixture;
+use crucible::prelude::*;
 
 #[fixture]
 pub struct PrivateSetupFixture {

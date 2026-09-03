@@ -1,0 +1,6 @@
+error: circular fixture dependency: `SelfFixture` requires itself
+       note: a fixture cannot appear in its own `requires` list
+ --> tests/ui/fail-fixture-self-cycle.rs:4:23
+  |
+4 | #[fixture(requires = [SelfFixture])]
+  |                       ^^^^^^^^^^^

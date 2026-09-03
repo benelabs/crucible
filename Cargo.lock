@@ -1355,8 +1355,10 @@ dependencies = [
 name = "crucible-macros"
 version = "1.26.0"
 dependencies = [
+ "crucible",
  "proc-macro2",
  "quote",
+ "soroban-sdk",
  "syn 2.0.119",
  "trybuild",
 ]

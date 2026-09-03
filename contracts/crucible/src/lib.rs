@@ -16,6 +16,15 @@ mod env_crypto_tests;
 mod env_event_filter_tests;
 mod event_topic_match;
 pub mod fixture;
+pub mod fixture_graph;
+
+/// Alias under which `#[fixture(requires = [..])]` expansions reach the
+/// dependency-graph traits.
+///
+/// The attribute macro cannot know what a crate calls its `crucible` import, so
+/// it emits paths rooted at `crucible_fixture_graph`. Bringing that name into
+/// scope is what `use crucible::prelude::*;` does for you.
+pub use crate::fixture_graph as crucible_fixture_graph;
 pub mod macros;
 pub mod prelude;
 

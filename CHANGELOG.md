@@ -1,3 +1,9 @@
+## [1.29.0](https://github.com/benelabs/crucible/compare/v1.28.0...v1.29.0) (2026-09-03)
+
+### Features
+
+* **macros:** add declarative fixture dependency graph resolver ([#962](https://github.com/benelabs/crucible/issues/962)) ([6605c10](https://github.com/benelabs/crucible/commit/6605c10a285e0fab547e83a206b3e0cd4f2a944a)), closes [#814](https://github.com/benelabs/crucible/issues/814)
+
 ## [1.28.0](https://github.com/benelabs/crucible/compare/v1.27.0...v1.28.0) (2026-09-03)
 
 ### Features

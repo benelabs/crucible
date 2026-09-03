@@ -1,3 +1,11 @@
+## [1.28.0](https://github.com/benelabs/crucible/compare/v1.27.0...v1.28.0) (2026-09-03)
+
+### Features
+
+* **crucible:** add cross-contract invocation call-graph and trace recorder ([#959](https://github.com/benelabs/crucible/issues/959)) ([5b69c5d](https://github.com/benelabs/crucible/commit/5b69c5d1a9e7dd39b36b2ec13cfa9fd45578bdd9)), closes [#810](https://github.com/benelabs/crucible/issues/810)
+* **crucible:** add dynamic auth invocation tree verification engine ([#960](https://github.com/benelabs/crucible/issues/960)) ([2e4ab8f](https://github.com/benelabs/crucible/commit/2e4ab8f95cef0e31213d7d061653881485582169)), closes [#811](https://github.com/benelabs/crucible/issues/811)
+* **crucible:** add time-warp and monotonic ledger clock virtualizer ([#961](https://github.com/benelabs/crucible/issues/961)) ([2a40eff](https://github.com/benelabs/crucible/commit/2a40effb5c8be1bf2b7a6634cd76530908ec606d)), closes [#812](https://github.com/benelabs/crucible/issues/812)
+
 ## [1.27.0](https://github.com/benelabs/crucible/compare/v1.26.0...v1.27.0) (2026-09-03)
 
 ### Features

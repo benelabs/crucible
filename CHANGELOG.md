@@ -1,3 +1,9 @@
+## [1.30.1](https://github.com/benelabs/crucible/compare/v1.30.0...v1.30.1) (2026-09-24)
+
+### Bug Fixes
+
+* **ci:** resolve CI, SAST, Docker, and security audit workflow failures ([0a431cb](https://github.com/benelabs/crucible/commit/0a431cbf91815c773172cb30aaa5cb471aa1f877))
+
 ## [1.30.0](https://github.com/benelabs/crucible/compare/v1.29.0...v1.30.0) (2026-09-03)
 
 ### Features

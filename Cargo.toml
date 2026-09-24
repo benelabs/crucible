@@ -52,5 +52,5 @@ codegen-units = 1
 strip = true
 
 [workspace.dependencies]
-soroban-sdk = { version = "26", features = ["testutils"] }
+soroban-sdk = { version = "28", features = ["testutils"] }
 crucible-macros = { path = "crucible-macros", version = "1.16.0" }

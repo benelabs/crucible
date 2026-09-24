@@ -33,7 +33,7 @@ ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 k256 = { version = "0.13", features = ["ecdsa", "arithmetic", "pkcs8"] }
 p256 = { version = "0.13", features = ["ecdsa", "arithmetic", "pkcs8"] }
 rand = "0.8"
-rand_chacha = "0.3"
+rand_chacha = "0.9"
 
 [dev-dependencies]
 static_assertions = "1.1.0"

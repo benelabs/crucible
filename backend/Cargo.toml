@@ -114,7 +114,7 @@ hex = "0.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
-testcontainers = "0.16"
+testcontainers = "0.28"
 wiremock = "0.6"
 hyper = { version = "1.0", features = ["full"] }
 mime = "0.3"

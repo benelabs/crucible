@@ -465,7 +465,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "anyhow",
  "apalis",
@@ -506,7 +506,7 @@ dependencies = [
  "sha2 0.10.9",
  "soroban-sdk",
  "sqlx",
- "stellar-xdr",
+ "stellar-xdr 26.0.1",
  "temp-env",
  "testcontainers",
  "thiserror 2.0.20",
@@ -713,9 +713,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "bytes-lit"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0adabf37211a5276e46335feabcbb1530c95eb3fdf85f324c7db942770aa025d"
+checksum = "9b04f2b1d34cb428043f14aa4c853d14294532e8bbde3b6a3bc2faaaae31a1dd"
 dependencies = [
  "num-bigint",
  "proc-macro2",
@@ -982,6 +982,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "crate-git-revision"
+version = "0.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54851b5b3f24621804b1cded2820975623c205e3055d2d44031cdb1237339ac8"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "crc"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1054,7 +1065,7 @@ dependencies = [
 
 [[package]]
 name = "cross-contract"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1105,7 +1116,7 @@ checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "crucible"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "arbitrary",
  "crucible-macros",
@@ -1116,14 +1127,14 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde_json",
- "soroban-env-host",
+ "soroban-env-host 26.1.4",
  "soroban-sdk",
  "static_assertions",
 ]
 
 [[package]]
 name = "crucible-example-amm-pool"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1131,7 +1142,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-bounty-escrow"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1139,7 +1150,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-counter"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1147,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-circuit-breaker"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1155,7 +1166,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-stop"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1163,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-escrow-multi-arbiter"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1171,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-flash-mint"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1179,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-gaming-crafting"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1187,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-gasless"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1195,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-insurance-mutual"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1203,7 +1214,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lending"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1211,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-liquid-staking"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1219,7 +1230,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lottery"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1227,7 +1238,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-nft-rental"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1235,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-options-protocol"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1243,7 +1254,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-payment-streaming"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1251,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-portfolio-index"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1259,7 +1270,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-prediction-market"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1267,7 +1278,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-quadratic-funding"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1275,7 +1286,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-smart-wallet"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1283,7 +1294,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-staking"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1291,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-time-locked-vault"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1299,7 +1310,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-token"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1307,7 +1318,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-vesting"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1315,7 +1326,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-macros"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "proc-macro2",
@@ -1928,7 +1939,7 @@ dependencies = [
 
 [[package]]
 name = "example-yield-vault"
-version = "1.30.0"
+version = "1.30.1"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -4854,31 +4865,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "soroban-builtin-sdk-macros"
+version = "28.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86ffd329211a50add3965a8f4a8f70e24fc5c8268c945566ab963029b12dce40"
+dependencies = [
+ "itertools 0.13.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "soroban-env-common"
 version = "26.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ededa4063061c00886490bb3290e416ee0b03d7732a7378ccba7bb19211fb00c"
 dependencies = [
+ "crate-git-revision 0.0.6",
+ "ethnum",
+ "num-derive",
+ "num-traits",
+ "soroban-env-macros 26.1.4",
+ "soroban-wasmi",
+ "static_assertions",
+ "stellar-xdr 26.0.1",
+ "wasmparser",
+]
+
+[[package]]
+name = "soroban-env-common"
+version = "28.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "610bb12ee937a56c2b629f8eb16efb7e47607cba4e79ab0c24132b9a53dd19a0"
+dependencies = [
  "arbitrary",
- "crate-git-revision",
+ "crate-git-revision 0.0.9",
  "ethnum",
  "num-derive",
  "num-traits",
  "serde",
- "soroban-env-macros",
+ "soroban-env-macros 28.0.2",
  "soroban-wasmi",
  "static_assertions",
- "stellar-xdr",
+ "stellar-xdr 28.0.0",
  "wasmparser",
 ]
 
 [[package]]
 name = "soroban-env-guest"
-version = "26.1.4"
+version = "28.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ff2525f31e2453b52e90400a2952ce4618f8925bd03167938573e83c320c33f"
+checksum = "7d383176b27bb286f718ab0ff5713bd9b01132089151266359bd9b20f38684cf"
 dependencies = [
- "soroban-env-common",
+ "soroban-env-common 28.0.2",
  "static_assertions",
 ]
 
@@ -4911,8 +4951,45 @@ dependencies = [
  "sec1",
  "sha2 0.10.9",
  "sha3",
- "soroban-builtin-sdk-macros",
- "soroban-env-common",
+ "soroban-builtin-sdk-macros 26.1.4",
+ "soroban-env-common 26.1.4",
+ "soroban-wasmi",
+ "static_assertions",
+ "stellar-strkey 0.0.13",
+ "wasmparser",
+]
+
+[[package]]
+name = "soroban-env-host"
+version = "28.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36d7e5920c200939164cc58038224e2d90d7e2fabbfa505d6e2129d648dce7e2"
+dependencies = [
+ "ark-bls12-381",
+ "ark-bn254",
+ "ark-ec",
+ "ark-ff",
+ "ark-serialize",
+ "curve25519-dalek 5.0.0",
+ "ecdsa",
+ "ed25519-dalek",
+ "elliptic-curve",
+ "generic-array",
+ "getrandom 0.2.17",
+ "hex-literal",
+ "hmac 0.12.1",
+ "k256",
+ "num-derive",
+ "num-integer",
+ "num-traits",
+ "p256",
+ "rand 0.8.8",
+ "rand_chacha 0.3.1",
+ "sec1",
+ "sha2 0.10.9",
+ "sha3",
+ "soroban-builtin-sdk-macros 28.0.2",
+ "soroban-env-common 28.0.2",
  "soroban-wasmi",
  "static_assertions",
  "stellar-strkey 0.0.13",
@@ -4930,33 +5007,48 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
- "stellar-xdr",
+ "stellar-xdr 26.0.1",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "soroban-env-macros"
+version = "28.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "077600bb175ea54592c1ac5983b8fb34ec9ab7a65f298af11d687b61e9d646a4"
+dependencies = [
+ "itertools 0.13.0",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "stellar-xdr 28.0.0",
  "syn 2.0.119",
 ]
 
 [[package]]
 name = "soroban-ledger-snapshot"
-version = "26.1.1"
+version = "28.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf43abc1e6219c45dd14e75e8abb848a6cf9830372febbe005fda1cbfb8c940f"
+checksum = "b5caeb0a4c8af6d04dc1dfbf96199e0d50ae086c7d54c9001abe78bb891fc44f"
 dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "soroban-env-common",
- "soroban-env-host",
+ "soroban-env-common 28.0.2",
+ "soroban-env-host 28.0.2",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "soroban-sdk"
-version = "26.1.1"
+version = "28.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ce2a22afcbfc9407fe32ce789f441636d62cd078a4cc126191932b74b1e6c4"
+checksum = "e4946477e75667215a25b652b0febb446485686c944d364c117c903e3fb98bab"
 dependencies = [
  "arbitrary",
  "bytes-lit",
- "crate-git-revision",
+ "crate-git-revision 0.0.9",
  "ctor",
  "derive_arbitrary",
  "ed25519-dalek",
@@ -4965,7 +5057,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soroban-env-guest",
- "soroban-env-host",
+ "soroban-env-host 28.0.2",
  "soroban-ledger-snapshot",
  "soroban-sdk-macros",
  "stellar-strkey 0.0.16",
@@ -4974,9 +5066,9 @@ dependencies = [
 
 [[package]]
 name = "soroban-sdk-macros"
-version = "26.1.1"
+version = "28.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6538ceb7d40c01499c2779b449a697c56c62a60bae6e5c5705d3a782075b5028"
+checksum = "168f2d2c3fd4da57584c71e0a8315a8e656486495bc53e18c93b8ec4db085438"
 dependencies = [
  "darling 0.20.11",
  "heck",
@@ -4985,38 +5077,38 @@ dependencies = [
  "proc-macro2",
  "quote",
  "sha2 0.10.9",
- "soroban-env-common",
+ "soroban-env-common 28.0.2",
  "soroban-spec",
  "soroban-spec-rust",
- "stellar-xdr",
+ "stellar-xdr 28.0.0",
  "syn 2.0.119",
 ]
 
 [[package]]
 name = "soroban-spec"
-version = "26.1.1"
+version = "28.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca18ced644f86e1e36a0fddb856d45a6a8478296e6b54941fb5e2daa96076bf7"
+checksum = "2f48c8e183fc140ccd89e1fe1663cc605fb18641967c0bb591f64887599fde59"
 dependencies = [
  "base64 0.22.1",
  "sha2 0.10.9",
- "stellar-xdr",
+ "stellar-xdr 28.0.0",
  "thiserror 1.0.69",
  "wasmparser",
 ]
 
 [[package]]
 name = "soroban-spec-rust"
-version = "26.1.1"
+version = "28.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f3e3933a8ca588de7fb70460a48a5e0b043f43836aeb11b6aa0128143d95814"
+checksum = "40cd0021887fd047e9f63cea36da35b202881bc0e0dbcc067a146137ca46f192"
 dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
  "sha2 0.10.9",
  "soroban-spec",
- "stellar-xdr",
+ "stellar-xdr 28.0.0",
  "syn 2.0.119",
  "thiserror 1.0.69",
 ]
@@ -5281,7 +5373,7 @@ version = "0.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee1832fb50c651ad10f734aaf5d31ca5acdfb197a6ecda64d93fcdb8885af913"
 dependencies = [
- "crate-git-revision",
+ "crate-git-revision 0.0.6",
  "data-encoding",
 ]
 
@@ -5291,7 +5383,7 @@ version = "0.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "084afcb0d458c3d5d5baa2d294b18f881e62cc258ef539d8fdf68be7dbe45520"
 dependencies = [
- "crate-git-revision",
+ "crate-git-revision 0.0.6",
  "data-encoding",
  "heapless",
 ]
@@ -5302,10 +5394,26 @@ version = "26.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6e29c7e1f071c2767916460d006668197843d5d93f0ec8893a26f72a14f595"
 dependencies = [
+ "base64 0.22.1",
+ "cfg_eval",
+ "crate-git-revision 0.0.6",
+ "escape-bytes",
+ "ethnum",
+ "hex",
+ "sha2 0.10.9",
+ "stellar-strkey 0.0.13",
+]
+
+[[package]]
+name = "stellar-xdr"
+version = "28.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f93d09ff8b9f919b084f664003c4c546ac66a76affd5429460dbe29f4b326f8e"
+dependencies = [
  "arbitrary",
  "base64 0.22.1",
  "cfg_eval",
- "crate-git-revision",
+ "crate-git-revision 0.0.9",
  "escape-bytes",
  "ethnum",
  "hex",

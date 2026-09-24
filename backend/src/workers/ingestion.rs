@@ -323,13 +323,21 @@ impl IngestionPipeline {
 
     /// Drain the bounded buffer, persist cursor after each ledger.
     pub async fn consume_available(&self) -> Result<usize, IngestionError> {
-        let mut rx_guard = self.rx.lock().expect("lock");
-        let rx = rx_guard
-            .as_mut()
-            .ok_or(IngestionError::ShutDown)?;
+        let batches = {
+            let mut rx_guard = self.rx.lock().expect("lock");
+            let rx = rx_guard
+                .as_mut()
+                .ok_or(IngestionError::ShutDown)?;
+
+            let mut collected = Vec::new();
+            while let Ok(batch) = rx.try_recv() {
+                collected.push(batch);
+            }
+            collected
+        };
 
         let mut processed = 0usize;
-        while let Ok(batch) = rx.try_recv() {
+        for batch in batches {
             self.cursor.save_cursor(batch.sequence).await?;
             self.last_sequence
                 .store(batch.sequence, Ordering::SeqCst);
@@ -560,15 +568,14 @@ mod tests {
 
     #[test]
     fn rejects_zero_buffer_capacity() {
-        let err = IngestionPipeline::new(
+        let res = IngestionPipeline::new(
             IngestionConfig {
                 buffer_capacity: 0,
                 ..IngestionConfig::default()
             },
             Arc::new(SyntheticLedgerSource::new(0, 1)),
             Arc::new(InMemoryCursorStore::new()),
-        )
-        .unwrap_err();
-        assert!(matches!(err, IngestionError::InvalidConfig(_)));
+        );
+        assert!(matches!(res, Err(IngestionError::InvalidConfig(_))));
     }
 }

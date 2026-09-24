@@ -24,6 +24,7 @@ fn estimate_size_impl<T: ?Sized>(value: &T) -> usize {
 
     if type_name.starts_with("soroban_sdk::String") {
         let s = value as *const T as *const soroban_sdk::String;
+        // SAFETY: The type_name check ensures `value` is indeed a `soroban_sdk::String`.
         let s = unsafe { &*s };
         let env = s.env();
         let val: soroban_sdk::Val = s.into_val(env);

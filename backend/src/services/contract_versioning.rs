@@ -26,7 +26,7 @@ pub struct VerificationBadge {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct VerifyContractSourceRequest {
+pub struct VerifySourceCodeRequest {
     pub contract_id: String,
     pub git_repo_url: String,
     pub git_commit_hash: String,
@@ -108,7 +108,7 @@ pub struct VerifyContractSourceRequest {
 /// Badge representing the verification status of a smart contract
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct VerificationBadge {
+pub struct SourceVerificationBadge {
     pub status: String, // "verified" | "mismatched" | "failed"
     pub badge_url: String,
     pub icon: String,
@@ -136,7 +136,7 @@ pub struct SourceVerificationResult {
     pub computed_wasm_hash: String,
     pub on_chain_wasm_hash: String,
     pub is_verified: bool,
-    pub badge: VerificationBadge,
+    pub badge: SourceVerificationBadge,
     pub build_metadata: BuildMetadata,
     pub verification_timestamp: DateTime<Utc>,
 }
@@ -166,7 +166,7 @@ impl ContractVersioningService {
     /// Verifies that deployed on-chain Wasm bytecode matches exact source code repository commits.
     pub async fn verify_source_code(
         &self,
-        request: VerifyContractSourceRequest,
+        request: VerifySourceCodeRequest,
     ) -> Result<ContractVerificationRecord, AppError> {
         if request.contract_id.trim().is_empty() {
             return Err(AppError::ValidationError("contractId is required".to_string()));
@@ -230,25 +230,25 @@ Build failed in deterministic container.
                 badge_url: format!("https://img.shields.io/badge/Crucible-Verified-brightgreen?logo=stellar"),
                 status_label: "verified".to_string(),
                 color: "#28a745".to_string(),
-                svg_markup: "<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#28a745"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Verified</text></svg>".to_string(),
+                svg_markup: r##"<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#28a745"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Verified</text></svg>"##.to_string(),
             },
             VerificationStatus::Mismatch => VerificationBadge {
                 badge_url: format!("https://img.shields.io/badge/Crucible-Mismatch-red?logo=stellar"),
                 status_label: "mismatch".to_string(),
                 color: "#dc3545".to_string(),
-                svg_markup: "<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#dc3545"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Mismatch</text></svg>".to_string(),
+                svg_markup: r##"<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#dc3545"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Mismatch</text></svg>"##.to_string(),
             },
             VerificationStatus::BuildFailed => VerificationBadge {
                 badge_url: format!("https://img.shields.io/badge/Crucible-Build_Failed-critical?logo=stellar"),
                 status_label: "build-failed".to_string(),
                 color: "#ffc107".to_string(),
-                svg_markup: "<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#ffc107"/><text x="55" y="14" fill="#000" text-anchor="middle">Crucible: Build Failed</text></svg>".to_string(),
+                svg_markup: r##"<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#ffc107"/><text x="55" y="14" fill="#000" text-anchor="middle">Crucible: Build Failed</text></svg>"##.to_string(),
             },
             VerificationStatus::Pending => VerificationBadge {
                 badge_url: format!("https://img.shields.io/badge/Crucible-Pending-lightgrey?logo=stellar"),
                 status_label: "pending".to_string(),
                 color: "#6c757d".to_string(),
-                svg_markup: "<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#6c757d"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Pending</text></svg>".to_string(),
+                svg_markup: r##"<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#6c757d"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Pending</text></svg>"##.to_string(),
             },
         };
 
@@ -395,7 +395,7 @@ Build failed in deterministic container.
             "mismatched".to_string()
         };
 
-        let badge = VerificationBadge {
+        let badge = SourceVerificationBadge {
             status: status.clone(),
             badge_url: format!("https://img.shields.io/badge/soroban_source-{}-{}.svg", status, if is_verified { "brightgreen" } else { "red" }),
             icon: if is_verified { "shield-check".to_string() } else { "shield-alert".to_string() },
@@ -564,7 +564,7 @@ mod tests {
         let source = "pub fn increment(env: Env) -> u32 { 1 }";
         let expected_hash = sha256_hex(source.as_bytes());
 
-        let req = VerifyContractSourceRequest {
+        let req = VerifySourceCodeRequest {
             contract_id: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM".to_string(),
             git_repo_url: "https://github.com/example/stellar-counter".to_string(),
             git_commit_hash: "a1b2c3d4e5f".to_string(),
@@ -584,7 +584,7 @@ mod tests {
     #[tokio::test]
     async fn test_verify_source_code_mismatch() {
         let service = ContractVersioningService::new(pool());
-        let req = VerifyContractSourceRequest {
+        let req = VerifySourceCodeRequest {
             contract_id: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM".to_string(),
             git_repo_url: "https://github.com/example/stellar-counter".to_string(),
             git_commit_hash: "a1b2c3d4e5f".to_string(),
@@ -602,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn test_verify_source_code_build_failed() {
         let service = ContractVersioningService::new(pool());
-        let req = VerifyContractSourceRequest {
+        let req = VerifySourceCodeRequest {
             contract_id: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM".to_string(),
             git_repo_url: "https://github.com/example/stellar-counter".to_string(),
             git_commit_hash: "a1b2c3d4e5f".to_string(),

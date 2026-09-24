@@ -1661,7 +1661,7 @@ impl MockEnv {
     /// ```
     pub fn simulate_failing_call<F, T>(&self, f: F) -> FailedCallResult
     where
-        F: FnOnce() -> T + std::panic::UnwindSafe,
+        F: FnOnce() -> T,
     {
         self.inner.mock_all_auths();
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

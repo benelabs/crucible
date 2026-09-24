@@ -2,7 +2,6 @@ use axum::{
     extract::{Json, State},
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
-    Json,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -206,6 +205,42 @@ pub async fn dispense_faucet_handler(
     let client_ip = "127.0.0.1";
     let res = service.dispense(&payload.destination, client_ip, payload.amount_xlm).await?;
     Ok(Json(res))
+}
+
+static GLOBAL_FAUCET_POOL: std::sync::OnceLock<Arc<FaucetDispenserService>> = std::sync::OnceLock::new();
+
+pub fn get_faucet_pool() -> Arc<FaucetDispenserService> {
+    GLOBAL_FAUCET_POOL
+        .get_or_init(|| Arc::new(FaucetDispenserService::new()))
+        .clone()
+}
+
+/// Handler for the Ephemeral Testnet Faucet & Account Dispenser (`POST /api/stellar/faucet` / `POST /api/v1/faucet`)
+#[instrument(skip(headers))]
+pub async fn fund_testnet_account(
+    headers: HeaderMap,
+    Json(payload): Json<FundAccountRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("127.0.0.1")
+        .split(',')
+        .next()
+        .unwrap_or("127.0.0.1")
+        .trim();
+
+    let pool = get_faucet_pool();
+    let res = pool.dispense(&payload.destination, client_ip, payload.amount_xlm).await?;
+    Ok((StatusCode::OK, Json(res)))
+}
+
+/// Handler to inspect Faucet Pool status (`GET /api/stellar/faucet/status` / `GET /api/v1/faucet/status`)
+#[instrument]
+pub async fn get_faucet_status() -> impl IntoResponse {
+    let pool = get_faucet_pool();
+    let stats = pool.get_stats().await;
+    (StatusCode::OK, Json(stats))
 }
 
 #[cfg(test)]

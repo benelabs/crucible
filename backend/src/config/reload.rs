@@ -33,15 +33,23 @@ impl IntoResponse for ConfigReloadError {
 }
 
 /// Hot-reloaded in-memory contract registry backed by an atomic ArcSwap.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct ContractRegistry {
-    contracts: ArcSwap<HashMap<String, serde_json::Value>>,
+    contracts: Arc<ArcSwap<HashMap<String, serde_json::Value>>>,
+}
+
+impl Clone for ContractRegistry {
+    fn clone(&self) -> Self {
+        Self {
+            contracts: Arc::clone(&self.contracts),
+        }
+    }
 }
 
 impl ContractRegistry {
     pub fn new() -> Self {
         Self {
-            contracts: ArcSwap::from(Arc::new(HashMap::new())),
+            contracts: Arc::new(ArcSwap::from(Arc::new(HashMap::new()))),
         }
     }
 
@@ -242,7 +250,6 @@ pub async fn handle_get_config(State(manager): State<Arc<ConfigManager>>) -> imp
 // `config:reload`. If the key is absent or unparseable the existing config
 // is kept and an error is logged.
 
-use redis::{AsyncCommands, Client as RedisClient};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, RwLock};
 use tracing::{error, warn};
@@ -622,7 +629,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dynamic_registry_reload_keeps_reads_consistent() {
-        let manager = Arc::new(ConfigManager::new(AppConfig::default()));
+        let manager = Arc::new(ConfigManager::new(BaseAppConfig::default()));
         let mut tasks = Vec::new();
 
         for _ in 0..8 {

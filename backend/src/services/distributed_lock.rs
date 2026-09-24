@@ -401,8 +401,8 @@ mod tests {
     async fn second_acquire_fails_while_held() {
         let mgr = three_node_manager(Duration::from_secs(5));
         let _held = mgr.acquire("deploy:unique").await.unwrap();
-        let err = mgr.acquire("deploy:unique").await.unwrap_err();
-        assert!(matches!(err, LockError::NotAcquired { .. }));
+        let res = mgr.acquire("deploy:unique").await;
+        assert!(matches!(res, Err(LockError::NotAcquired { .. })));
     }
 
     #[tokio::test]
@@ -419,15 +419,14 @@ mod tests {
 
     #[test]
     fn rejects_invalid_heartbeat_config() {
-        let err = RedlockManager::new(
+        let res = RedlockManager::new(
             vec![Arc::new(InMemoryRedisNode::new())],
             RedlockConfig {
                 ttl: Duration::from_secs(1),
                 heartbeat_interval: Duration::from_secs(2),
                 ..RedlockConfig::default()
             },
-        )
-        .unwrap_err();
-        assert!(matches!(err, LockError::InvalidConfig(_)));
+        );
+        assert!(matches!(res, Err(LockError::InvalidConfig(_))));
     }
 }

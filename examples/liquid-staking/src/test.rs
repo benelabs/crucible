@@ -1,8 +1,6 @@
 #![cfg(test)]
 extern crate std;
 
-use std::time::Duration;
-
 use crucible::prelude::*;
 use soroban_sdk::Address;
 
@@ -91,7 +89,7 @@ fn unbonding_queue_enforces_cooldown_before_withdraw() {
     }));
     assert!(result.is_err());
 
-    ctx.env.advance_time(Duration::from_secs(COOLDOWN_SECS));
+    ctx.env.advance_time(Duration::seconds(COOLDOWN_SECS));
     let withdrawn = ctx.client().withdraw(&ctx.alice, &id);
     assert_eq!(withdrawn, DEPOSIT);
     assert_eq!(ctx.token.balance(&ctx.alice), DEPOSIT * 20);
@@ -127,7 +125,7 @@ fn multi_epoch_reward_compounding() {
     for epoch in 1..=3 {
         let reward = 100_000 * i128::from(epoch);
         ctx.client().accrue_rewards(&ctx.admin, &reward);
-        ctx.env.advance_time(Duration::from_secs(86_400));
+        ctx.env.advance_time(Duration::seconds(86_400));
         ctx.env.advance_sequence(1);
     }
 
@@ -154,7 +152,7 @@ fn unbond_uses_reward_boosted_exchange_rate() {
     let req = ctx.client().get_unbonding(&id);
     assert_eq!(req.assets, DEPOSIT * 2);
 
-    ctx.env.advance_time(Duration::from_secs(COOLDOWN_SECS));
+    ctx.env.advance_time(Duration::seconds(COOLDOWN_SECS));
     let out = ctx.client().withdraw(&ctx.alice, &id);
     assert_eq!(out, DEPOSIT * 2);
 }

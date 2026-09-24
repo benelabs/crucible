@@ -37,6 +37,7 @@ pub struct OptionPosition {
 enum DataKey {
     State,
     Position(Address),
+    LatestPosition,
 }
 
 #[contract]
@@ -87,6 +88,7 @@ impl OptionsProtocol {
         };
 
         env.storage().instance().set(&DataKey::Position(holder.clone()), &position);
+        env.storage().instance().set(&DataKey::LatestPosition, &position);
         env.events().publish((symbol_short!("mint"), holder), (strike_price, quantity, expiry));
         quantity
     }
@@ -108,7 +110,7 @@ impl OptionsProtocol {
         token::TokenClient::new(&env, &token).transfer(
             &holder,
             &position.writer,
-            &position.premium * amount,
+            &(position.premium * amount),
         );
 
         position.quantity -= amount;
@@ -116,7 +118,8 @@ impl OptionsProtocol {
             position.status = OptionStatus::Exercised;
         }
 
-        env.storage().instance().set(&DataKey::Position(option_id), &position);
+        env.storage().instance().set(&DataKey::Position(option_id.clone()), &position);
+        env.storage().instance().set(&DataKey::LatestPosition, &position);
         env.events().publish((symbol_short!("buy"), holder), (option_id, amount));
     }
 
@@ -139,7 +142,8 @@ impl OptionsProtocol {
 
         if intrinsic <= 0 {
             position.status = OptionStatus::Expired;
-            env.storage().instance().set(&DataKey::Position(holder), &position);
+            env.storage().instance().set(&DataKey::Position(holder.clone()), &position);
+            env.storage().instance().set(&DataKey::LatestPosition, &position);
             return;
         }
 
@@ -149,10 +153,18 @@ impl OptionsProtocol {
             &holder,
             &payout,
         );
-        token::TokenClient::new(&env, &token).burn(&env.current_contract_address(), &position.collateral);
         position.status = OptionStatus::Exercised;
-        env.storage().instance().set(&DataKey::Position(holder), &position);
+        env.storage().instance().set(&DataKey::Position(holder.clone()), &position);
+        env.storage().instance().set(&DataKey::LatestPosition, &position);
         env.events().publish((symbol_short!("exercise"), holder), payout);
+    }
+
+    pub fn get_position(env: Env, holder: Address) -> OptionPosition {
+        env.storage().instance().get(&DataKey::Position(holder)).unwrap()
+    }
+
+    pub fn get_state(env: Env) -> OptionPosition {
+        env.storage().instance().get(&DataKey::LatestPosition).unwrap()
     }
 
     pub fn initialize(env: Env, admin: Address, token: Address) {
@@ -178,7 +190,7 @@ impl OptionsProtocol {
         env.events().publish((symbol_short!("unlock"), writer), position.collateral);
     }
 
-    fn oracle_price(env: &Env) -> i128 {
+    fn oracle_price(_env: &Env) -> i128 {
         1000
     }
 }

@@ -43,7 +43,7 @@ impl Ctx {
         let token = MockToken::new(&env, "USDC", 6);
 
         // Fund smart wallet contract
-        token.mint_to_address(&id, DAILY_LIMIT * 5);
+        token.mint(&id, DAILY_LIMIT * 5);
 
         Ctx {
             env,

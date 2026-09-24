@@ -9,22 +9,17 @@ FROM lukemathwalker/cargo-chef:latest AS chef
 WORKDIR /app
 
 FROM chef AS planner
-COPY Cargo.toml Cargo.lock ./
-COPY backend/Cargo.toml backend/Cargo.toml
-COPY contracts/Cargo.toml contracts/Cargo.toml
-RUN mkdir -p backend/src contracts/src && \
-    echo "fn main() {}" > backend/src/main.rs && \
-    touch contracts/src/lib.rs
-RUN cargo chef prepare --recipe-path recipe.json
+COPY . .
+RUN cargo chef prepare --bin backend --recipe-path recipe.json
 
 # Stage 2: Build dependencies (cached layer)
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN CARGO_BUILD_JOBS=2 cargo chef cook --release --bin backend --recipe-path recipe.json
 
 # Stage 3: Full build
 COPY . .
-RUN cargo build --release --bin backend
+RUN CARGO_BUILD_JOBS=2 cargo build --release --bin backend
 
 # Stage 4: Runtime image
 FROM gcr.io/distroless/cc-debian12 AS runtime

@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
+use redis::AsyncCommands;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
@@ -336,9 +337,9 @@ impl CacheInvalidationManager {
                 .arg(format!("cache:tags:{}", tag))
                 .query_async(&mut conn)
                 .await?;
-            
-        if !keys.is_empty() {
-            Self::invalidate_keys_impl(redis_client, keys).await?;
+            if !keys.is_empty() {
+                Self::invalidate_keys_impl(redis_client, keys).await?;
+            }
         }
         Ok(())
     }
@@ -417,7 +418,8 @@ impl SimulationCacheManager {
 
         // Level 2: Redis cluster cache
         if let Ok(mut conn) = self.redis_client.get_multiplexed_async_connection().await {
-            if let Ok(Some(cached_json)) = conn.get::<_, Option<String>>(&redis_key).await {
+            let res: Result<Option<String>, _> = conn.get(&redis_key).await;
+            if let Ok(Some(cached_json)) = res {
                 if let Ok(res) = serde_json::from_str::<SimulationResult>(&cached_json) {
                     debug!(key = %redis_key, "Simulation cache L2 hit (Redis)");
                     self.moka_cache.insert(redis_key, res.clone()).await;

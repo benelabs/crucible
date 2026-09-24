@@ -659,6 +659,7 @@ fn expand_quickcheck(
         vis,
         sig,
         block,
+        ..
     } = func;
 
     if let Some(asyncness) = sig.asyncness {

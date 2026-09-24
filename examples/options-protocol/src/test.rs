@@ -52,7 +52,7 @@ fn test_call_option_exercise_in_the_money() {
             &500_i128,
             &50_i128,
             &10_i128,
-            &1_000_i128,
+            &5_000_i128,
             &(OPTION_EXPIRY),
         );
     });
@@ -61,7 +61,7 @@ fn test_call_option_exercise_in_the_money() {
     ctx.env.with_mock_all_auths(|| ctx.client().exercise(&ctx.holder));
 
     assert_eq!(ctx.client().get_state().status, OptionStatus::Exercised);
-    assert_eq!(ctx.token.balance(&ctx.holder), 1_000_000_000);
+    assert_eq!(ctx.token.balance(&ctx.holder), 5000);
 }
 
 #[test]

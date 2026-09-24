@@ -3,7 +3,7 @@ extern crate std;
 
 use crucible::prelude::*;
 use crucible::{assert_emitted, assert_reverts};
-use soroban_sdk::{symbol_short, Address, Option, String};
+use soroban_sdk::{symbol_short, Address, String};
 
 use crate::{NFTRentalProtocol, NFTRentalProtocolClient, RentalAgreement, RentalListing, NFT};
 

@@ -433,7 +433,6 @@ mod extra_tests {
 
         assert!(inspected.would_succeed());
         assert!(inspected.fee() >= 0);
-        assert!(inspected.instructions() >= 0);
         assert!(inspected.result().is_some());
     }
 }

@@ -118,7 +118,12 @@ async fn readiness_all_healthy() {
     // Register a worker heartbeat so the queue check passes
     register_worker_hb(&mut queue).await;
 
-    let state = HealthState { db, cache, queue };
+    let state = HealthState {
+        db,
+        cache,
+        queue,
+        soroban_rpc_url: None,
+    };
 
     let app = Router::new().nest("/health", health::router().with_state(state));
     let resp = app
@@ -157,6 +162,7 @@ async fn readiness_db_unavailable() {
         db: dead_pool(),
         cache,
         queue,
+        soroban_rpc_url: None,
     };
 
     let app = Router::new().nest("/health", health::router().with_state(state));
@@ -193,7 +199,12 @@ async fn readiness_queue_unavailable() {
     // report "down".
     let queue = cache.clone();
 
-    let state = HealthState { db, cache, queue };
+    let state = HealthState {
+        db,
+        cache,
+        queue,
+        soroban_rpc_url: None,
+    };
 
     let app = Router::new().nest("/health", health::router().with_state(state));
     let resp = app
@@ -245,6 +256,7 @@ async fn readiness_redis_unavailable() {
         db: live_pool(),
         cache,
         queue,
+        soroban_rpc_url: None,
     };
 
     let app = Router::new().nest("/health", health::router().with_state(state));
@@ -278,6 +290,7 @@ async fn liveness_stays_healthy_when_deps_are_down() {
         db: dead_pool(),
         cache: cache.clone(),
         queue: cache,
+        soroban_rpc_url: None,
     };
 
     // Mount both liveness and readiness.

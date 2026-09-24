@@ -4,12 +4,12 @@ WORKDIR /app
 
 FROM chef AS planner
 COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+RUN cargo chef prepare --bin backend --recipe-path recipe.json
 
 # Stage 2: Build
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-RUN CARGO_BUILD_JOBS=2 cargo chef cook --release --recipe-path recipe.json
+RUN CARGO_BUILD_JOBS=2 cargo chef cook --release --bin backend --recipe-path recipe.json
 
 COPY . .
 RUN CARGO_BUILD_JOBS=2 cargo build --release --bin backend

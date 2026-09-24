@@ -42,6 +42,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use chrono::{DateTime, Utc};
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, instrument, warn};

@@ -216,14 +216,33 @@ impl DlqCoordinator {
         let mut failed = Vec::new();
 
         for job_id in ids {
+            // Distributed lock idempotency guard per job_id
+            let lock_key = format!("{}:lock:{}", self.queue_key, job_id);
+            let set_lock: bool = redis::cmd("SET")
+                .arg(&lock_key)
+                .arg("1")
+                .arg("NX")
+                .arg("EX")
+                .arg(30)
+                .query_async(&mut conn)
+                .await
+                .unwrap_or(false);
+
+            if !set_lock {
+                failed.push(job_id);
+                continue;
+            }
+
             let found: Option<String> = conn.hget(&hash_key, &job_id).await?;
             if found.is_none() {
+                let _: () = conn.del(&lock_key).await.unwrap_or(());
                 failed.push(job_id.clone());
                 continue;
             }
 
             let _: () = conn.hdel(&hash_key, &job_id).await?;
             let _: () = conn.lrem(&self.queue_key, 0, &job_id).await?;
+            let _: () = conn.del(&lock_key).await.unwrap_or(());
             replayed.push(job_id);
         }
 

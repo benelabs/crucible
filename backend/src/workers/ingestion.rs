@@ -243,6 +243,7 @@ pub struct IngestionPipeline {
     backpressure_waits: AtomicU64,
     last_sequence: AtomicU64,
     rate: RateLimiter,
+    dlq: Mutex<Vec<LedgerBatch>>,
 }
 
 impl IngestionPipeline {
@@ -265,6 +266,7 @@ impl IngestionPipeline {
             backpressure_waits: AtomicU64::new(0),
             last_sequence: AtomicU64::new(0),
             rate,
+            dlq: Mutex::new(Vec::new()),
         })
     }
 
@@ -306,12 +308,16 @@ impl IngestionPipeline {
                 Ok(()) => enqueued += 1,
                 Err(mpsc::error::TrySendError::Full(batch)) => {
                     self.backpressure_waits.fetch_add(1, Ordering::SeqCst);
-                    debug!(seq = batch.sequence, "buffer full; applying backpressure");
-                    tokio::time::timeout(self.config.enqueue_timeout, self.tx.send(batch))
-                        .await
-                        .map_err(|_| IngestionError::BackpressureTimeout)?
-                        .map_err(|_| IngestionError::ShutDown)?;
-                    enqueued += 1;
+                    debug!(seq = batch.sequence, "buffer full; applying backpressure with DLQ spillover");
+                    match tokio::time::timeout(self.config.enqueue_timeout, self.tx.send(batch.clone())).await {
+                        Ok(Ok(())) => enqueued += 1,
+                        Ok(Err(_)) => return Err(IngestionError::ShutDown),
+                        Err(_) => {
+                            warn!(seq = batch.sequence, "buffer saturated; spillover to dead-letter queue (DLQ)");
+                            self.dlq.lock().expect("lock").push(batch);
+                            enqueued += 1;
+                        }
+                    }
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     return Err(IngestionError::ShutDown);

@@ -96,10 +96,22 @@ impl WebhookDispatcherWorker {
         computed.as_bytes().ct_eq(expected_signature.as_bytes()).into()
     }
 
-    /// Calculate exponential retry backoff duration for a given attempt.
+    /// Calculate exponential retry backoff duration with full jitter for a given attempt.
     pub fn calculate_retry_delay(&self, attempt: u32) -> Duration {
         let factor = 2u64.saturating_pow(attempt.saturating_sub(1));
-        Duration::from_secs(self.base_delay_secs.saturating_mul(factor))
+        let max_delay_ms = self.base_delay_secs.saturating_mul(factor).saturating_mul(1000);
+        if max_delay_ms == 0 {
+            return Duration::ZERO;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
+        let mixed = nanos.wrapping_add((attempt as u64).wrapping_mul(6_364_136_223_846_793_005));
+        let jitter_ms = mixed % max_delay_ms;
+
+        Duration::from_millis(jitter_ms)
     }
 
     /// Dispatch a webhook event to an endpoint with HMAC signature.
@@ -180,10 +192,10 @@ mod tests {
     fn test_retry_backoff_calculation() {
         let worker = WebhookDispatcherWorker::new(5, 2);
 
-        assert_eq!(worker.calculate_retry_delay(1), Duration::from_secs(2));
-        assert_eq!(worker.calculate_retry_delay(2), Duration::from_secs(4));
-        assert_eq!(worker.calculate_retry_delay(3), Duration::from_secs(8));
-        assert_eq!(worker.calculate_retry_delay(4), Duration::from_secs(16));
+        assert!(worker.calculate_retry_delay(1) <= Duration::from_secs(2));
+        assert!(worker.calculate_retry_delay(2) <= Duration::from_secs(4));
+        assert!(worker.calculate_retry_delay(3) <= Duration::from_secs(8));
+        assert!(worker.calculate_retry_delay(4) <= Duration::from_secs(16));
     }
 
     #[tokio::test]

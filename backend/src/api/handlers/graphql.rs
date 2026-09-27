@@ -63,6 +63,17 @@ impl GraphQLFederationGateway {
 
         // Schema Introspection Query
         if q.contains("__schema") || q.contains("__type") {
+            let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string());
+            if app_env.eq_ignore_ascii_case("production") {
+                return GraphQLResponse {
+                    data: None,
+                    errors: Some(vec![GraphQLError {
+                        message: "GraphQL introspection is disabled in production environment".to_string(),
+                        path: None,
+                    }]),
+                };
+            }
+
             return GraphQLResponse {
                 data: Some(json!({
                     "__schema": {

@@ -177,6 +177,7 @@ impl RedlockManager {
         let ttl_ms = self.config.ttl.as_millis() as u64;
 
         loop {
+            let start_time = Instant::now();
             let mut votes = 0usize;
             for node in &self.nodes {
                 if node.set_nx_px(&resource, &token, ttl_ms).await {
@@ -184,7 +185,12 @@ impl RedlockManager {
                 }
             }
 
-            if votes >= self.quorum() {
+            // Factor max clock drift: (ttl * 0.01 + 2ms) per Redlock spec
+            let drift = Duration::from_millis(((ttl_ms as f64 * 0.01) + 2.0) as u64);
+            let elapsed = start_time.elapsed();
+            let validity = self.config.ttl.checked_sub(elapsed + drift);
+
+            if votes >= self.quorum() && validity.map_or(false, |v| v > Duration::ZERO) {
                 debug!(%resource, votes, quorum = self.quorum(), "redlock acquired");
                 return Ok(LockGuard::spawn(
                     self.nodes.clone(),

@@ -1,8 +1,11 @@
 -- Phase 1: Expand Phase for Zero-Downtime Schema Upgrade
 -- Example: Upgrading audit_logs table by expanding metadata into structured columns without locking or breaking existing API versions.
 
-ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS event_category TEXT DEFAULT 'general';
+ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS event_category TEXT;
 ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS client_ip TEXT;
+
+-- Backfill existing historical rows safely in batches (nullable expand phase)
+UPDATE audit_logs SET event_category = 'general' WHERE event_category IS NULL;
 
 -- Create dual-write trigger function for zero-downtime backward compatibility
 CREATE OR REPLACE FUNCTION sync_audit_logs_event_category()

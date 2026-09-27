@@ -80,6 +80,22 @@ impl WebhookDispatcherWorker {
         Ok(format!("sha256={}", hex_signature))
     }
 
+    /// Verify webhook signature using constant-time comparison to prevent timing analysis attacks.
+    pub fn verify_signature(secret: &str, payload: &str, expected_signature: &str) -> bool {
+        use subtle::ConstantTimeEq;
+
+        let computed = match Self::sign_payload(secret, payload) {
+            Ok(sig) => sig,
+            Err(_) => return false,
+        };
+
+        if computed.len() != expected_signature.len() {
+            return false;
+        }
+
+        computed.as_bytes().ct_eq(expected_signature.as_bytes()).into()
+    }
+
     /// Calculate exponential retry backoff duration for a given attempt.
     pub fn calculate_retry_delay(&self, attempt: u32) -> Duration {
         let factor = 2u64.saturating_pow(attempt.saturating_sub(1));

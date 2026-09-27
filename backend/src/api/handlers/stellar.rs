@@ -43,6 +43,7 @@ pub struct FaucetDispenserService {
     balance_xlm: Arc<Mutex<Decimal>>,
     dispense_count: Arc<Mutex<u64>>,
     rate_limits: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
+    account_rate_limits: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
     max_requests_per_window: usize,
     rate_window: Duration,
 }
@@ -60,25 +61,34 @@ impl FaucetDispenserService {
             balance_xlm: Arc::new(Mutex::new(Decimal::new(100_000, 0))), // 100,000 XLM initial pool
             dispense_count: Arc::new(Mutex::new(0)),
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
+            account_rate_limits: Arc::new(Mutex::new(HashMap::new())),
             max_requests_per_window: 5,
             rate_window: Duration::from_secs(60),
         }
     }
 
-    pub async fn check_rate_limit(&self, ip: &str) -> bool {
+    pub async fn check_rate_limit(&self, ip: &str, destination: &str) -> bool {
         let mut limits = self.rate_limits.lock().await;
+        let mut account_limits = self.account_rate_limits.lock().await;
         let now = Instant::now();
-        let timestamps = limits.entry(ip.to_string()).or_default();
 
-        // Prune older than window
-        timestamps.retain(|&t| now.duration_since(t) < self.rate_window);
-
-        if timestamps.len() >= self.max_requests_per_window {
-            false
-        } else {
-            timestamps.push(now);
-            true
+        // Prune and check IP rate limit
+        let ip_timestamps = limits.entry(ip.to_string()).or_default();
+        ip_timestamps.retain(|&t| now.duration_since(t) < self.rate_window);
+        if ip_timestamps.len() >= self.max_requests_per_window {
+            return false;
         }
+
+        // Prune and check target account destination rate limit
+        let acc_timestamps = account_limits.entry(destination.to_string()).or_default();
+        acc_timestamps.retain(|&t| now.duration_since(t) < self.rate_window);
+        if acc_timestamps.len() >= self.max_requests_per_window {
+            return false;
+        }
+
+        ip_timestamps.push(now);
+        acc_timestamps.push(now);
+        true
     }
 
     pub async fn replenish_pool(&self, amount: Decimal) {
@@ -113,12 +123,12 @@ impl FaucetDispenserService {
             ));
         }
 
-        // Check rate limit per IP
-        if !self.check_rate_limit(client_ip).await {
-            warn!(client_ip, "Faucet rate limit exceeded for client IP");
+        // Check rate limit per IP and per destination account
+        if !self.check_rate_limit(client_ip, destination).await {
+            warn!(client_ip, destination, "Faucet rate limit exceeded for client IP or destination key");
             return Err((
                 StatusCode::TOO_MANY_REQUESTS,
-                "Rate limit exceeded. Maximum 5 funding requests per minute per IP.".to_string(),
+                "Rate limit exceeded. Maximum 5 funding requests per minute per IP or account.".to_string(),
             ));
         }
 
@@ -280,9 +290,26 @@ mod tests {
         let err = service.dispense(valid_dest, ip, None).await.unwrap_err();
         assert_eq!(err.0, StatusCode::TOO_MANY_REQUESTS);
 
-        // Different IP must still succeed
-        let other_ip_res = service.dispense(valid_dest, "10.0.0.6", None).await;
+        // Different IP and destination must still succeed
+        let other_dest = "GCARU656RHO62CJJUXOG4YJ4V5W266OFEQ3Q4U6V5B6AUPY7V7S6TEST";
+        let other_ip_res = service.dispense(other_dest, "10.0.0.6", None).await;
         assert!(other_ip_res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_dispense_rate_limiting_per_destination() {
+        let service = FaucetDispenserService::new();
+        let valid_dest = "GBBD67IF6I2E7E5NCTZTTG46YAKMBH2O7662T7O4B5XW4YVRE3L363C6";
+
+        for i in 0..5 {
+            let ip = format!("10.0.1.{}", i);
+            let res = service.dispense(valid_dest, &ip, None).await;
+            assert!(res.is_ok());
+        }
+
+        // 6th request to same destination account within window must fail with 429 even from a new IP
+        let err = service.dispense(valid_dest, "10.0.1.99", None).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[tokio::test]
@@ -297,7 +324,7 @@ mod tests {
         let service = Arc::new(FaucetDispenserService::new());
         let mut handles = Vec::new();
 
-        for i in 0..10 {
+        for i in 0..5 {
             let svc = Arc::clone(&service);
             let ip = format!("172.16.0.{}", i);
             let handle = tokio::spawn(async move {
@@ -313,7 +340,7 @@ mod tests {
         }
 
         let stats = service.get_stats().await;
-        assert_eq!(stats.total_dispensed_count, 10);
+        assert_eq!(stats.total_dispensed_count, 5);
     }
 
     #[tokio::test]

@@ -156,3 +156,22 @@ fn unbond_uses_reward_boosted_exchange_rate() {
     let out = ctx.client().withdraw(&ctx.alice, &id);
     assert_eq!(out, DEPOSIT * 2);
 }
+
+#[test]
+fn rounding_direction_favors_protocol() {
+    let ctx = Ctx::setup();
+    ctx.env.mock_all_auths();
+
+    ctx.client().deposit(&ctx.alice, &DEPOSIT);
+    ctx.client().accrue_rewards(&ctx.admin, &1); // Total pooled = 1_000_001, Total shares = 1_000_000
+
+    // Minting shares on small deposit must round down (floor)
+    let shares = ctx.client().convert_to_shares(&10);
+    // 10 * 1_000_000 / 1_000_001 = 9.99999... -> floors to 9
+    assert_eq!(shares, 9);
+
+    // Redeeming assets from shares must round down (floor)
+    let assets = ctx.client().convert_to_assets(&9);
+    // 9 * 1_000_001 / 1_000_000 = 9.000009... -> floors to 9
+    assert_eq!(assets, 9);
+}

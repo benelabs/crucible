@@ -255,22 +255,26 @@ impl LiquidStaking {
         (total_pooled * RATE_SCALE) / total_shares
     }
 
+    /// Convert assets to shares, enforcing floor rounding in favor of the protocol to prevent share minting arbitrage.
     pub fn convert_to_shares(env: Env, assets: i128) -> i128 {
         let total_pooled = Self::total_pooled(env.clone());
         let total_shares = Self::total_shares(env);
         if total_pooled == 0 || total_shares == 0 {
             assets
         } else {
+            // Floor division (integer truncation towards 0 for positive numbers) rounds down share minting
             (assets * total_shares) / total_pooled
         }
     }
 
+    /// Convert shares to assets, enforcing floor rounding in favor of the protocol on redemption.
     pub fn convert_to_assets(env: Env, shares: i128) -> i128 {
         let total_shares = Self::total_shares(env.clone());
         if total_shares == 0 {
             shares
         } else {
             let total_pooled = Self::total_pooled(env);
+            // Floor division (integer truncation towards 0 for positive numbers) rounds down asset redemption
             (shares * total_pooled) / total_shares
         }
     }

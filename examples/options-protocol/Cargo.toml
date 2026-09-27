@@ -1,5 +1,4 @@
 [package]
-license.workspace = true
 name = "crucible-example-options-protocol"
 version.workspace = true
 edition.workspace = true

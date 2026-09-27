@@ -137,6 +137,12 @@ impl AppError {
     }
 }
 
+impl From<axum::extract::rejection::JsonRejection> for AppError {
+    fn from(rejection: axum::extract::rejection::JsonRejection) -> Self {
+        AppError::BadRequest(format!("Malformed JSON request payload: {}", rejection))
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {

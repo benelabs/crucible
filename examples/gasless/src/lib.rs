@@ -85,8 +85,15 @@ impl Gasless {
             panic!("invalid nonce");
         }
 
-        // Require the user's authorization (attached by the relayer).
-        meta_tx.from.require_auth();
+        // Bind domain separator: contract address & network ID to prevent cross-chain / cross-contract replay attacks.
+        let domain_contract = env.current_contract_address();
+        let domain_network = env.ledger().network_id();
+        meta_tx.from.require_auth_for_args((
+            domain_contract,
+            domain_network,
+            meta_tx.nonce,
+            meta_tx.deadline,
+        ));
 
         // Advance nonce.
         env.storage()

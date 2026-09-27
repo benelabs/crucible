@@ -57,7 +57,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<WsState>) {
     info!("WebSocket client connected for dashboard updates");
 
     let mut push_ticker = interval(Duration::from_secs(PUSH_INTERVAL_SECS));
+    push_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut ping_ticker = interval(Duration::from_secs(PING_INTERVAL_SECS));
+    ping_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {

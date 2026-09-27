@@ -158,9 +158,14 @@ async fn run_job_loop(
 
         debug!("Next execution scheduled in {:?}", duration_until_next);
 
-        // Sleep until the next tick, or break if cancelled
+        // Wait until the next tick using an interval with MissedTickBehavior::Skip
+        // to prevent rapid burst executions if Tokio runtime is starved
+        let mut interval_ticker = tokio::time::interval(duration_until_next.max(Duration::from_millis(1)));
+        interval_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval_ticker.tick().await; // consume initial tick
+
         tokio::select! {
-            _ = tokio::time::sleep(duration_until_next) => {}
+            _ = interval_ticker.tick() => {}
             _ = cancel_token.cancelled() => {
                 info!("Job loop cancelled, shutting down");
                 break;

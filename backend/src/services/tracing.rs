@@ -321,6 +321,16 @@ impl TracingService {
         let parent_cx = propagator.extract(&carrier);
         span.set_parent(parent_cx);
     }
+
+    /// Spawn an asynchronous background task with current OpenTelemetry trace span context attached.
+    pub fn spawn_instrumented<F, T>(future: F) -> tokio::task::JoinHandle<T>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        use tracing::Instrument;
+        tokio::spawn(future.instrument(tracing::Span::current()))
+    }
 }
 
 #[cfg(test)]
@@ -395,5 +405,18 @@ mod tests {
 
         let config = TracingConfig::default().with_sampling_ratio(-0.5);
         assert_eq!(config.sampling_ratio, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_instrumented_context_propagation() {
+        let parent_span = TracingService::job_span("test_async_job", "job-1023");
+        let _guard = parent_span.enter();
+
+        let handle = TracingService::spawn_instrumented(async {
+            tracing::Span::current().is_none()
+        });
+
+        let is_span_none = handle.await.unwrap();
+        assert!(!is_span_none);
     }
 }

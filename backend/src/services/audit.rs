@@ -257,12 +257,22 @@ impl AuditService {
         let mut has_where = false;
 
         if let Some(ref et) = event_type {
+            if et.len() > 100 {
+                return Err(AppError::ValidationError(
+                    "event_type filter parameter exceeds maximum allowed length of 100 characters".into(),
+                ));
+            }
             query_builder.push(" WHERE event_type = ");
             query_builder.push_bind(et);
             has_where = true;
         }
 
         if let Some(ref t_id) = tenant_id {
+            if t_id.len() > 100 {
+                return Err(AppError::ValidationError(
+                    "tenant_id filter parameter exceeds maximum allowed length of 100 characters".into(),
+                ));
+            }
             if has_where {
                 query_builder.push(" AND ");
             } else {

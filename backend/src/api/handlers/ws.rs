@@ -57,7 +57,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<WsState>) {
     info!("WebSocket client connected for dashboard updates");
 
     let mut push_ticker = interval(Duration::from_secs(PUSH_INTERVAL_SECS));
+    push_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut ping_ticker = interval(Duration::from_secs(PING_INTERVAL_SECS));
+    ping_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -75,7 +77,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<WsState>) {
                 match serde_json::to_string(&update) {
                     Ok(json) => {
                         if sender.send(Message::Text(json.into())).await.is_err() {
-                            debug!("WebSocket client disconnected (send failed)");
+                            debug!("WebSocket client disconnected (send failed), dropping stream");
                             break;
                         }
                     }
@@ -85,7 +87,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<WsState>) {
 
             _ = ping_ticker.tick() => {
                 if sender.send(Message::Ping(vec![].into())).await.is_err() {
-                    debug!("WebSocket client disconnected (ping failed)");
+                    debug!("WebSocket client disconnected (ping failed), dropping stream");
                     break;
                 }
             }
@@ -93,14 +95,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<WsState>) {
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Close(_))) | None => {
-                        info!("WebSocket client disconnected");
+                        info!("WebSocket client explicitly disconnected or channel closed");
                         break;
                     }
                     Some(Ok(Message::Pong(_))) => {
                         debug!("Received pong from WebSocket client");
                     }
                     Some(Err(e)) => {
-                        warn!(error = %e, "WebSocket receive error");
+                        warn!(error = %e, "WebSocket receive error, tearing down connection");
                         break;
                     }
                     _ => {}
@@ -108,6 +110,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<WsState>) {
             }
         }
     }
+
+    // Teardown and decrement connection count immediately upon loop termination
     crate::services::sys_metrics::record_websocket_conn_change(-1);
 }
 

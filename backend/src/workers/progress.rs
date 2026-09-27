@@ -63,16 +63,21 @@ impl JobProgressTracker {
                                     as u8;
                         }
 
-                        // Store updated progress
-                        redis_conn
-                            .set_ex::<_, _, ()>(
-                                &key,
-                                serde_json::to_string(&progress)?,
-                                3600_u64, // 1 hour TTL
-                            )
-                            .await?;
-
-                        debug!("Updated progress for job: {}", progress.job_id);
+                        // Evict completed jobs (100% progress) from active tracking to prevent memory accumulation
+                        if progress.progress_percentage >= 100 {
+                            redis_conn.del::<_, ()>(&key).await?;
+                            debug!("Evicted completed job progress entry: {}", progress.job_id);
+                        } else {
+                            // Store updated progress with TTL expiration
+                            redis_conn
+                                .set_ex::<_, _, ()>(
+                                    &key,
+                                    serde_json::to_string(&progress)?,
+                                    3600_u64, // 1 hour TTL
+                                )
+                                .await?;
+                            debug!("Updated progress for job: {}", progress.job_id);
+                        }
                     }
                     Err(e) => {
                         error!("Failed to parse progress data for {}: {}", key, e);

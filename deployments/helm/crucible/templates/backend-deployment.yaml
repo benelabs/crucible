@@ -87,7 +87,11 @@ spec:
             capabilities:
               drop:
                 - ALL
+            # Enforce a read-only root filesystem; scratch goes to /tmp (tmpfs).
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -95,8 +99,11 @@ spec:
               mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
       volumes:
+        # Writable tmpfs for temporary scratch files under a read-only root FS.
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
         - name: sa-token
           projected:
             sources:

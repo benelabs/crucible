@@ -16,6 +16,7 @@ pub struct IndexedEvent {
     pub contract_id: String,
     pub ledger_sequence: i64,
     pub transaction_hash: String,
+    pub event_index: i32,
     pub event_type: String,
     pub topics: serde_json::Value,
     pub data: serde_json::Value,
@@ -54,15 +55,16 @@ impl EventIndexer {
             let result = sqlx::query(
                 r#"
                 INSERT INTO contract_events
-                    (id, contract_id, ledger_sequence, transaction_hash, event_type, topics, data, indexed_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                ON CONFLICT (transaction_hash, event_type) DO NOTHING
+                    (id, contract_id, ledger_sequence, transaction_hash, event_index, event_type, topics, data, indexed_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (transaction_hash, event_index) DO NOTHING
                 "#,
             )
             .bind(Uuid::new_v4())
             .bind(&event.contract_id)
             .bind(event.ledger_sequence)
             .bind(&event.transaction_hash)
+            .bind(event.event_index)
             .bind(&event.event_type)
             .bind(&event.topics)
             .bind(&event.data)
@@ -90,7 +92,7 @@ impl EventIndexer {
 
         let rows = sqlx::query_as::<_, IndexedEvent>(
             r#"
-            SELECT id, contract_id, ledger_sequence, transaction_hash,
+                 SELECT id, contract_id, ledger_sequence, transaction_hash, event_index,
                    event_type, topics, data, indexed_at
             FROM contract_events
             WHERE ($1::text IS NULL OR contract_id = $1)
@@ -144,6 +146,7 @@ pub struct RawEvent {
     pub contract_id: String,
     pub ledger_sequence: i64,
     pub transaction_hash: String,
+    pub event_index: i32,
     pub event_type: String,
     pub topics: serde_json::Value,
     pub data: serde_json::Value,
@@ -166,6 +169,7 @@ mod tests {
             contract_id: contract_id.to_string(),
             ledger_sequence: ledger,
             transaction_hash: tx.to_string(),
+            event_index: 0,
             event_type: kind.to_string(),
             topics: serde_json::json!(["transfer"]),
             data: serde_json::json!({"amount": 100}),
@@ -193,5 +197,6 @@ mod tests {
         let back: RawEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(back.contract_id, "CABC");
         assert_eq!(back.ledger_sequence, 100);
+        assert_eq!(back.event_index, 0);
     }
 }

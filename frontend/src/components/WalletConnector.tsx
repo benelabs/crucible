@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Wallet, LogOut, Copy, CheckCircle2, AlertTriangle, RefreshCw, ExternalLink } from 'lucide-react';
 import './WalletConnector.css';
 
@@ -31,6 +31,49 @@ const NETWORK_LABELS: Record<Network, string> = {
   testnet:   'Testnet',
   futurenet: 'Futurenet',
 };
+const WALLET_STORAGE_KEY = 'crucible_wallet_connection';
+
+interface PersistedWalletState {
+  network: Network;
+  wallet: ConnectedWallet | null;
+}
+
+function isNetwork(value: unknown): value is Network {
+  return value === 'mainnet' || value === 'testnet' || value === 'futurenet';
+}
+
+function isConnectedWallet(value: unknown, network: Network): value is ConnectedWallet {
+  if (!value || typeof value !== 'object') return false;
+
+  const wallet = value as Partial<ConnectedWallet>;
+  return WALLETS.some(item => item.type === wallet.type)
+    && typeof wallet.publicKey === 'string'
+    && typeof wallet.balance === 'string'
+    && wallet.network === network;
+}
+
+function readPersistedWalletState(): PersistedWalletState {
+  const defaultState: PersistedWalletState = { network: 'testnet', wallet: null };
+
+  try {
+    const stored = localStorage.getItem(WALLET_STORAGE_KEY);
+    if (!stored) return defaultState;
+
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== 'object') return defaultState;
+
+    const data = parsed as Partial<PersistedWalletState>;
+    const network = isNetwork(data.network) ? data.network : defaultState.network;
+    const candidate = data.wallet;
+
+    return {
+      network,
+      wallet: isConnectedWallet(candidate, network) ? candidate : null,
+    };
+  } catch {
+    return defaultState;
+  }
+}
 
 /** Simulate wallet connection (replace with real SDK calls in production). */
 async function mockConnect(walletType: WalletType, network: Network): Promise<ConnectedWallet> {
@@ -41,29 +84,61 @@ async function mockConnect(walletType: WalletType, network: Network): Promise<Co
 }
 
 export const WalletConnector: React.FC = () => {
-  const [status, setStatus]       = useState<ConnectionStatus>('disconnected');
-  const [wallet, setWallet]       = useState<ConnectedWallet | null>(null);
-  const [network, setNetwork]     = useState<Network>('testnet');
+  const [initialState] = useState(readPersistedWalletState);
+  const [status, setStatus]       = useState<ConnectionStatus>(initialState.wallet ? 'connected' : 'disconnected');
+  const [wallet, setWallet]       = useState<ConnectedWallet | null>(initialState.wallet);
+  const [network, setNetwork]     = useState<Network>(initialState.network);
   const [error, setError]         = useState<string | null>(null);
   const [copied, setCopied]       = useState(false);
+  const [pendingNetwork, setPendingNetwork] = useState<Network | null>(null);
 
-  const handleConnect = useCallback(async (walletType: WalletType) => {
+  useEffect(() => {
+    try {
+      localStorage.setItem(WALLET_STORAGE_KEY, JSON.stringify({ network, wallet }));
+    } catch {
+      // Storage can be unavailable in private browsing or restricted contexts.
+    }
+  }, [network, wallet]);
+
+  const connectToNetwork = useCallback(async (walletType: WalletType, targetNetwork: Network) => {
     setStatus('connecting');
+    setWallet(null);
+    setNetwork(targetNetwork);
     setError(null);
     try {
-      const connected = await mockConnect(walletType, network);
+      const connected = await mockConnect(walletType, targetNetwork);
       setWallet(connected);
       setStatus('connected');
     } catch (e: any) {
       setError(e.message ?? 'Connection failed');
       setStatus('error');
     }
-  }, [network]);
+  }, []);
+
+  const handleConnect = useCallback((walletType: WalletType) => {
+    return connectToNetwork(walletType, network);
+  }, [connectToNetwork, network]);
+
+  const handleNetworkSelect = useCallback((nextNetwork: Network) => {
+    if (nextNetwork === network || status === 'connecting') return;
+    if (status === 'connected' && wallet) {
+      setPendingNetwork(nextNetwork);
+      return;
+    }
+    setNetwork(nextNetwork);
+  }, [network, status, wallet]);
+
+  const confirmNetworkSwitch = useCallback(() => {
+    if (!pendingNetwork || !wallet) return;
+    setPendingNetwork(null);
+    void connectToNetwork(wallet.type, pendingNetwork);
+  }, [connectToNetwork, pendingNetwork, wallet]);
 
   const handleDisconnect = useCallback(() => {
     setWallet(null);
     setStatus('disconnected');
     setError(null);
+    setPendingNetwork(null);
   }, []);
 
   const handleCopy = useCallback(async () => {
@@ -94,8 +169,8 @@ export const WalletConnector: React.FC = () => {
               <button
                 key={n}
                 className={`network-tab ${network === n ? 'active' : ''}`}
-                onClick={() => setNetwork(n)}
-                disabled={status === 'connecting' || status === 'connected'}
+                onClick={() => handleNetworkSelect(n)}
+                disabled={status === 'connecting'}
                 data-testid={`network-tab-${n}`}
               >
                 {NETWORK_LABELS[n]}
@@ -103,6 +178,41 @@ export const WalletConnector: React.FC = () => {
             ))}
           </div>
         </div>
+
+        {pendingNetwork && wallet && (
+          <div className="network-switch-backdrop">
+            <section
+              className="network-switch-dialog glass-panel"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="network-switch-title"
+              aria-describedby="network-switch-description"
+              data-testid="network-switch-dialog"
+            >
+              <AlertTriangle size={22} className="network-switch-icon" />
+              <h3 id="network-switch-title">Reconnect to {NETWORK_LABELS[pendingNetwork]}?</h3>
+              <p id="network-switch-description">
+                Switching networks will reconnect {WALLETS.find(w => w.type === wallet.type)?.label} on {NETWORK_LABELS[pendingNetwork]}.
+              </p>
+              <div className="network-switch-actions">
+                <button
+                  className="network-switch-cancel"
+                  onClick={() => setPendingNetwork(null)}
+                  data-testid="cancel-network-switch"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="network-switch-confirm"
+                  onClick={confirmNetworkSwitch}
+                  data-testid="confirm-network-switch"
+                >
+                  Switch and reconnect
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
 
         {/* Wallet list — shown when disconnected / error */}
         {(status === 'disconnected' || status === 'error') && (

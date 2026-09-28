@@ -771,8 +771,15 @@ fn expand_quickcheck(
         None => quote! {},
     };
 
+    // Preserve outer attributes from the source AST — especially `///` doc
+    // comments (`#[doc = ...]`) — so IDE hover tooltips and
+    // `cargo test -- --nocapture` summaries keep the author's documentation.
+    let doc_attrs = attrs.iter().filter(|attr| attr.path().is_ident("doc"));
+    let other_attrs = attrs.iter().filter(|attr| !attr.path().is_ident("doc"));
+
     Ok(quote! {
-        #(#attrs)*
+        #(#doc_attrs)*
+        #(#other_attrs)*
         #[test]
         #vis fn #name #generics () #where_clause {
             ::crucible::quickcheck::check::<( #(#types,)* ), _>(

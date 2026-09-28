@@ -25,7 +25,7 @@ fn deploy_treasury(env: &Env) -> (Address, Address, Address) {
     let mut admins = Vec::new(env);
     admins.push_back(admin1.clone());
     admins.push_back(admin2.clone());
-    client.initialize(&admins, &2);
+    client.initialize(&admins, &2, &i128::MAX);
     (treasury_id, admin1, admin2)
 }
 

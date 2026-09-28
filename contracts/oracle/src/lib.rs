@@ -1,5 +1,8 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec};
+
+/// Maximum age of a price observation before it is considered stale (1 hour).
+const MAX_STALENESS_SECONDS: u64 = 3_600;
 
 #[contracttype]
 #[derive(Clone)]
@@ -120,38 +123,46 @@ impl Oracle {
         Ok(())
     }
 
-    /// Get latest price for a symbol
+    /// Get latest price for a symbol.
+    /// Reverts if the observation is older than [`MAX_STALENESS_SECONDS`].
     pub fn get_price(env: Env, symbol: String) -> Result<i128, &'static str> {
-        env.storage()
-            .instance()
-            .get::<_, PriceData>(&DataKey::Price(symbol))
-            .map(|data| data.price)
-            .ok_or("Price not found")
+        let data = Self::load_fresh_price(&env, symbol)?;
+        Ok(data.price)
     }
 
-    /// Get price data with source info
+    /// Get price data with source info.
+    /// Reverts if the observation is older than [`MAX_STALENESS_SECONDS`].
     pub fn get_price_data(env: Env, symbol: String) -> Result<PriceData, &'static str> {
-        env.storage()
-            .instance()
-            .get(&DataKey::Price(symbol))
-            .ok_or("Price not found")
+        Self::load_fresh_price(&env, symbol)
     }
 
-    /// Aggregate prices from multiple sources (average)
+    /// Aggregate prices from multiple sources (average).
+    /// Reverts if the latest observation is older than [`MAX_STALENESS_SECONDS`].
     pub fn aggregate_price(env: Env, symbol: String, num_sources: u64) -> Result<i128, &'static str> {
         if num_sources == 0 {
             return Err("num_sources must be positive");
         }
 
-        let storage = env.storage().instance();
+        // For MVP, return the latest fresh price.
+        // In production, this would aggregate from multiple sources.
+        let price_data = Self::load_fresh_price(&env, symbol)?;
+        Ok(price_data.price)
+    }
 
-        // For MVP, return the latest price
-        // In production, this would aggregate from multiple sources
-        let price_data: PriceData = storage
+    /// Load a price and reject it when `current_time - updated_at > MAX_STALENESS_SECONDS`.
+    fn load_fresh_price(env: &Env, symbol: String) -> Result<PriceData, &'static str> {
+        let price_data: PriceData = env
+            .storage()
+            .instance()
             .get(&DataKey::Price(symbol))
             .ok_or("Price not found")?;
 
-        Ok(price_data.price)
+        let current_time = env.ledger().timestamp();
+        let age = current_time.saturating_sub(price_data.timestamp);
+        if age > MAX_STALENESS_SECONDS {
+            return Err("Price feed is stale");
+        }
+        Ok(price_data)
     }
 
     /// Get data source details
@@ -209,7 +220,7 @@ impl Oracle {
         Ok(())
     }
 
-    /// Validate price data freshness
+    /// Validate price data freshness against a caller-supplied max age.
     pub fn validate_price_freshness(
         env: Env,
         symbol: String,
@@ -221,7 +232,7 @@ impl Oracle {
             .get(&DataKey::Price(symbol))
             .ok_or("Price not found")?;
 
-        let age = env.ledger().timestamp() - price_data.timestamp;
+        let age = env.ledger().timestamp().saturating_sub(price_data.timestamp);
         Ok(age <= max_age_seconds)
     }
 }

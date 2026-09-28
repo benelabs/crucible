@@ -103,7 +103,15 @@ impl PaymentStreaming {
             (now - stream.start_time) as i128
         };
 
-        let vested = (stream.deposit_amount * elapsed) / duration;
+        let vested = if elapsed >= duration {
+            stream.deposit_amount
+        } else {
+            stream
+                .deposit_amount
+                .checked_mul(elapsed)
+                .unwrap_or_else(|| panic!("vesting calculation overflow"))
+                / duration
+        };
         vested - stream.claimed_amount
     }
 

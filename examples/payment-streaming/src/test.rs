@@ -51,3 +51,36 @@ fn test_payment_streaming_lifecycle() {
     assert_eq!(final_withdrawn, 5_000_000);
     assert_eq!(token.balance(&recipient), 10_000_000);
 }
+
+#[test]
+fn test_large_stream_overflow_is_reported_and_fully_vests_at_end() {
+    let env = MockEnv::builder()
+        .at_timestamp(1_000)
+        .with_contract::<PaymentStreaming>()
+        .with_account("sender", Stroops::xlm(100))
+        .with_account("recipient", Stroops::xlm(10))
+        .build();
+
+    let contract_id = env.contract_id::<PaymentStreaming>();
+    let sender = env.account("sender");
+    let recipient = env.account("recipient");
+    let token = MockToken::new(&env, "USDC", 6);
+    let deposit = i128::MAX / 2 + 1;
+    token.mint(&sender, deposit);
+
+    let client = PaymentStreamingClient::new(env.inner(), &contract_id);
+    let stream_id = client.create_stream(
+        &sender.address(),
+        &recipient.address(),
+        &token.address(),
+        &deposit,
+        &1_000,
+        &1_003,
+    );
+
+    env.advance_time(Duration::seconds(2));
+    assert!(client.try_claimable_amount(&stream_id).is_err());
+
+    env.advance_time(Duration::seconds(1));
+    assert_eq!(client.claimable_amount(&stream_id), deposit);
+}

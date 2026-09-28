@@ -541,10 +541,12 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
 /// * `shrink = N` — maximum shrink steps (default 1024).
 /// * `seed = N` — fix the seed, making the run fully reproducible.
 /// * `size = N` — soft budget bounding generated collection lengths (default 32).
+/// * `max_depth = N` — recursion depth cap for nested generators (default 8).
 ///
 /// Unset arguments fall back to the `CRUCIBLE_QUICKCHECK_CASES`,
-/// `CRUCIBLE_QUICKCHECK_SHRINK` and `CRUCIBLE_QUICKCHECK_SEED` environment
-/// variables, then to the defaults above.
+/// `CRUCIBLE_QUICKCHECK_SHRINK`, `CRUCIBLE_QUICKCHECK_SEED` and
+/// `CRUCIBLE_QUICKCHECK_MAX_DEPTH` environment variables, then to the defaults
+/// above.
 ///
 /// # Example
 ///
@@ -598,13 +600,14 @@ pub fn quickcheck(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
-/// The `cases` / `shrink` / `seed` / `size` arguments of `#[quickcheck]`.
+/// The `cases` / `shrink` / `seed` / `size` / `max_depth` arguments of `#[quickcheck]`.
 #[derive(Default)]
 struct QuickcheckArgs {
     cases: Option<syn::Expr>,
     shrink: Option<syn::Expr>,
     seed: Option<syn::Expr>,
     size: Option<syn::Expr>,
+    max_depth: Option<syn::Expr>,
 }
 
 impl QuickcheckArgs {
@@ -629,10 +632,12 @@ impl QuickcheckArgs {
                 &mut parsed.seed
             } else if meta.path.is_ident("size") {
                 &mut parsed.size
+            } else if meta.path.is_ident("max_depth") {
+                &mut parsed.max_depth
             } else {
                 return Err(Error::new_spanned(
                     &meta.path,
-                    "unknown #[quickcheck] argument; expected one of `cases`, `shrink`, `seed`, `size`",
+                    "unknown #[quickcheck] argument; expected one of `cases`, `shrink`, `seed`, `size`, `max_depth`",
                 ));
             };
 
@@ -654,25 +659,53 @@ fn expand_quickcheck(
     args: QuickcheckArgs,
     func: syn::ItemFn,
 ) -> Result<proc_macro2::TokenStream, Error> {
+    // Bind every ItemFn field explicitly so syn 2.x/3.x AST additions (e.g.
+    // `modifiers`) surface as compile errors here instead of being silently
+    // dropped by `..`, which previously masked missing-attribute / return-type
+    // diagnostics for #[crucible::quickcheck] / #[test] wrappers.
     let syn::ItemFn {
         attrs,
         vis,
+        modifiers,
         sig,
         block,
-        ..
     } = func;
 
-    if let Some(asyncness) = sig.asyncness {
+    if let Some(defaultness) = &modifiers.defaultness {
+        return Err(Error::new_spanned(
+            defaultness,
+            "#[quickcheck] does not support `default` function modifiers",
+        ));
+    }
+    if let Some(asyncness) = &sig.asyncness {
         return Err(Error::new_spanned(
             asyncness,
             "#[quickcheck] does not support async functions",
         ));
     }
-    if !matches!(sig.output, syn::ReturnType::Default) {
+    if let Some(constness) = &sig.constness {
         return Err(Error::new_spanned(
-            &sig.output,
-            "#[quickcheck] properties must return `()`; assert inside the body instead",
+            constness,
+            "#[quickcheck] does not support const functions",
         ));
+    }
+    if let Some(abi) = &sig.abi {
+        return Err(Error::new_spanned(
+            abi,
+            "#[quickcheck] does not support functions with an explicit ABI",
+        ));
+    }
+    // Explicit return-signature validation: only bare `()` / omitted return is
+    // allowed so Result/Option/typed returns fail at expansion time with a
+    // clear diagnostic rather than expanding into a broken #[test].
+    match &sig.output {
+        syn::ReturnType::Default => {}
+        syn::ReturnType::Type(_, ty) => {
+            return Err(Error::new_spanned(
+                ty,
+                "#[quickcheck] properties must return `()`; assert inside the body instead",
+            ));
+        }
     }
     if sig.inputs.is_empty() {
         return Err(Error::new_spanned(
@@ -717,6 +750,7 @@ fn expand_quickcheck(
     let cases = field(&args.cases, "cases");
     let shrink = field(&args.shrink, "shrink_iters");
     let size = field(&args.size, "size");
+    let max_depth = field(&args.max_depth, "max_depth");
     // `seed` is an `Option<u64>` in the config, so the literal has to be wrapped.
     let seed = match &args.seed {
         Some(expr) => quote! { seed: ::core::option::Option::Some(#expr), },
@@ -734,6 +768,7 @@ fn expand_quickcheck(
                     #shrink
                     #seed
                     #size
+                    #max_depth
                     ..::core::default::Default::default()
                 },
                 |( #(#patterns,)* )| #block,

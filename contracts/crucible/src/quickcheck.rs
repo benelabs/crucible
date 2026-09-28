@@ -48,6 +48,7 @@
 //! | `CRUCIBLE_QUICKCHECK_CASES` | Inputs to try per test | 256 |
 //! | `CRUCIBLE_QUICKCHECK_SHRINK` | Maximum shrink steps | 1024 |
 //! | `CRUCIBLE_QUICKCHECK_SEED` | Starting seed | random per run |
+//! | `CRUCIBLE_QUICKCHECK_MAX_DEPTH` | Recursion depth for nested generators | 8 |
 //!
 //! The macro's own arguments — `#[crucible::quickcheck(cases = 32)]` — take
 //! precedence over the environment.
@@ -62,6 +63,18 @@ pub const DEFAULT_CASES: u32 = 256;
 
 /// Default cap on shrink steps before the smallest case found is reported.
 pub const DEFAULT_SHRINK_ITERS: u32 = 1024;
+
+/// Default recursion depth for nested custom / collection generators.
+pub const DEFAULT_MAX_DEPTH: u32 = 8;
+
+/// Reduces the generation budget when descending into a nested structure.
+///
+/// Returns `0` at the leaves so recursive `Arbitrary` impls terminate instead
+/// of overflowing the stack on deeply nested types.
+#[inline]
+fn nested_budget(size: u32) -> u32 {
+    size.saturating_sub(1)
+}
 
 /// A small deterministic PRNG (xorshift64*).
 ///
@@ -254,8 +267,12 @@ impl Arbitrary for char {
 
 impl Arbitrary for String {
     fn arbitrary(rng: &mut Rng, size: u32) -> Self {
-        let len = rng.below(size.max(1) as u64);
-        (0..len).map(|_| char::arbitrary(rng, size)).collect()
+        if size == 0 {
+            return String::new();
+        }
+        let child = nested_budget(size);
+        let len = rng.below(child.max(1) as u64);
+        (0..len).map(|_| char::arbitrary(rng, child)).collect()
     }
 
     fn shrink(&self) -> Vec<Self> {
@@ -274,10 +291,10 @@ impl Arbitrary for String {
 
 impl<T: Arbitrary> Arbitrary for Option<T> {
     fn arbitrary(rng: &mut Rng, size: u32) -> Self {
-        if rng.one_in(4) {
+        if size == 0 || rng.one_in(4) {
             None
         } else {
-            Some(T::arbitrary(rng, size))
+            Some(T::arbitrary(rng, nested_budget(size)))
         }
     }
 
@@ -295,8 +312,12 @@ impl<T: Arbitrary> Arbitrary for Option<T> {
 
 impl<T: Arbitrary> Arbitrary for Vec<T> {
     fn arbitrary(rng: &mut Rng, size: u32) -> Self {
-        let len = rng.below(size.max(1) as u64);
-        (0..len).map(|_| T::arbitrary(rng, size)).collect()
+        if size == 0 {
+            return Vec::new();
+        }
+        let child = nested_budget(size);
+        let len = rng.below(child.max(1) as u64);
+        (0..len).map(|_| T::arbitrary(rng, child)).collect()
     }
 
     fn shrink(&self) -> Vec<Self> {
@@ -334,7 +355,8 @@ macro_rules! impl_arbitrary_tuple {
     ($($name:ident => $index:tt),+ $(,)?) => {
         impl<$($name: Arbitrary),+> Arbitrary for ($($name,)+) {
             fn arbitrary(rng: &mut Rng, size: u32) -> Self {
-                ($($name::arbitrary(rng, size),)+)
+                let child = nested_budget(size);
+                ($($name::arbitrary(rng, child),)+)
             }
 
             fn shrink(&self) -> Vec<Self> {
@@ -461,6 +483,11 @@ pub struct Config {
     pub seed: Option<u64>,
     /// Soft budget bounding collection lengths and recursion.
     pub size: u32,
+    /// Hard recursion-depth cap for nested custom data structures.
+    ///
+    /// Combined with [`size`](Self::size) when driving [`Arbitrary::arbitrary`]
+    /// so deeply nested types cannot blow the stack during mock generation.
+    pub max_depth: u32,
 }
 
 impl Default for Config {
@@ -470,6 +497,7 @@ impl Default for Config {
             shrink_iters: DEFAULT_SHRINK_ITERS,
             seed: None,
             size: 32,
+            max_depth: DEFAULT_MAX_DEPTH,
         }
     }
 }
@@ -498,7 +526,17 @@ impl Config {
         if self.seed.is_none() {
             self.seed = read("CRUCIBLE_QUICKCHECK_SEED");
         }
+        if self.max_depth == DEFAULT_MAX_DEPTH {
+            if let Some(depth) = read("CRUCIBLE_QUICKCHECK_MAX_DEPTH") {
+                self.max_depth = depth;
+            }
+        }
         self
+    }
+
+    /// Effective generation budget: the lesser of `size` and `max_depth`.
+    fn generation_budget(&self) -> u32 {
+        self.size.min(self.max_depth)
     }
 
     /// Returns the seed to run with, choosing one if none was fixed.
@@ -531,9 +569,10 @@ where
     let config = config.from_env();
     let seed = config.resolved_seed();
     let mut rng = Rng::new(seed);
+    let budget = config.generation_budget();
 
     for case in 0..config.cases {
-        let input = T::arbitrary(&mut rng, config.size);
+        let input = T::arbitrary(&mut rng, budget);
         if let Some(failure) = run_once(&mut property, input.clone()) {
             let (minimal, minimal_failure, steps) =
                 shrink(&mut property, input, failure, config.shrink_iters);
@@ -819,5 +858,30 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(config.from_env().cases, 8);
+    }
+
+    #[test]
+    fn zero_generation_budget_stops_nested_recursion() {
+        // A budget of 0 must bottom out nested collections / options so custom
+        // recursive Arbitrary impls cannot overflow the stack (#1005).
+        let mut rng = Rng::new(1);
+        assert!(Vec::<u8>::arbitrary(&mut rng, 0).is_empty());
+        assert!(Option::<u32>::arbitrary(&mut rng, 0).is_none());
+        assert!(String::arbitrary(&mut rng, 0).is_empty());
+
+        // Depth is strictly decreasing: a Vec-of-Vec under a small budget
+        // cannot keep expanding forever.
+        let nested: Vec<Vec<u8>> = Vec::arbitrary(&mut rng, 3);
+        assert!(nested.iter().all(|inner| inner.len() <= 2));
+    }
+
+    #[test]
+    fn generation_budget_is_capped_by_max_depth() {
+        let config = Config {
+            size: 64,
+            max_depth: 4,
+            ..Config::default()
+        };
+        assert_eq!(config.generation_budget(), 4);
     }
 }

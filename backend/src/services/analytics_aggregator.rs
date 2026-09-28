@@ -113,7 +113,7 @@ impl AnalyticsAggregator {
         let cache_key = format!("{}{}", CACHE_KEY_PREFIX, contract_id);
 
         // Try Redis cache first
-        if let Ok(mut conn) = self.redis.get_async_connection().await {
+        if let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await {
             if let Ok(cached) = conn.get::<_, String>(&cache_key).await {
                 if let Ok(analytics) = serde_json::from_str::<ContractAnalytics>(&cached) {
                     debug!(contract_id, "Cache hit for contract analytics");
@@ -125,7 +125,7 @@ impl AnalyticsAggregator {
         let analytics = self.compute_contract_analytics(contract_id).await?;
 
         // Populate cache (best-effort)
-        if let Ok(mut conn) = self.redis.get_async_connection().await {
+        if let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await {
             if let Ok(json) = serde_json::to_string(&analytics) {
                 let _: Result<(), _> = conn.set_ex(&cache_key, json, CACHE_TTL_SECS).await;
             }
@@ -206,7 +206,7 @@ impl AnalyticsAggregator {
     pub async fn summary(&self) -> Result<AnalyticsSummary, anyhow::Error> {
         const SUMMARY_KEY: &str = "analytics:summary";
 
-        if let Ok(mut conn) = self.redis.get_async_connection().await {
+        if let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await {
             if let Ok(cached) = conn.get::<_, String>(SUMMARY_KEY).await {
                 if let Ok(s) = serde_json::from_str::<AnalyticsSummary>(&cached) {
                     return Ok(s);
@@ -256,7 +256,7 @@ impl AnalyticsAggregator {
             computed_at: Utc::now(),
         };
 
-        if let Ok(mut conn) = self.redis.get_async_connection().await {
+        if let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await {
             if let Ok(json) = serde_json::to_string(&summary) {
                 let _: Result<(), _> = conn.set_ex(SUMMARY_KEY, json, CACHE_TTL_SECS).await;
             }

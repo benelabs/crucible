@@ -348,6 +348,17 @@ pub struct MockEnv {
     track_costs: bool,
     crypto_registry: Rc<RefCell<MockCryptoRegistry>>,
     checkpoints: Rc<RefCell<CheckpointStack>>,
+    /// Host event-buffer indices suppressed after speculative rollback, plus
+    /// bookkeeping so a metering-driven buffer clear invalidates stale hides.
+    event_rollback: Rc<RefCell<EventRollbackState>>,
+}
+
+/// Tracks speculative event hides and detects host buffer resets.
+#[derive(Clone, Default)]
+struct EventRollbackState {
+    hidden_indices: std::collections::HashSet<usize>,
+    last_len: usize,
+    last_head_fingerprint: Option<u64>,
 }
 
 // Typed event wrapper to provide ergonomic access to event fields and typed data conversion.
@@ -1121,9 +1132,19 @@ impl MockEnv {
 
     /// Returns all events emitted during the test.
     ///
+    /// Prefer [`events_from_contract`](Self::events_from_contract) /
+    /// [`events_matching`](Self::events_matching) when asserting after
+    /// [`speculate`](Self::speculate): those helpers honour speculative event
+    /// rollback. This method forwards to the host buffer directly.
+    ///
     /// In Soroban SDK v25.x, this returns the ContractEvents wrapper.
     pub fn events_all(&self) -> ContractEvents {
         self.inner.events().all()
+    }
+
+    /// Number of contract events still visible after speculative rollbacks.
+    pub fn visible_event_count(&self) -> usize {
+        self.visible_host_events().len()
     }
 
     /// Returns all events emitted by a specific contract address.
@@ -1142,9 +1163,8 @@ impl MockEnv {
         contract_id: &Address,
     ) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
         use soroban_sdk::xdr::{self, ScAddress};
-        let all_events = self.inner.events().all();
         let mut result = SorobanVec::new(&self.inner);
-        for event in all_events.events() {
+        for event in self.visible_host_events() {
             if let Some(ref id) = event.contract_id {
                 let sc_addr = ScAddress::Contract(id.clone());
                 let addr = Address::from_val(&self.inner, &sc_addr);
@@ -1571,6 +1591,7 @@ impl MockEnv {
             // A fork gets a fresh stack: checkpoints taken in one environment
             // must never be redeemable in the other.
             checkpoints: Rc::new(RefCell::new(self.checkpoints.borrow().forked())),
+            event_rollback: Rc::new(RefCell::new(self.event_rollback.borrow().clone())),
         }
     }
 
@@ -1824,6 +1845,11 @@ impl MockEnv {
     /// caller. The rollback also happens if `f` panics, so a reverted
     /// speculative branch cannot leak state into the rest of the test.
     ///
+    /// Contract events emitted during speculation are pruned as well: the host
+    /// event-stream index is snapshotted before `f` runs, and any events
+    /// recorded after that pointer are hidden from MockEnv event observers on
+    /// exit (including panic unwind).
+    ///
     /// Unlike [`simulate`](Self::simulate), which reports the cost and auth
     /// profile of a call, this is about ledger state: it answers "what would
     /// this do?" without leaving any trace.
@@ -1840,13 +1866,112 @@ impl MockEnv {
         F: FnOnce() -> T,
     {
         let id = self.checkpoint();
+        // Snapshot the event stream prior to speculation.
+        let events_before = self
+            .inner
+            .host()
+            .get_events()
+            .map(|events| events.0)
+            .unwrap_or_default();
+
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+
         self.rollback_to(id);
         self.release_checkpoint(id);
+        // Truncate / hide the event log back to the snapshot on exit.
+        self.rollback_events_to(&events_before);
+
         match outcome {
             Ok(value) => value,
             Err(payload) => std::panic::resume_unwind(payload),
         }
+    }
+
+    /// Hide host events that appeared after `events_before`, accounting for
+    /// metering clears that replace the buffer during speculation.
+    fn rollback_events_to(&self, events_before: &[soroban_env_host::events::HostEvent]) {
+        let events_after = self
+            .inner
+            .host()
+            .get_events()
+            .map(|events| events.0)
+            .unwrap_or_default();
+
+        let mut common = 0usize;
+        while common < events_before.len()
+            && common < events_after.len()
+            && Self::host_event_fingerprint(&events_before[common])
+                == Self::host_event_fingerprint(&events_after[common])
+        {
+            common += 1;
+        }
+
+        let mut state = self.event_rollback.borrow_mut();
+        // Drop hides that referred to a previous buffer generation, then hide
+        // everything past the common prefix (the speculative suffix).
+        state.hidden_indices.clear();
+        state.hidden_indices.extend(common..events_after.len());
+        state.last_len = events_after.len();
+        state.last_head_fingerprint = events_after.first().map(Self::host_event_fingerprint);
+    }
+
+    fn host_event_fingerprint(event: &soroban_env_host::events::HostEvent) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        // ContractEvent / failed_call are the observable identity of a host event.
+        format!("{:?}", event.event).hash(&mut hasher);
+        event.failed_call.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Drop stale hides when the host event buffer has been reset (e.g. by
+    /// invocation metering at the start of a later top-level call).
+    fn sync_event_rollback_state(&self) {
+        let events = self
+            .inner
+            .host()
+            .get_events()
+            .map(|events| events.0)
+            .unwrap_or_default();
+        let mut state = self.event_rollback.borrow_mut();
+        let head = events.first().map(Self::host_event_fingerprint);
+        let cleared = events.len() < state.last_len
+            || (state.last_len > 0
+                && head != state.last_head_fingerprint
+                && !state.hidden_indices.is_empty());
+        if cleared {
+            // A fresh buffer generation — previous speculative hides no longer apply.
+            state.hidden_indices.clear();
+        } else {
+            state.hidden_indices.retain(|&index| index < events.len());
+        }
+        state.last_len = events.len();
+        state.last_head_fingerprint = head;
+    }
+
+    /// Host contract events with speculative / failed entries removed.
+    fn visible_host_events(&self) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+        self.sync_event_rollback_state();
+        let hidden = self.event_rollback.borrow().hidden_indices.clone();
+        self.inner
+            .host()
+            .get_events()
+            .map(|events| events.0)
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, host_event)| {
+                if host_event.failed_call || hidden.contains(&index) {
+                    None
+                } else if host_event.event.type_ == soroban_sdk::xdr::ContractEventType::Contract
+                    && host_event.event.contract_id.is_some()
+                {
+                    Some(host_event.event)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Runs `f` and returns a chainable assertion that it reverted.
@@ -1970,8 +2095,21 @@ impl Drop for MockAuthGuard {
 
 impl Default for MockEnv {
     fn default() -> Self {
+        let event_rollback = Rc::new(RefCell::new(EventRollbackState::default()));
+        let env = Env::default();
+        // Clear speculative hides whenever a new top-level host invocation
+        // starts (metering resets the event buffer at the same boundary).
+        let rollback_for_hook = Rc::clone(&event_rollback);
+        let _ = env.host().set_invocation_hook(Some(Rc::new(move |_host, event| {
+            if matches!(event, soroban_env_host::InvocationEvent::Start) {
+                let mut state = rollback_for_hook.borrow_mut();
+                state.hidden_indices.clear();
+                state.last_len = 0;
+                state.last_head_fingerprint = None;
+            }
+        })));
         Self {
-            inner: Env::default(),
+            inner: env,
             accounts: Rc::new(RefCell::new(HashMap::new())),
             contract_ids: Rc::new(RefCell::new(HashMap::new())),
             tokens: Rc::new(RefCell::new(HashMap::new())),
@@ -1980,6 +2118,7 @@ impl Default for MockEnv {
             track_costs: false,
             crypto_registry: Rc::new(RefCell::new(MockCryptoRegistry::new())),
             checkpoints: Rc::new(RefCell::new(CheckpointStack::new())),
+            event_rollback,
         }
     }
 }

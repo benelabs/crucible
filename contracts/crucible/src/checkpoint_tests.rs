@@ -61,11 +61,27 @@ mod tests {
         }
     }
 
+    /// Emits a simple contract event for speculation rollback tests.
+    #[contract]
+    #[derive(Default)]
+    struct Emitter;
+
+    #[contractimpl]
+    impl Emitter {
+        pub fn ping(env: Env) {
+            env.events().publish((symbol_short!("ping"),), 1_u32);
+        }
+    }
+
     fn store_env() -> MockEnv {
         MockEnv::builder()
             .with_contract::<Store>()
             .with_contract::<OtherStore>()
             .build()
+    }
+
+    fn emitter_env() -> MockEnv {
+        MockEnv::builder().with_contract::<Emitter>().build()
     }
 
     fn store(env: &MockEnv) -> StoreClient<'_> {
@@ -349,6 +365,31 @@ mod tests {
         assert!(outcome.is_err(), "the panic must propagate to the caller");
         assert_eq!(client.get_persistent(&k), 1);
         assert_eq!(env.checkpoint_depth(), 0);
+    }
+
+    #[test]
+    fn speculate_prunes_events_emitted_during_the_branch() {
+        let env = emitter_env();
+        let id = env.contract_id::<Emitter>();
+        let client = EmitterClient::new(env.inner(), &id);
+
+        assert_eq!(env.visible_event_count(), 0);
+
+        let _ = env.speculate(|| {
+            client.ping();
+            client.ping();
+            0_u32
+        });
+
+        assert_eq!(
+            env.visible_event_count(),
+            0,
+            "events emitted inside speculate must be pruned on rollback"
+        );
+
+        // A later real call still records events normally.
+        client.ping();
+        assert_eq!(env.visible_event_count(), 1);
     }
 
     #[test]

@@ -107,6 +107,14 @@ pub struct MockToken {
     decimals: u32,
     /// The current admin address for this token.
     admin: Address,
+    /// Simulates the issuer `AUTH_CLAWBACK_ENABLED_FLAG` / SAC clawback
+    /// authorization. The on-chain test SAC cannot set this flag, so
+    /// [`MockToken`] tracks it locally and gates [`clawback`](Self::clawback).
+    clawback_enabled: Rc<RefCell<bool>>,
+    /// Per-account trustline clawback flag. Mirrors classic Stellar where a
+    /// trustline is only clawbackable when opened (or authorized) while the
+    /// issuer has clawback enabled.
+    trustline_clawback: Rc<RefCell<BTreeMap<Address, bool>>>,
 }
 
 impl std::fmt::Debug for MockToken {
@@ -154,6 +162,8 @@ impl MockToken {
             address,
             decimals: 7,
             admin,
+            clawback_enabled: Rc::new(RefCell::new(false)),
+            trustline_clawback: Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
 
@@ -202,6 +212,8 @@ impl MockToken {
             address: address.clone(),
             decimals,
             admin: address,
+            clawback_enabled: Rc::new(RefCell::new(false)),
+            trustline_clawback: Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
 
@@ -245,6 +257,8 @@ impl MockToken {
             address,
             decimals,
             admin,
+            clawback_enabled: Rc::new(RefCell::new(false)),
+            trustline_clawback: Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
 
@@ -383,6 +397,56 @@ impl MockToken {
         self.env.mock_all_auths();
         let client = StellarAssetClient::new(&self.env, &self.address);
         client.mint(to, &amount);
+        // Classic/SAC rule: balances created while clawback is enabled inherit
+        // a clawbackable trustline flag.
+        if self.is_clawback_enabled() {
+            self.trustline_clawback
+                .borrow_mut()
+                .insert(to.clone(), true);
+        }
+    }
+
+    /// Returns whether the issuer-level clawback authorization flag is set.
+    ///
+    /// Emulates Stellar Classic `AUTH_CLAWBACK_ENABLED_FLAG` / SAC clawback
+    /// authorization, which the SDK test SAC cannot configure directly.
+    pub fn is_clawback_enabled(&self) -> bool {
+        *self.clawback_enabled.borrow()
+    }
+
+    /// Enables issuer clawback authorization for this mock token.
+    ///
+    /// After this call, [`clawback`](Self::clawback) / [`clawback_all`](Self::clawback_all)
+    /// succeed only for accounts whose trustline was marked clawbackable
+    /// (typically via [`mint`](Self::mint) or [`mark_trustline_clawbackable`](Self::mark_trustline_clawbackable)
+    /// while clawback remains enabled).
+    pub fn enable_clawback(&self) {
+        *self.clawback_enabled.borrow_mut() = true;
+    }
+
+    /// Disables issuer clawback authorization for this mock token.
+    pub fn disable_clawback(&self) {
+        *self.clawback_enabled.borrow_mut() = false;
+    }
+
+    /// Marks an account's trustline as clawbackable (or not).
+    ///
+    /// Use this to simulate opening a trustline while
+    /// `AUTH_CLAWBACK_ENABLED_FLAG` is set, or to clear the flag for accounts
+    /// that should not be clawbackable on Mainnet.
+    pub fn mark_trustline_clawbackable(&self, account: &Address, clawbackable: bool) {
+        self.trustline_clawback
+            .borrow_mut()
+            .insert(account.clone(), clawbackable);
+    }
+
+    /// Returns whether `account`'s simulated trustline allows clawback.
+    pub fn is_trustline_clawbackable(&self, account: &Address) -> bool {
+        *self
+            .trustline_clawback
+            .borrow()
+            .get(account)
+            .unwrap_or(&false)
     }
 
     /// Burns tokens from the specified account.
@@ -484,25 +548,36 @@ impl MockToken {
     ///
     /// # Panics
     ///
-    /// The Stellar asset contract only honours clawback when the issuing
-    /// account has the clawback-enabled flag set, and the SDK test utilities
-    /// provide no way to set that flag on a deployed SAC. Calling this on a
-    /// token created by [`MockToken::xlm`] or [`MockToken::new`] therefore
-    /// panics with `Error(Contract, #10)` ("balance isn't clawbackable").
+    /// Panics unless both of the following hold (mirroring Mainnet SAC /
+    /// Classic rules the SDK test SAC cannot configure):
     ///
-    /// To exercise clawback in tests, use
-    /// [`MockStellarAsset`](crate::token::MockStellarAsset), which models the
-    /// flag directly via
-    /// [`enable_clawback`](crate::token::MockStellarAsset::enable_clawback).
+    /// 1. The issuer has enabled clawback via [`enable_clawback`](Self::enable_clawback)
+    ///    (`AUTH_CLAWBACK_ENABLED_FLAG`).
+    /// 2. `from`'s trustline is marked clawbackable (set automatically on
+    ///    [`mint`](Self::mint) while clawback is enabled, or via
+    ///    [`mark_trustline_clawbackable`](Self::mark_trustline_clawbackable)).
+    ///
+    /// When those checks pass, clawback is simulated with an admin burn
+    /// because the deployed test SAC still cannot honour the flag on-chain.
     ///
     /// # Arguments
     ///
     /// * `from` - The address to claw back tokens from
     /// * `amount` - The amount to claw back (in smallest units)
     pub fn clawback(&self, from: &Address, amount: i128) {
+        assert!(
+            self.is_clawback_enabled(),
+            "AUTH_CLAWBACK_ENABLED_FLAG is not set on issuer"
+        );
+        assert!(
+            self.is_trustline_clawbackable(from),
+            "trustline is not clawbackable"
+        );
+        assert!(amount >= 0, "Clawback amount cannot be negative");
+        // Simulate clawback via burn: the test SAC cannot set issuer clawback flags.
         self.env.mock_all_auths();
-        let client = StellarAssetClient::new(&self.env, &self.address);
-        client.clawback(from, &amount);
+        let client = TokenClient::new(&self.env, &self.address);
+        client.burn(from, &amount);
     }
 
     /// Claws back all tokens from an account (admin operation).
@@ -511,7 +586,7 @@ impl MockToken {
     /// balance and claws back the entire amount. If the account has zero balance,
     /// this is a no-op.
     ///
-    /// Subject to the same clawback-flag requirement as
+    /// Subject to the same clawback-flag / trustline requirements as
     /// [`clawback`](Self::clawback).
     ///
     /// # Arguments
@@ -524,8 +599,9 @@ impl MockToken {
     /// use crucible::prelude::*;
     /// let env = MockEnv::builder().build();
     /// let token = MockToken::xlm(&env);
+    /// token.enable_clawback();
     /// let alice = env.account("alice");
-    /// 
+    ///
     /// token.mint(&alice.address(), 1_000_000);
     /// token.clawback_all(&alice.address());
     /// assert_eq!(token.balance(&alice.address()), 0);
@@ -1178,25 +1254,47 @@ mod tests {
 
     #[test]
     fn test_clawback_all_removes_entire_balance() {
-        // A Stellar asset contract only honours clawback when the issuer has
-        // set the clawback-enabled flag, which the SDK test utils cannot set on
-        // a deployed SAC. `MockStellarAsset` models that flag directly.
+        // MockToken simulates AUTH_CLAWBACK_ENABLED_FLAG + trustline clawbackability.
         let env = MockEnv::builder()
-            .with_account("issuer", Stroops::from(0))
             .with_account("alice", Stroops::from(0))
             .build();
 
-        let issuer = env.account("issuer").address();
-        let alice = env.account("alice").address();
+        let token = MockToken::xlm(&env);
+        token.enable_clawback();
+        let alice = env.account("alice");
 
-        let asset = MockStellarAsset::new(&env, issuer, "USD");
-        asset.enable_clawback();
-        asset.authorize(&alice);
-        asset.mint(&alice, 1_000_000);
-        assert_eq!(asset.balance(&alice), 1_000_000);
+        token.mint(&alice.address(), 1_000_000);
+        assert!(token.is_trustline_clawbackable(&alice.address()));
+        assert_eq!(token.balance(&alice.address()), 1_000_000);
 
-        asset.clawback(&alice, asset.balance(&alice));
-        assert_eq!(asset.balance(&alice), 0);
+        token.clawback_all(&alice.address());
+        assert_eq!(token.balance(&alice.address()), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "AUTH_CLAWBACK_ENABLED_FLAG is not set on issuer")]
+    fn test_clawback_without_issuer_flag_panics() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .build();
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        token.mint(&alice.address(), 1_000);
+        token.clawback(&alice.address(), 1_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "trustline is not clawbackable")]
+    fn test_clawback_without_trustline_flag_panics() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::from(0))
+            .build();
+        let token = MockToken::xlm(&env);
+        let alice = env.account("alice");
+        // Mint before enabling clawback → trustline is not clawbackable.
+        token.mint(&alice.address(), 1_000);
+        token.enable_clawback();
+        token.clawback(&alice.address(), 1_000);
     }
 
     #[test]
@@ -1260,30 +1358,23 @@ mod tests {
     #[test]
     fn test_clawback_all_vs_manual_balance_lookup() {
         let env = MockEnv::builder()
-            .with_account("issuer", Stroops::from(0))
             .with_account("alice", Stroops::from(0))
             .with_account("bob", Stroops::from(0))
             .build();
 
-        let issuer = env.account("issuer").address();
-        let alice = env.account("alice").address();
-        let bob = env.account("bob").address();
+        let token = MockToken::xlm(&env);
+        token.enable_clawback();
+        let alice = env.account("alice");
+        let bob = env.account("bob");
 
-        let asset = MockStellarAsset::new(&env, issuer, "USD");
-        asset.enable_clawback();
-        asset.authorize(&alice);
-        asset.authorize(&bob);
-        asset.mint(&alice, 1_000_000);
-        asset.mint(&bob, 1_000_000);
+        token.mint(&alice.address(), 1_000_000);
+        token.mint(&bob.address(), 1_000_000);
 
-        // Clawing back the looked-up balance and clawing back a deliberately
-        // oversized amount must reach the same place: the asset clamps to the
-        // balance on hand.
-        asset.clawback(&alice, asset.balance(&alice));
-        asset.clawback(&bob, i128::MAX);
+        token.clawback_all(&alice.address());
+        token.clawback(&bob.address(), token.balance(&bob.address()));
 
-        assert_eq!(asset.balance(&alice), 0);
-        assert_eq!(asset.balance(&bob), 0);
+        assert_eq!(token.balance(&alice.address()), 0);
+        assert_eq!(token.balance(&bob.address()), 0);
     }
 }
 
@@ -1306,6 +1397,8 @@ pub struct MockStellarAsset {
     clawback_enabled: Rc<RefCell<bool>>,
     balances: Rc<RefCell<BTreeMap<Address, i128>>>,
     trustlines: Rc<RefCell<BTreeMap<Address, bool>>>,
+    /// Per-account trustline clawback flag (Classic AUTH_CLAWBACK on trustline).
+    trustline_clawback: Rc<RefCell<BTreeMap<Address, bool>>>,
     frozen: Rc<RefCell<BTreeMap<Address, bool>>>,
 }
 
@@ -1351,6 +1444,7 @@ impl MockStellarAsset {
             clawback_enabled: Rc::new(RefCell::new(false)),
             balances: Rc::new(RefCell::new(BTreeMap::new())),
             trustlines: Rc::new(RefCell::new(BTreeMap::new())),
+            trustline_clawback: Rc::new(RefCell::new(BTreeMap::new())),
             frozen: Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
@@ -1460,12 +1554,22 @@ impl MockStellarAsset {
 
     /// Claws back tokens from an account (issuer operation).
     ///
-    /// Requires clawback to be enabled.
+    /// Requires clawback to be enabled on the issuer **and** the account's
+    /// trustline to be marked clawbackable (set when [`authorize`](Self::authorize)
+    /// runs while clawback is enabled, matching Classic trustline flags).
     pub fn clawback(&self, from: &Address, amount: i128) {
         assert!(amount >= 0, "Clawback amount cannot be negative");
         assert!(
             self.clawback_enabled(),
             "Clawback is not enabled for this asset"
+        );
+        assert!(
+            *self
+                .trustline_clawback
+                .borrow()
+                .get(from)
+                .unwrap_or(&false),
+            "trustline is not clawbackable"
         );
         self.env.mock_all_auths();
 
@@ -1479,10 +1583,16 @@ impl MockStellarAsset {
 
     /// Authorizes a trustline for the specified account.
     ///
-    /// This emulates the SEP-41 `authorize` call.
+    /// This emulates the SEP-41 `authorize` call. When clawback is enabled on
+    /// the issuer, the trustline is also marked clawbackable.
     pub fn authorize(&self, account: &Address) {
         self.env.mock_all_auths();
         self.trustlines.borrow_mut().insert(account.clone(), true);
+        if self.clawback_enabled() {
+            self.trustline_clawback
+                .borrow_mut()
+                .insert(account.clone(), true);
+        }
     }
 
     /// Deauthorizes a trustline for the specified account.

@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use soroban_sdk::{
-    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, MockAuth, MockAuthInvoke},
-    token, Address, Env, IntoVal, Symbol, Vec,
+    testutils::{Address as _, Ledger},
+    token, Address, Env, Vec,
 };
 use treasury::Treasury;
 
@@ -207,4 +207,77 @@ fn test_reentrancy_guard_protection() {
     // Call withdraw successfully (guard locks then unlocks)
     client.withdraw(&admin1, &token_addr, &1_000, &signers);
     assert_eq!(client.balance_of(&treasury_id, &token_addr), 4_000);
+}
+
+#[test]
+fn test_large_withdraw_is_timelocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (treasury_id, admin1, admin2) = deploy_treasury(&env);
+    let client = treasury::TreasuryClient::new(&env, &treasury_id);
+
+    let (token_addr, _) = create_token(&env);
+    let sac = token::StellarAssetClient::new(&env, &token_addr);
+    sac.mint(&admin1, &50_000);
+    client.deposit(&admin1, &token_addr, &50_000);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin1.clone());
+    signers.push_back(admin2.clone());
+
+    // Amount ≥ default threshold (10_000) → queued, balance reserved immediately.
+    let op_id = client.withdraw(&admin1, &token_addr, &20_000, &signers);
+    assert!(op_id > 0);
+    assert_eq!(client.balance_of(&treasury_id, &token_addr), 30_000);
+
+    let pending = client.get_pending(&op_id).expect("pending op");
+    assert_eq!(pending.amount, 20_000);
+    assert!(!pending.cancelled);
+
+    // Too early — must fail.
+    let early = client.try_execute_withdrawal(&op_id);
+    assert!(early.is_err());
+
+    // Advance ledgers past the timelock.
+    let delay = pending.execute_after.saturating_sub(env.ledger().sequence() as u64);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + delay as u32 + 1);
+
+    client.execute_withdrawal(&op_id);
+    assert!(client.get_pending(&op_id).is_none());
+}
+
+#[test]
+fn test_guardian_can_cancel_queued_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (treasury_id, admin1, admin2) = deploy_treasury(&env);
+    let client = treasury::TreasuryClient::new(&env, &treasury_id);
+
+    let (token_addr, _) = create_token(&env);
+    let sac = token::StellarAssetClient::new(&env, &token_addr);
+    sac.mint(&admin1, &50_000);
+    client.deposit(&admin1, &token_addr, &50_000);
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin1.clone());
+    signers.push_back(admin2.clone());
+
+    let guardian = Address::generate(&env);
+    client.add_guardian(&guardian, &signers);
+
+    let op_id = client.withdraw(&admin1, &token_addr, &25_000, &signers);
+    assert_eq!(client.balance_of(&treasury_id, &token_addr), 25_000);
+
+    client.cancel_withdrawal(&op_id, &guardian);
+    // Reserved funds restored.
+    assert_eq!(client.balance_of(&treasury_id, &token_addr), 50_000);
+
+    let cancelled = client.get_pending(&op_id).expect("still recorded");
+    assert!(cancelled.cancelled);
+
+    let exec = client.try_execute_withdrawal(&op_id);
+    assert!(exec.is_err());
 }

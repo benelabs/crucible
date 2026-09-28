@@ -422,6 +422,9 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let mut field_bindings = Vec::new();
     let mut field_inits = Vec::new();
     let mut has_env = false;
+    // Hygienic temporary for the generated MockEnv so a caller-side `env`
+    // binding cannot accidentally shadow or collide with the macro injection.
+    let env_ident = syn::Ident::new("__crucible_env", proc_macro2::Span::mixed_site());
 
     if let Data::Struct(data) = &ast.data {
         if let Fields::Named(fields) = &data.fields {
@@ -470,19 +473,30 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                 if is_contract_client {
                     if let Some(ct) = contract_ty {
                         contract_types.push(ct.clone());
+                        // Bind client fields with mixed-site hygiene so a user
+                        // local named `client` (or the field's name) in an outer
+                        // macro expansion cannot collide with these temporaries.
+                        let binding = syn::Ident::new(
+                            &format!("__crucible_{}", field_name),
+                            proc_macro2::Span::mixed_site(),
+                        );
                         field_bindings.push(quote! {
-                            let #field_name = <#field_ty>::new(
-                                env.inner(),
-                                &env.contract_id::<#ct>(),
+                            let #binding = <#field_ty>::new(
+                                #env_ident.inner(),
+                                &#env_ident.contract_id::<#ct>(),
                             );
                         });
-                        field_inits.push(quote! { #field_name, });
+                        field_inits.push(quote! { #field_name: #binding, });
                     }
                 } else {
+                    let binding = syn::Ident::new(
+                        &format!("__crucible_{}", field_name),
+                        proc_macro2::Span::mixed_site(),
+                    );
                     field_bindings.push(quote! {
-                        let #field_name = Default::default();
+                        let #binding = Default::default();
                     });
-                    field_inits.push(quote! { #field_name, });
+                    field_inits.push(quote! { #field_name: #binding, });
                 }
             }
         }
@@ -508,12 +522,12 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
             /// a fresh `MockEnv` and wires all `#[contract_client]` fields. Other
             /// fields (besides `env`) are set to their `Default` value.
             pub fn setup() -> Self {
-                let env = #env_init;
-                // Fields are bound before the struct literal so `env` is still
-                // borrowable while the contract clients are built.
+                let #env_ident = #env_init;
+                // Fields are bound before the struct literal so the env binding
+                // is still borrowable while the contract clients are built.
                 #(#field_bindings)*
                 Self {
-                    env,
+                    env: #env_ident,
                     #(#field_inits)*
                 }
             }

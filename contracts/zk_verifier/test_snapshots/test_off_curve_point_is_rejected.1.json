@@ -17,7 +17,7 @@
               "function_name": "register_vk",
               "args": [
                 {
-                  "u64": "404"
+                  "u64": "606"
                 },
                 {
                   "map": [
@@ -155,7 +155,7 @@
                             "symbol": "VerificationKey"
                           },
                           {
-                            "u64": "404"
+                            "u64": "606"
                           }
                         ]
                       },
@@ -236,29 +236,5 @@
       }
     ]
   },
-  "events": [
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "zk_fail"
-              },
-              {
-                "u64": "404"
-              }
-            ],
-            "data": {
-              "u32": 0
-            }
-          }
-        }
-      },
-      "failed_call": false
-    }
-  ]
+  "events": []
 }

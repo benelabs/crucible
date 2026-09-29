@@ -3,8 +3,10 @@
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
 const BPS: i128 = 10_000;
+const LIQUIDATION_BONUS_BPS: i128 = 500;
 const INDEX_SCALE: i128 = 1_000_000_000_000;
 const SECONDS_PER_YEAR: i128 = 31_536_000;
+const INTEREST_DENOMINATOR: i128 = BPS * SECONDS_PER_YEAR;
 
 #[contracttype]
 #[derive(Clone)]
@@ -26,6 +28,7 @@ pub struct ReserveState {
     pub supply_index: i128,
     pub borrow_index: i128,
     pub last_accrual_time: u64,
+    pub interest_remainder: i128,
 }
 
 #[contracttype]
@@ -104,6 +107,7 @@ impl Lending {
                 supply_index: INDEX_SCALE,
                 borrow_index: INDEX_SCALE,
                 last_accrual_time: env.ledger().timestamp(),
+                interest_remainder: 0,
             },
         );
     }
@@ -269,6 +273,57 @@ impl Lending {
             .publish((symbol_short!("repay"), borrower), paid);
     }
 
+    /// Liquidate an unhealthy borrower in exchange for collateral at a 5% bonus.
+    pub fn liquidate(env: Env, liquidator: Address, borrower: Address, repay_amount: i128) {
+        Self::require_positive("repay amount", repay_amount);
+        liquidator.require_auth();
+        let config = Self::config(&env);
+        let mut state = Self::accrue(&env, &config);
+        let mut position = Self::load_position(&env, borrower.clone());
+        let borrowed = Self::scale_up(position.borrowed_scaled, state.borrow_index);
+
+        if borrowed == 0 {
+            panic!("nothing to liquidate");
+        }
+        if position.collateral == 0 {
+            panic!("no collateral to liquidate");
+        }
+        if Self::is_healthy(&position, &state, &config) {
+            panic!("position is healthy");
+        }
+
+        let paid = if repay_amount > borrowed {
+            borrowed
+        } else {
+            repay_amount
+        };
+        let collateral_value = Self::checked_mul(paid, BPS + LIQUIDATION_BONUS_BPS) / BPS;
+        let seized = if collateral_value > position.collateral {
+            position.collateral
+        } else {
+            collateral_value
+        };
+        position.borrowed_scaled = Self::scale_down(borrowed - paid, state.borrow_index);
+        position.collateral = Self::checked_sub(position.collateral, seized);
+        state.total_borrowed = Self::checked_sub(state.total_borrowed, paid);
+        state.total_collateral = Self::checked_sub(state.total_collateral, seized);
+
+        token::TokenClient::new(&env, &config.asset).transfer(
+            &liquidator,
+            &env.current_contract_address(),
+            &paid,
+        );
+        token::TokenClient::new(&env, &config.collateral_asset).transfer(
+            &env.current_contract_address(),
+            &liquidator,
+            &seized,
+        );
+        Self::save_position(&env, borrower.clone(), &position);
+        Self::save_state(&env, &state);
+        env.events()
+            .publish((symbol_short!("liquidate"), borrower), (paid, seized));
+    }
+
     /// Return the current reserve state after applying pending interest.
     pub fn reserve(env: Env) -> ReserveState {
         let config = Self::config(&env);
@@ -298,18 +353,28 @@ impl Lending {
         let mut state: ReserveState = env.storage().instance().get(&DataKey::State).unwrap();
         let now = env.ledger().timestamp();
         let elapsed = now - state.last_accrual_time;
-        if elapsed == 0 || state.total_borrowed == 0 {
+        if elapsed == 0 {
+            state.last_accrual_time = now;
+            env.storage().instance().set(&DataKey::State, &state);
+            return state;
+        }
+        if state.total_borrowed == 0 {
+            state.interest_remainder = 0;
             state.last_accrual_time = now;
             env.storage().instance().set(&DataKey::State, &state);
             return state;
         }
 
         let rate_bps = Self::borrow_rate_bps(config, &state);
-        let interest = Self::checked_mul(
-            Self::checked_mul(state.total_borrowed, rate_bps),
-            elapsed as i128,
-        ) / BPS
-            / SECONDS_PER_YEAR;
+        let interest_numerator = Self::checked_add(
+            state.interest_remainder,
+            Self::checked_mul(
+                Self::checked_mul(state.total_borrowed, rate_bps),
+                elapsed as i128,
+            ),
+        );
+        let interest = interest_numerator / INTEREST_DENOMINATOR;
+        state.interest_remainder = interest_numerator % INTEREST_DENOMINATOR;
         if interest > 0 {
             let prior_supplied = state.total_supplied;
             let prior_borrowed = state.total_borrowed;
@@ -339,12 +404,20 @@ impl Lending {
     }
 
     fn require_healthy(position: &AccountPosition, state: &ReserveState, config: &ReserveConfig) {
+        if !Self::is_healthy(position, state, config) {
+            panic!("insufficient collateral");
+        }
+    }
+
+    fn is_healthy(
+        position: &AccountPosition,
+        state: &ReserveState,
+        config: &ReserveConfig,
+    ) -> bool {
         let borrowed = Self::scale_up(position.borrowed_scaled, state.borrow_index);
         let borrow_limit =
             Self::checked_mul(position.collateral, config.collateral_factor_bps) / BPS;
-        if borrowed > borrow_limit {
-            panic!("insufficient collateral");
-        }
+        borrowed <= borrow_limit
     }
 
     fn available_liquidity(state: &ReserveState) -> i128 {

@@ -54,6 +54,14 @@ impl AccountHandle {
     }
 
     /// Returns the account's balance in a given token.
+    ///
+    /// Equivalent to `token.balance(&account.address())` — both query the
+    /// same underlying token contract storage on the shared [`MockEnv`], so
+    /// either form reflects the live balance, including amounts minted via
+    /// [`MockToken::mint`](crate::token::MockToken::mint) after the account
+    /// was created. Prefer this method when you already hold an
+    /// `AccountHandle` and want to avoid re-deriving the address; prefer
+    /// `token.balance(..)` when you only have the address.
     pub fn token_balance(&self, token: &MockToken) -> i128 {
         token.balance(&self.address)
     }
@@ -241,6 +249,23 @@ mod tests {
         // Should be retrievable from env
         let charlie_ref = env.account("charlie");
         assert_eq!(charlie_ref.address(), charlie.address());
+    }
+
+    #[test]
+    fn test_token_balance_reflects_mint_after_account_creation() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::xlm(1_000))
+            .build();
+
+        let usdc = MockToken::new(&env, "USDC", 6);
+        let alice = env.account("alice");
+
+        // Mint happens after the account handle already exists.
+        usdc.mint(&alice.address(), 5_000_000);
+
+        assert_eq!(alice.token_balance(&usdc), 5_000_000);
+        // Both query paths must agree.
+        assert_eq!(usdc.balance(&alice.address()), 5_000_000);
     }
 
     #[test]

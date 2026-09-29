@@ -249,6 +249,8 @@ The `AccountHandle` type gives you:
 | `.token_balance(&token)` | `i128` | Balance in a given `MockToken` |
 | `.sign(payload)` | `Vec<u8>` | Sign an arbitrary payload with the account keypair |
 
+`account.token_balance(&token)` and `token.balance(&account.address())` are two equivalent ways to query the same live balance — both read the same underlying token contract storage on the shared `MockEnv`, so either reflects amounts minted at any point, including after the account was created. Use whichever reads better at the call site: the account-first form when you already have an `AccountHandle`, the token-first form when you only have an `Address`.
+
 Authorization in tests is driven through `MockEnv`:
 
 - `env.mock_all_auths()` — globally bypasses authorization checks for all subsequent calls.

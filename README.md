@@ -27,6 +27,7 @@ It is a purpose-built Rust testing library for Soroban — analogous to what jes
   - [Token Contracts](#token-contracts)
   - [Transaction Simulation](#transaction-simulation)
   - [Event Assertions](#event-assertions)
+  - [Testing Cross-Contract Calls](#testing-cross-contract-calls)
   - [Gas & Fee Estimation](#gas--fee-estimation)
   - [Custom Fixtures](#custom-fixtures)
 - [API Reference](#api-reference)
@@ -484,6 +485,88 @@ assert_eq!(events.len(), 2);
 
 let first: TransferData = events[0].data();
 assert_eq!(first.amount, 500_i128);
+```
+
+---
+
+### Testing Cross-Contract Calls
+
+Contracts rarely work in isolation — a router calls a counter, an aggregator calls a router, a pool calls a token. crucible registers every contract in the same `MockEnv`, so cross-contract calls execute exactly as they would on-chain, and every frame of the call is inspectable from the test.
+
+The `examples/cross-contract` crate is a complete, compiling reference for everything in this section: `Counter` ← `Router` ← `Aggregator`, a two-level call chain with token transfers and events at every level.
+
+#### Registering Dependent Contracts
+
+Register each contract with `.with_contract::<C>()` before `.build()`. Order does not matter — `MockEnv` assigns each contract its own address up front, so contracts can reference each other's addresses at `initialize` time regardless of registration order:
+
+```rust
+let env = MockEnv::builder()
+    .with_contract::<Counter>()
+    .with_contract::<Router>()
+    .with_contract::<Aggregator>()
+    .with_account("alice", Stroops::xlm(100))
+    .build();
+```
+
+#### Routing Contract IDs
+
+Look up each registered contract's address with `env.contract_id::<C>()`, then wire dependent contracts together through their own `initialize` calls — the same way a deployer would on a live network:
+
+```rust
+let counter_id = env.contract_id::<Counter>();
+let router_id  = env.contract_id::<Router>();
+let agg_id     = env.contract_id::<Aggregator>();
+
+env.mock_all_auths();
+RouterClient::new(env.inner(), &router_id).initialize(&counter_id, &token.address());
+AggregatorClient::new(env.inner(), &agg_id).initialize(&router_id);
+```
+
+From here, calling `AggregatorClient::new(env.inner(), &agg_id).aggregate_ping()` drives the full chain — `Aggregator` → `Router` → `Counter` — inside a single test call.
+
+#### Event Assertions in Nested Calls
+
+`assert_emitted!` takes the emitting contract's address as its second argument, so you can assert on events published deep inside the call tree, not just the outermost call. Given `Aggregator::aggregate_ping()` calls `Router::ping_counter()` which calls `Counter::increment()`, each contract's own event is asserted against its own id:
+
+```rust
+agg_client.aggregate_ping();
+
+// The outer contract's event...
+assert_emitted!(env, agg_id, (symbol_short!("aggping"),), 1_u32);
+// ...and the inner contract's event from the same call, asserted independently.
+assert_emitted!(env, counter_id, (symbol_short!("incr"),), 1_u32);
+```
+
+#### Authorization Chains
+
+`env.mock_all_auths()` bypasses `require_auth()` everywhere for the rest of the test — including inside inner contracts reached via cross-contract calls, since the bypass lives on the shared `soroban_sdk::Env` every registered contract runs on. This is why a single `env.mock_all_auths()` before `aggregator.aggregate_transfer(&alice, &bob, &amount)` is enough to satisfy the `from.require_auth()` calls in both `Aggregator::aggregate_transfer` and `Router::route_transfer`.
+
+To test authorization failures in a call chain, use `env.mock_auths(&[..])` with an explicit tree instead — it authorizes only the specific invocation described, so a mismatched or missing entry anywhere in the chain still fails with the real auth error. See [Fluent Revert Assertions](#fluent-revert-assertions) for asserting that failure cleanly. Prefer [`with_mock_all_auths`](#pre-funded-accounts) or `mock_all_auths_scoped()` to contain the bypass to part of a test rather than leaving it enabled for everything that follows.
+
+#### Debugging Tips: Reading Nested Call Traces
+
+When a multi-level call does something unexpected, wrap it in `env.trace()` to capture the full invocation tree instead of guessing from the final state:
+
+```rust
+let (out_amount, trace) = env.trace(|| {
+    agg_client.aggregate_transfer(&alice, &bob, &500_i128)
+});
+
+trace.assert_called("transfer");           // panics with the tree printed if `transfer` never ran
+assert_eq!(trace.max_depth(), 2);          // Aggregator(0) -> Router(1) -> Token(2)
+println!("{}", trace.to_tree_string());    // human-readable call tree for CI logs
+```
+
+If the call panics partway through the chain, `env.try_trace()` captures the frames recorded up to the failure instead of unwinding past them:
+
+```rust
+let (result, trace) = env.try_trace(|| {
+    agg_client.aggregate_transfer(&alice, &bob, &too_much)
+});
+
+assert!(result.is_err());
+let failed = trace.panicked_frames();
+assert_eq!(failed[0].function, "transfer"); // exactly which frame in the chain broke
 ```
 
 ---

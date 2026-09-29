@@ -2153,6 +2153,32 @@ impl MockEnvBuilder {
         self
     }
 
+    /// Register multiple mock tokens at once.
+    ///
+    /// Equivalent to calling [`with_token`](Self::with_token) once per entry.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let env = MockEnv::builder()
+    ///     .with_tokens([
+    ///         ("USDC", 6),
+    ///         ("EURC", 6),
+    ///         ("BTC",  8),
+    ///         ("ETH",  18),
+    ///     ])
+    ///     .build();
+    /// ```
+    pub fn with_tokens<'a, I>(mut self, tokens: I) -> Self
+    where
+        I: IntoIterator<Item = (&'a str, u32)>,
+    {
+        for (symbol, decimals) in tokens {
+            self = self.with_token(symbol, decimals);
+        }
+        self
+    }
+
     /// Stops the environment writing a test snapshot file when it is dropped.
     ///
     /// The Soroban test host writes a JSON snapshot per `Env` by default, which
@@ -2200,6 +2226,42 @@ impl MockEnvBuilder {
             self.env.register_token(&symbol, token);
         }
         self.env
+    }
+}
+
+#[cfg(test)]
+mod builder_tests {
+    use super::*;
+
+    #[test]
+    fn with_tokens_registers_every_entry() {
+        let env = MockEnv::builder()
+            .with_tokens([("USDC", 6), ("EURC", 6), ("BTC", 8)])
+            .build();
+
+        assert_eq!(env.token("USDC").decimals(), 6);
+        assert_eq!(env.token("EURC").decimals(), 6);
+        assert_eq!(env.token("BTC").decimals(), 8);
+    }
+
+    #[test]
+    fn with_tokens_matches_repeated_with_token_calls() {
+        let via_with_tokens = MockEnv::builder()
+            .with_tokens([("USDC", 6), ("BTC", 8)])
+            .build();
+        let via_with_token = MockEnv::builder()
+            .with_token("USDC", 6)
+            .with_token("BTC", 8)
+            .build();
+
+        assert_eq!(
+            via_with_tokens.token("USDC").decimals(),
+            via_with_token.token("USDC").decimals()
+        );
+        assert_eq!(
+            via_with_tokens.token("BTC").decimals(),
+            via_with_token.token("BTC").decimals()
+        );
     }
 }
 

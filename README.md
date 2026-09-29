@@ -691,6 +691,7 @@ MockEnv::builder()
 
     // Token setup
     .with_token(symbol: &str, decimals: u32)   -> Self
+    .with_tokens(tokens: impl IntoIterator<Item = (&str, u32)>) -> Self
 
     // Diagnostics
     .track_costs()                             -> Self

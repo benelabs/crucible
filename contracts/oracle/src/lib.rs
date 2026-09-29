@@ -1,6 +1,9 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
 
+/// Maximum allowed price deviation per update: 15%
+const MAX_PRICE_DEVIATION_BPS: i128 = 1500; // basis points (15% = 1500 bps)
+
 #[contracttype]
 #[derive(Clone)]
 struct PriceData {
@@ -96,6 +99,20 @@ impl Oracle {
             return Err("Price must be positive");
         }
 
+        // Check price deviation against previous price
+        if let Some(prev_price_data) = storage.get::<_, PriceData>(&DataKey::Price(symbol.clone())) {
+            let prev_price = prev_price_data.price;
+            if prev_price > 0 {
+                // Calculate absolute percentage deviation in basis points
+                let price_diff = (price - prev_price).abs();
+                let deviation_bps = (price_diff * 10000) / prev_price;
+
+                if deviation_bps > MAX_PRICE_DEVIATION_BPS {
+                    return Err("Price deviation exceeds maximum threshold of 15%");
+                }
+            }
+        }
+
         let timestamp = env.ledger().timestamp();
 
         // Store latest price
@@ -137,7 +154,7 @@ impl Oracle {
             .ok_or("Price not found")
     }
 
-    /// Aggregate prices from multiple sources (average)
+    /// Aggregate prices from multiple sources using median
     pub fn aggregate_price(env: Env, symbol: String, num_sources: u64) -> Result<i128, &'static str> {
         if num_sources == 0 {
             return Err("num_sources must be positive");
@@ -145,13 +162,97 @@ impl Oracle {
 
         let storage = env.storage().instance();
 
-        // For MVP, return the latest price
-        // In production, this would aggregate from multiple sources
-        let price_data: PriceData = storage
-            .get(&DataKey::Price(symbol))
+        // Get current price and verify we have enough data
+        let current_price: PriceData = storage
+            .get(&DataKey::Price(symbol.clone()))
             .ok_or("Price not found")?;
 
-        Ok(price_data.price)
+        // Count active sources
+        let source_counter: u64 = storage.get(&DataKey::SourceCounter).unwrap_or(0);
+        let mut active_count = 0u64;
+
+        for source_id in 1..=source_counter {
+            if let Some(source) = storage.get::<_, DataSource>(&DataKey::DataSource(source_id)) {
+                if source.active {
+                    active_count += 1;
+                }
+            }
+        }
+
+        // If num_sources is 1 or we have fewer active sources, return current price
+        if num_sources == 1 || active_count < 2 {
+            return Ok(current_price.price);
+        }
+
+        // For median calculation, we use the current price as one data point
+        // and simulate getting prices from multiple sources
+        // In production, each source would have its own price entry
+        let mut prices: Vec<i128> = Vec::new(&env);
+        
+        // Add current price as the base
+        prices.push_back(current_price.price);
+
+        // For now, we use the price history to gather additional price points
+        // This is a simplified implementation - production would track per-source prices
+        let current_time = env.ledger().timestamp();
+        
+        // Try to get historical prices from the last hour (3600 seconds)
+        let lookback = 3600u64;
+        let start_time = current_time.saturating_sub(lookback);
+        
+        // Collect up to num_sources price points from history
+        let mut found = 1u64;
+        let mut t = start_time;
+        
+        while found < num_sources && t < current_time {
+            if let Some(price) = storage.get::<_, i128>(&DataKey::PriceHistory(symbol.clone(), t)) {
+                if price != current_price.price {
+                    prices.push_back(price);
+                    found += 1;
+                    if found >= num_sources {
+                        break;
+                    }
+                }
+            }
+            t += 1; // Check each second
+        }
+
+        if prices.len() < 2 {
+            // Not enough historical data, return current price with warning
+            return Ok(current_price.price);
+        }
+
+        // Sort prices to find median
+        let len = prices.len();
+        
+        // Simple selection sort for small arrays
+        for i in 0..len {
+            let mut min_idx = i;
+            for j in (i + 1)..len {
+                if prices.get(j).unwrap_or(&i128::MAX) < prices.get(min_idx).unwrap_or(&i128::MAX) {
+                    min_idx = j;
+                }
+            }
+            if min_idx != i {
+                let temp = *prices.get(i).unwrap_or(&0);
+                let min_val = *prices.get(min_idx).unwrap_or(&0);
+                // Manual swap since we can't do tuple assignment easily
+                prices.set(i, min_val);
+                prices.set(min_idx, temp);
+            }
+        }
+
+        // Return median
+        let mid = prices.len() / 2;
+        if prices.len() % 2 == 0 {
+            // Even: average of two middle values
+            let v1 = *prices.get(mid - 1).unwrap_or(&0);
+            let v2 = *prices.get(mid).unwrap_or(&0);
+            Ok((v1 + v2) / 2)
+        } else {
+            // Odd: middle value
+            Ok(*prices.get(mid).unwrap_or(&0))
+        }
     }
 
     /// Get data source details
@@ -221,7 +322,9 @@ impl Oracle {
             .get(&DataKey::Price(symbol))
             .ok_or("Price not found")?;
 
-        let age = env.ledger().timestamp() - price_data.timestamp;
+        // Use saturating subtraction to prevent underflow if clock drifts backward
+        let current_time = env.ledger().timestamp();
+        let age = current_time.saturating_sub(price_data.timestamp);
         Ok(age <= max_age_seconds)
     }
 }

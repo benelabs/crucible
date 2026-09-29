@@ -116,7 +116,16 @@ async fn main() -> Result<(), anyhow::Error> {
     tokio::spawn(LogAggregator::run_worker(log_receiver));
 
     let conn = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
-    let storage: RedisStorage<TransactionMonitorJob> = RedisStorage::new(conn);
+    // A job's lease/heartbeat window: if the worker holding a job stops
+    // renewing its lock (e.g. the Redis connection drops mid-flight during a
+    // Sentinel failover), the job is requeued after this duration instead of
+    // being silently lost. `max_retries` bounds how many times a requeued job
+    // is retried before apalis considers it permanently failed.
+    let storage_config = apalis_redis::Config::default()
+        .set_reenqueue_orphaned_after(std::time::Duration::from_secs(300))
+        .set_max_retries(5);
+    let storage: RedisStorage<TransactionMonitorJob> =
+        RedisStorage::new_with_config(conn, storage_config);
     tracing::info!("Redis connection established");
 
     let worker = WorkerBuilder::new("monitor-worker")

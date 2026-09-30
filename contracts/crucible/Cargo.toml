@@ -16,12 +16,9 @@ categories = ["development-tools::testing"]
 crate-type = ["rlib"]
 
 [features]
-std = []
-snapshots = ["std", "serde", "serde_json"]
+snapshots = ["serde", "serde_json"]
 default = ["derive"]
 derive = ["dep:crucible-macros"]
-full = ["snapshots", "derive"]
-
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }

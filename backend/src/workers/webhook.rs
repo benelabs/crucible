@@ -99,7 +99,7 @@ impl WebhookDispatcherWorker {
         computed.as_bytes().ct_eq(expected_signature.as_bytes()).into()
     }
 
-    /// Calculate exponential retry backoff duration with full jitter for a given attempt.
+    /// Calculate exponential retry backoff duration for a given attempt.
     pub fn calculate_retry_delay(&self, attempt: u32) -> Duration {
         let factor = 2u64.saturating_pow(attempt.saturating_sub(1));
         let max_delay_ms = self.base_delay_secs.saturating_mul(factor).saturating_mul(1000);

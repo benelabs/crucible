@@ -40,7 +40,7 @@ pub struct VoteRecord {
 pub struct EscrowState {
     pub depositor: Address,
     pub recipient: Address,
-    /// All registered arbiters; any one may approve.
+    /// All registered arbiters; legacy approval is available only for quorum one.
     pub arbiters: Vec<Address>,
     pub token: Address,
     pub amount: i128,
@@ -134,6 +134,9 @@ impl MultiArbiterEscrow {
         let mut state: EscrowState = env.storage().instance().get(&DataKey::State).unwrap();
         if state.status != EscrowStatus::Pending {
             panic!("escrow is not pending");
+        }
+        if state.quorum > 1 {
+            panic!("approve is disabled for quorum escrows");
         }
         if !state.arbiters.contains(&caller) {
             panic!("caller is not a registered arbiter");

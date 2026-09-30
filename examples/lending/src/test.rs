@@ -157,6 +157,45 @@ fn test_repay_caps_overpayment_to_current_debt() {
 }
 
 #[test]
+fn test_liquidate_unhealthy_position_repays_debt_and_seizes_bonus_collateral() {
+    let ctx = Ctx::setup();
+    ctx.fund_pool_and_collateral();
+    ctx.env.mock_all_auths();
+    ctx.client().withdraw_collateral(&ctx.borrower, &COLLATERAL);
+    ctx.client()
+        .deposit_collateral(&ctx.borrower, &1_000_000_i128);
+    ctx.client().borrow(&ctx.borrower, &750_000_i128);
+
+    ctx.env.advance_time(Duration::days(365));
+    let debt_before = ctx.client().position(&ctx.borrower).borrowed;
+    assert!(debt_before > 750_000);
+
+    ctx.client()
+        .liquidate(&ctx.lender, &ctx.borrower, &100_000_i128);
+
+    let position = ctx.client().position(&ctx.borrower);
+    assert_eq!(position.borrowed, debt_before - 100_000);
+    assert_eq!(position.collateral, 895_000);
+    assert_eq!(ctx.collateral.balance(&ctx.lender), 105_000);
+    assert_eq!(ctx.client().reserve().total_borrowed, debt_before - 100_000);
+    assert_eq!(ctx.client().reserve().total_collateral, 895_000);
+}
+
+#[test]
+fn test_liquidate_healthy_position_reverts() {
+    let ctx = Ctx::setup();
+    ctx.fund_pool_and_collateral();
+    ctx.env.mock_all_auths();
+    ctx.client().borrow(&ctx.borrower, &500_000_i128);
+
+    assert_reverts!(
+        ctx.client()
+            .liquidate(&ctx.lender, &ctx.borrower, &100_000_i128),
+        "position is healthy"
+    );
+}
+
+#[test]
 fn test_interest_accrues_to_debt_and_supply() {
     let ctx = Ctx::setup();
     ctx.fund_pool_and_collateral();
@@ -171,6 +210,21 @@ fn test_interest_accrues_to_debt_and_supply() {
     assert_eq!(borrower.borrowed, 562_500);
     assert_eq!(lender.supplied, 1_062_500);
     assert_eq!(ctx.client().reserve().total_borrowed, 562_500);
+}
+
+#[test]
+fn test_frequent_accruals_carry_fractional_interest() {
+    let ctx = Ctx::setup();
+    ctx.fund_pool_and_collateral();
+    ctx.env.mock_all_auths();
+    ctx.client().borrow(&ctx.borrower.address(), &500_000_i128);
+
+    for _ in 0..1_000 {
+        ctx.env.advance_time(Duration::seconds(1));
+        ctx.client().reserve();
+    }
+
+    assert!(ctx.client().position(&ctx.borrower).borrowed > 500_000);
 }
 
 #[test]

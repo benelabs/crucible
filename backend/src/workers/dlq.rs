@@ -50,6 +50,7 @@ impl DeadLetterQueue {
             reason = %job.failure_reason,
             "Routing permanently failed job to Dead Letter Queue (DLQ)"
         );
+        crate::services::metrics::inc_worker_job_dropped_metric();
 
         let json_data = serde_json::to_string(&job).map_err(AppError::Serialization)?;
         let hash_key = format!("{}:map", self.queue_key);

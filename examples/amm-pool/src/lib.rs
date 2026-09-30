@@ -170,7 +170,10 @@ impl AmmPoolContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger},
+        Address, Env,
+    };
 
     #[test]
     fn test_amm_deposit_and_swap_maintains_k_invariant() {
@@ -203,5 +206,44 @@ mod tests {
 
         // K invariant must be maintained or increased due to 0.3% LP fees
         assert!(k_end >= k_start);
+    }
+
+    #[test]
+    #[should_panic(expected = "transaction expired past deadline")]
+    fn test_swap_rejects_expired_deadline() {
+        let env = Env::default();
+        let contract_id = env.register(AmmPoolContract, ());
+        let client = AmmPoolContractClient::new(&env, &contract_id);
+
+        let user = Address::generate(&env);
+        let token_a = Address::generate(&env);
+        let token_b = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.initialize(&token_a, &token_b);
+        client.deposit(&user, &1000, &1000);
+
+        env.ledger().set_timestamp(10);
+        // deadline = 5 is already in the past → must panic before reserves change
+        let _ = client.swap(&user, &true, &100, &1, &5);
+    }
+
+    #[test]
+    #[should_panic(expected = "slippage limit exceeded")]
+    fn test_swap_rejects_excessive_slippage() {
+        let env = Env::default();
+        let contract_id = env.register(AmmPoolContract, ());
+        let client = AmmPoolContractClient::new(&env, &contract_id);
+
+        let user = Address::generate(&env);
+        let token_a = Address::generate(&env);
+        let token_b = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.initialize(&token_a, &token_b);
+        client.deposit(&user, &1000, &1000);
+
+        // Demand an impossible min_amount_out so slippage guard fires.
+        let _ = client.swap(&user, &true, &100, &999_999, &1000);
     }
 }

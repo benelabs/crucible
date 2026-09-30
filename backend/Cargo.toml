@@ -95,7 +95,7 @@ apalis-redis = "0.6"
 
 # Scheduler
 tokio-util = "0.7"
-cron = "0.12"
+cron = "0.17"
 
 # CSV serialization
 # `csv` has serde support built in; there is no `serde` feature to enable.

@@ -473,30 +473,19 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                 if is_contract_client {
                     if let Some(ct) = contract_ty {
                         contract_types.push(ct.clone());
-                        // Bind client fields with mixed-site hygiene so a user
-                        // local named `client` (or the field's name) in an outer
-                        // macro expansion cannot collide with these temporaries.
-                        let binding = syn::Ident::new(
-                            &format!("__crucible_{}", field_name),
-                            proc_macro2::Span::mixed_site(),
-                        );
                         field_bindings.push(quote! {
-                            let #binding = <#field_ty>::new(
-                                #env_ident.inner(),
-                                &#env_ident.contract_id::<#ct>(),
+                            let #field_name = <#field_ty>::new(
+                                env.inner(),
+                                &env.contract_id::<#ct>(),
                             );
                         });
-                        field_inits.push(quote! { #field_name: #binding, });
+                        field_inits.push(quote! { #field_name, });
                     }
                 } else {
-                    let binding = syn::Ident::new(
-                        &format!("__crucible_{}", field_name),
-                        proc_macro2::Span::mixed_site(),
-                    );
                     field_bindings.push(quote! {
-                        let #binding = Default::default();
+                        let #field_name = Default::default();
                     });
-                    field_inits.push(quote! { #field_name: #binding, });
+                    field_inits.push(quote! { #field_name, });
                 }
             }
         }
@@ -522,9 +511,9 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
             /// a fresh `MockEnv` and wires all `#[contract_client]` fields. Other
             /// fields (besides `env`) are set to their `Default` value.
             pub fn setup() -> Self {
-                let #env_ident = #env_init;
-                // Fields are bound before the struct literal so the env binding
-                // is still borrowable while the contract clients are built.
+                let env = #env_init;
+                // Fields are bound before the struct literal so `env` is still
+                // borrowable while the contract clients are built.
                 #(#field_bindings)*
                 Self {
                     env: #env_ident,

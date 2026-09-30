@@ -13,6 +13,7 @@ Object.defineProperty(navigator, 'clipboard', {
 describe('WalletConnector', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -113,14 +114,54 @@ describe('WalletConnector', () => {
     expect(screen.getByText(/Albedo/)).toBeInTheDocument();
   });
 
-  it('disables network tabs while connected', async () => {
+  it('confirms network changes and reconnects the active wallet', async () => {
     render(<WalletConnector />);
 
     fireEvent.click(screen.getByTestId('connect-freighter'));
     await waitFor(() => screen.getByTestId('connected-panel'), { timeout: 2000 });
 
-    expect(screen.getByTestId('network-tab-mainnet')).toBeDisabled();
-    expect(screen.getByTestId('network-tab-testnet')).toBeDisabled();
+    const futurenetTab = screen.getByTestId('network-tab-futurenet');
+    expect(futurenetTab).not.toBeDisabled();
+    fireEvent.click(futurenetTab);
+
+    expect(screen.getByTestId('network-switch-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('connected-network')).toHaveTextContent('Testnet');
+    fireEvent.click(screen.getByTestId('cancel-network-switch'));
+    expect(screen.queryByTestId('network-switch-dialog')).not.toBeInTheDocument();
+    expect(screen.getByTestId('connected-network')).toHaveTextContent('Testnet');
+
+    fireEvent.click(futurenetTab);
+    fireEvent.click(screen.getByTestId('confirm-network-switch'));
+    expect(screen.getByTestId('connecting-panel')).toBeInTheDocument();
+    await waitFor(() => screen.getByTestId('connected-panel'), { timeout: 2000 });
+    expect(screen.getByTestId('connected-network')).toHaveTextContent('Futurenet');
+  });
+
+  it('restores saved wallet metadata after remounting', async () => {
+    const firstRender = render(<WalletConnector />);
+
+    fireEvent.click(screen.getByTestId('connect-albedo'));
+    await waitFor(() => screen.getByTestId('connected-panel'), { timeout: 2000 });
+    const savedPublicKey = screen.getByTestId('connected-pubkey').textContent;
+    expect(localStorage.getItem('crucible_wallet_connection')).not.toBeNull();
+
+    firstRender.unmount();
+    render(<WalletConnector />);
+
+    expect(screen.getByTestId('connected-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('connected-pubkey')).toHaveTextContent(savedPublicKey ?? '');
+    expect(screen.getByTestId('connected-network')).toHaveTextContent('Testnet');
+    expect(screen.getByText(/Albedo/)).toBeInTheDocument();
+  });
+
+  it('falls back safely when saved connection data is invalid', () => {
+    localStorage.setItem('crucible_wallet_connection', '{invalid');
+
+    render(<WalletConnector />);
+
+    expect(screen.getByTestId('wallet-list')).toBeInTheDocument();
+    expect(screen.getByTestId('network-tab-testnet')).toHaveClass('active');
+    expect(screen.queryByTestId('connected-panel')).not.toBeInTheDocument();
   });
 
   // ── Disconnect ────────────────────────────────────────────────────────────

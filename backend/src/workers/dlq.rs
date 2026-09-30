@@ -78,19 +78,17 @@ impl DeadLetterQueue {
             .await
             .map_err(AppError::Redis)?;
 
-        let mut jobs = Vec::new();
-        let hash_key = format!("{}:map", self.queue_key);
-
-        for id in job_ids {
-            let json_str: Option<String> = conn.hget(&hash_key, &id).await.map_err(AppError::Redis)?;
-            if let Some(data) = json_str {
-                if let Ok(job) = serde_json::from_str::<DeadLetterJob>(&data) {
-                    jobs.push(job);
-                }
-            }
+        if job_ids.is_empty() {
+            return Ok(Vec::new());
         }
 
-        Ok(jobs)
+        let hash_key = format!("{}:map", self.queue_key);
+        let job_data: Vec<Option<String>> = conn
+            .hmget(&hash_key, &job_ids)
+            .await
+            .map_err(AppError::Redis)?;
+
+        Ok(deserialize_jobs(job_data))
     }
 
     /// Retrieves a single dead letter job by ID.
@@ -132,5 +130,48 @@ impl DeadLetterQueue {
 
         info!(job_id = %job_id, "Purged job from DLQ");
         Ok(())
+    }
+}
+
+fn deserialize_jobs(job_data: Vec<Option<String>>) -> Vec<DeadLetterJob> {
+    job_data
+        .into_iter()
+        .flatten()
+        .filter_map(|data| serde_json::from_str::<DeadLetterJob>(&data).ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_jobs_preserves_order_and_skips_missing_or_invalid_entries() {
+        let now = Utc::now();
+        let first = DeadLetterJob {
+            id: "first".to_string(),
+            job_name: "task".to_string(),
+            payload: serde_json::json!({}),
+            failure_reason: "failed".to_string(),
+            attempts: 1,
+            first_failed_at: now,
+            failed_at: now,
+        };
+        let last = DeadLetterJob {
+            id: "last".to_string(),
+            ..first.clone()
+        };
+
+        let jobs = deserialize_jobs(vec![
+            Some(serde_json::to_string(&first).unwrap()),
+            None,
+            Some("not valid JSON".to_string()),
+            Some(serde_json::to_string(&last).unwrap()),
+        ]);
+
+        assert_eq!(
+            jobs.iter().map(|job| job.id.as_str()).collect::<Vec<_>>(),
+            vec!["first", "last"]
+        );
     }
 }

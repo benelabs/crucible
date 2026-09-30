@@ -4,7 +4,7 @@
 //! - `assert_reverts!` — assert a contract call panics (reverts)
 //! - `assert_emitted!` — assert a specific event was emitted
 //! - `assert_not_emitted!` — assert no events were emitted
-//! - `assert_approx_eq!` — assert approximate numeric equality within tolerance
+//! - `assert_approx_eq!` — assert two numeric values are within a tolerance
 
 /// Asserts that a contract invocation panics (reverts).
 ///
@@ -580,6 +580,72 @@ macro_rules! assert_auth_tree {
     }};
 }
 
+/// Asserts that two numeric values are within a given tolerance of each other.
+///
+/// Useful when comparing amounts derived from fee splits, pro-rata payouts,
+/// price conversions, or any other calculation where rounding makes exact
+/// equality too strict, but the values must still land within an acceptable
+/// margin of each other. Works with any type supporting subtraction,
+/// ordering, and `Debug` (e.g. `i128`, `u128`, `i64`, `u64`).
+///
+/// # Example
+///
+/// ```ignore
+/// assert_approx_eq!(computed_amount, 1_000_000_i128, 5);
+/// assert_approx_eq!(computed_amount, 1_000_000_i128, 5, "fee split rounding");
+/// ```
+#[macro_export]
+macro_rules! assert_approx_eq {
+    ($left:expr, $right:expr, $tolerance:expr) => {{
+        let __left = $left;
+        let __right = $right;
+        let __tolerance = $tolerance;
+        let __diff = if __left > __right {
+            __left - __right
+        } else {
+            __right - __left
+        };
+        assert!(
+            __diff <= __tolerance,
+            "assert_approx_eq! failed: values are not within tolerance.\n\
+             \n\
+             Left      : {left:?}\n\
+             Right     : {right:?}\n\
+             Diff      : {diff:?}\n\
+             Tolerance : {tolerance:?}",
+            left = __left,
+            right = __right,
+            diff = __diff,
+            tolerance = __tolerance,
+        );
+    }};
+    ($left:expr, $right:expr, $tolerance:expr, $msg:literal) => {{
+        let __left = $left;
+        let __right = $right;
+        let __tolerance = $tolerance;
+        let __diff = if __left > __right {
+            __left - __right
+        } else {
+            __right - __left
+        };
+        assert!(
+            __diff <= __tolerance,
+            "assert_approx_eq! failed: values are not within tolerance.\n\
+             \n\
+             Left      : {left:?}\n\
+             Right     : {right:?}\n\
+             Diff      : {diff:?}\n\
+             Tolerance : {tolerance:?}\n\
+             Context   : {ctx}",
+            left = __left,
+            right = __right,
+            diff = __diff,
+            tolerance = __tolerance,
+            ctx = $msg,
+        );
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use crate::env::MockEnv;
@@ -614,16 +680,21 @@ mod tests {
     }
 
     #[test]
-    fn test_assert_approx_eq_accepts_values_within_tolerance() {
-        crate::assert_approx_eq!(100_i128, 102_i128, 2_i128);
-        crate::assert_approx_eq!(10.0_f64, 10.01_f64, 0.02_f64);
+    fn test_assert_approx_eq_passes_within_tolerance() {
+        crate::assert_approx_eq!(1_000_000_i128, 1_000_003_i128, 5_i128);
+        crate::assert_approx_eq!(1_000_003_i128, 1_000_000_i128, 5_i128);
+        crate::assert_approx_eq!(42_u64, 42_u64, 0_u64);
     }
 
     #[test]
-    fn test_assert_approx_eq_panics_when_outside_tolerance() {
-        let result = std::panic::catch_unwind(|| {
-            crate::assert_approx_eq!(100_i128, 105_i128, 2_i128);
-        });
-        assert!(result.is_err());
+    #[should_panic(expected = "assert_approx_eq! failed")]
+    fn test_assert_approx_eq_fails_outside_tolerance() {
+        crate::assert_approx_eq!(1_000_000_i128, 1_000_010_i128, 5_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "fee split rounding")]
+    fn test_assert_approx_eq_includes_custom_message() {
+        crate::assert_approx_eq!(100_i128, 200_i128, 1_i128, "fee split rounding");
     }
 }

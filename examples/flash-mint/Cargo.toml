@@ -1,5 +1,4 @@
 [package]
-license.workspace = true
 name = "crucible-example-flash-mint"
 version.workspace = true
 edition.workspace = true

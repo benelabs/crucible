@@ -131,3 +131,37 @@ fn test_flash_mint_reverts_on_invalid_callback() {
     let data = Bytes::from_slice(&env, b"fail_callback");
     token_client.flash_loan(&borrower_id, &token_id, &10_000_i128, &data);
 }
+
+#[contract]
+pub struct ReentrantBorrower;
+
+#[contractimpl]
+impl ReentrantBorrower {
+    pub fn on_flash_loan(
+        env: Env,
+        _initiator: Address,
+        token: Address,
+        amount: i128,
+        _fee: i128,
+        _data: Bytes,
+    ) -> BytesN<32> {
+        let token_client = FlashMintTokenClient::new(&env, &token);
+        token_client.flash_loan(&env.current_contract_address(), &token, &amount, &Bytes::new(&env));
+        BytesN::from_array(&env, &FLASH_LOAN_CALLBACK_SUCCESS)
+    }
+}
+
+#[test]
+#[should_panic(expected = "reentrancy detected")]
+fn test_flash_mint_reentrancy_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let token_id = env.register(FlashMintToken, ());
+    let token_client = FlashMintTokenClient::new(&env, &token_id);
+    token_client.initialize(&admin, &0);
+
+    let reentrant_borrower_id = env.register(ReentrantBorrower, ());
+    token_client.flash_loan(&reentrant_borrower_id, &token_id, &10_000_i128, &Bytes::new(&env));
+}

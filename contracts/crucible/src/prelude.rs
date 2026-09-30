@@ -35,7 +35,10 @@ pub use crate::env::CryptoCurve;
 pub use crate::env::MockCryptoRegistry;
 pub use crate::env::MockKeyPair;
 pub use crate::token::MockToken;
-pub use crate::profiler::{export_flamegraph_svg, export_speedscope, Frame, GasProfiler, Profile, Sample};
+pub use crate::profiler::{
+    export_flamegraph_svg, export_speedscope, Frame, GasProfiler, GasProfilerResult, Profile,
+    Sample,
+};
 pub use crate::zk::{
     G1, G2, Groth16Proof, Groth16VerifyingKey, Gt, PairingCurve, PlonkProof,
 };

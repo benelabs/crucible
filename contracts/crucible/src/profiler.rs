@@ -42,6 +42,12 @@ pub struct Sample {
     pub stack: Vec<Frame>,
     pub cost: u64,
     pub memory_bytes: u64,
+    /// Bytes read from ledger storage during this sample.
+    pub storage_read_bytes: u64,
+    /// Bytes written to ledger storage during this sample.
+    pub storage_write_bytes: u64,
+    /// Number of ledger entries allocated (created) during this sample.
+    pub ledger_entry_allocations: u64,
 }
 
 impl Sample {
@@ -50,6 +56,58 @@ impl Sample {
             stack,
             cost,
             memory_bytes,
+            storage_read_bytes: 0,
+            storage_write_bytes: 0,
+            ledger_entry_allocations: 0,
+        }
+    }
+
+    /// Creates a sample with discrete storage I/O footprints.
+    pub fn with_storage(
+        stack: Vec<Frame>,
+        cost: u64,
+        memory_bytes: u64,
+        storage_read_bytes: u64,
+        storage_write_bytes: u64,
+        ledger_entry_allocations: u64,
+    ) -> Self {
+        Self {
+            stack,
+            cost,
+            memory_bytes,
+            storage_read_bytes,
+            storage_write_bytes,
+            ledger_entry_allocations,
+        }
+    }
+}
+
+/// Aggregated gas profile result with storage I/O segregation.
+///
+/// Separates CPU/memory metrics from storage read/write footprints so that
+/// rent-fee spikes can be diagnosed independently of instruction cost.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GasProfilerResult {
+    pub total_cost: u64,
+    pub total_memory_bytes: u64,
+    pub storage_read_bytes: u64,
+    pub storage_write_bytes: u64,
+    pub ledger_entry_allocations: u64,
+    pub sample_count: usize,
+    pub duration_ms: u64,
+}
+
+impl GasProfilerResult {
+    /// Builds a result from a completed [`Profile`].
+    pub fn from_profile(profile: &Profile) -> Self {
+        Self {
+            total_cost: profile.total_cost(),
+            total_memory_bytes: profile.total_memory_bytes(),
+            storage_read_bytes: profile.total_storage_read_bytes(),
+            storage_write_bytes: profile.total_storage_write_bytes(),
+            ledger_entry_allocations: profile.total_ledger_entry_allocations(),
+            sample_count: profile.samples.len(),
+            duration_ms: profile.end_time.saturating_sub(profile.start_time),
         }
     }
 }
@@ -86,6 +144,26 @@ impl Profile {
 
     pub fn total_memory_bytes(&self) -> u64 {
         self.samples.iter().map(|s| s.memory_bytes).sum()
+    }
+
+    pub fn total_storage_read_bytes(&self) -> u64 {
+        self.samples.iter().map(|s| s.storage_read_bytes).sum()
+    }
+
+    pub fn total_storage_write_bytes(&self) -> u64 {
+        self.samples.iter().map(|s| s.storage_write_bytes).sum()
+    }
+
+    pub fn total_ledger_entry_allocations(&self) -> u64 {
+        self.samples
+            .iter()
+            .map(|s| s.ledger_entry_allocations)
+            .sum()
+    }
+
+    /// Returns a [`GasProfilerResult`] with discrete storage I/O metrics.
+    pub fn result(&self) -> GasProfilerResult {
+        GasProfilerResult::from_profile(self)
     }
 }
 
@@ -148,9 +226,28 @@ impl GasProfiler {
 
     /// Pops the most recent frame and records a sample.
     pub fn exit(&mut self, cost: u64, memory_bytes: u64) {
+        self.exit_with_storage(cost, memory_bytes, 0, 0, 0);
+    }
+
+    /// Pops the most recent frame and records a sample with storage I/O footprints.
+    pub fn exit_with_storage(
+        &mut self,
+        cost: u64,
+        memory_bytes: u64,
+        storage_read_bytes: u64,
+        storage_write_bytes: u64,
+        ledger_entry_allocations: u64,
+    ) {
         if self.active && !self.current_stack.is_empty() {
             let stack = std::mem::take(&mut self.current_stack);
-            let sample = Sample::new(stack, cost, memory_bytes);
+            let sample = Sample::with_storage(
+                stack,
+                cost,
+                memory_bytes,
+                storage_read_bytes,
+                storage_write_bytes,
+                ledger_entry_allocations,
+            );
             if let Some(last) = self.profiles.last_mut() {
                 last.add_sample(sample);
             } else {
@@ -373,6 +470,23 @@ mod tests {
         assert_eq!(profile.samples.len(), 1);
         assert_eq!(profile.total_cost(), 100);
         assert_eq!(profile.total_memory_bytes(), 1024);
+    }
+
+    #[test]
+    fn test_gas_profiler_result_segregates_storage_io() {
+        let mut profiler = GasProfiler::new();
+        profiler.start();
+        profiler.enter(Frame::new("store", "ledger"));
+        profiler.exit_with_storage(200, 512, 128, 256, 3);
+        let profile = profiler.stop();
+        let result = profile.result();
+
+        assert_eq!(result.total_cost, 200);
+        assert_eq!(result.total_memory_bytes, 512);
+        assert_eq!(result.storage_read_bytes, 128);
+        assert_eq!(result.storage_write_bytes, 256);
+        assert_eq!(result.ledger_entry_allocations, 3);
+        assert_eq!(result.sample_count, 1);
     }
 
     #[test]

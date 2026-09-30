@@ -422,12 +422,12 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "LastSpendTimestamp"
+                            "symbol": "LastSpendSequence"
                           }
                         ]
                       },
                       "val": {
-                        "u64": "1000000"
+                        "u32": "0"
                       }
                     },
                     {

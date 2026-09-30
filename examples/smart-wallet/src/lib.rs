@@ -20,9 +20,15 @@ enum DataKey {
     Threshold,
     DailyLimit,
     SpentToday,
-    LastSpendTimestamp,
+    /// Ledger sequence at which the current spending period started.
+    LastSpendSequence,
     RecoveryApprovals(Address),
 }
+
+/// Approximate number of ledgers in one day (86_400s / 5s close time).
+/// Spending periods are keyed to sequence numbers so validators cannot
+/// prematurely reset limits by advancing ledger timestamps.
+const LEDGERS_PER_DAY: u32 = 17_280;
 
 #[contract]
 #[derive(Default)]
@@ -55,7 +61,9 @@ impl SmartWallet {
         env.storage().instance().set(&DataKey::Threshold, &threshold);
         env.storage().instance().set(&DataKey::DailyLimit, &daily_limit);
         env.storage().instance().set(&DataKey::SpentToday, &0i128);
-        env.storage().instance().set(&DataKey::LastSpendTimestamp, &env.ledger().timestamp());
+        env.storage()
+            .instance()
+            .set(&DataKey::LastSpendSequence, &env.ledger().sequence());
     }
 
     /// Execute a single transfer enforcing the daily spending limit.
@@ -206,13 +214,19 @@ impl SmartWallet {
     fn check_and_update_daily_spending(env: &Env, amount: i128) {
         let daily_limit: i128 = env.storage().instance().get(&DataKey::DailyLimit).unwrap();
         let mut spent_today: i128 = env.storage().instance().get(&DataKey::SpentToday).unwrap();
-        let last_timestamp: u64 = env.storage().instance().get(&DataKey::LastSpendTimestamp).unwrap();
+        let last_sequence: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LastSpendSequence)
+            .unwrap();
 
-        let current_time = env.ledger().timestamp();
-        // 86,400 seconds in 1 day
-        if current_time >= last_timestamp + 86_400 {
+        let current_sequence = env.ledger().sequence();
+        // Reset when a full day of ledgers has elapsed — immune to timestamp skew.
+        if current_sequence >= last_sequence.saturating_add(LEDGERS_PER_DAY) {
             spent_today = 0;
-            env.storage().instance().set(&DataKey::LastSpendTimestamp, &current_time);
+            env.storage()
+                .instance()
+                .set(&DataKey::LastSpendSequence, &current_sequence);
         }
 
         let new_spent = spent_today

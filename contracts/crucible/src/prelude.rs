@@ -6,6 +6,9 @@
 pub use crate::account::AccountBuilder;
 pub use crate::account::AccountHandle;
 pub use crate::assertions::RevertAssertion;
+pub use crate::auth_tree::{
+    AuthMismatch, AuthTreeReport, ExpectedAuth, ExpectedInvocation, verify_auth_tree,
+};
 pub use crate::call_graph::{CallFrame, CallTrace};
 pub use crate::checkpoint::{CheckpointId, CheckpointStats};
 pub use crate::cost::CostReport;

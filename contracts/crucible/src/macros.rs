@@ -473,18 +473,6 @@ macro_rules! assert_storage_entry_size_limit {
 /// Panics with a full diagnostic when the recorded tree differs in any way.
 #[macro_export]
 macro_rules! assert_auth_tree {
-    ($env:expr, $invoke:expr, [ $($tt:tt)* ]) => {{
-        extern crate std;
-        let __env = $crate::assert_auth_tree!(@env $env);
-        // Record nonce state before (simulated)
-        let __res = $invoke;
-        // Verify strictly incrementing or signature-bound nonces (simulated)
-        let __expected: std::vec::Vec<$crate::auth_tree::ExpectedAuth> =
-            $crate::assert_auth_tree!(@entries __env, [] $($tt)*);
-        $crate::auth_tree::verify_auth_tree(__env, &__expected).assert_matches();
-        __res
-    }};
-
     ($env:expr, [ $($tt:tt)* ]) => {{
         extern crate std;
         let __env = $crate::assert_auth_tree!(@env $env);
@@ -577,72 +565,6 @@ macro_rules! assert_auth_tree {
             >::into_val(&$args, $env));
         )*
         __args
-    }};
-}
-
-/// Asserts that two numeric values are within a given tolerance of each other.
-///
-/// Useful when comparing amounts derived from fee splits, pro-rata payouts,
-/// price conversions, or any other calculation where rounding makes exact
-/// equality too strict, but the values must still land within an acceptable
-/// margin of each other. Works with any type supporting subtraction,
-/// ordering, and `Debug` (e.g. `i128`, `u128`, `i64`, `u64`).
-///
-/// # Example
-///
-/// ```ignore
-/// assert_approx_eq!(computed_amount, 1_000_000_i128, 5);
-/// assert_approx_eq!(computed_amount, 1_000_000_i128, 5, "fee split rounding");
-/// ```
-#[macro_export]
-macro_rules! assert_approx_eq {
-    ($left:expr, $right:expr, $tolerance:expr) => {{
-        let __left = $left;
-        let __right = $right;
-        let __tolerance = $tolerance;
-        let __diff = if __left > __right {
-            __left - __right
-        } else {
-            __right - __left
-        };
-        assert!(
-            __diff <= __tolerance,
-            "assert_approx_eq! failed: values are not within tolerance.\n\
-             \n\
-             Left      : {left:?}\n\
-             Right     : {right:?}\n\
-             Diff      : {diff:?}\n\
-             Tolerance : {tolerance:?}",
-            left = __left,
-            right = __right,
-            diff = __diff,
-            tolerance = __tolerance,
-        );
-    }};
-    ($left:expr, $right:expr, $tolerance:expr, $msg:literal) => {{
-        let __left = $left;
-        let __right = $right;
-        let __tolerance = $tolerance;
-        let __diff = if __left > __right {
-            __left - __right
-        } else {
-            __right - __left
-        };
-        assert!(
-            __diff <= __tolerance,
-            "assert_approx_eq! failed: values are not within tolerance.\n\
-             \n\
-             Left      : {left:?}\n\
-             Right     : {right:?}\n\
-             Diff      : {diff:?}\n\
-             Tolerance : {tolerance:?}\n\
-             Context   : {ctx}",
-            left = __left,
-            right = __right,
-            diff = __diff,
-            tolerance = __tolerance,
-            ctx = $msg,
-        );
     }};
 }
 

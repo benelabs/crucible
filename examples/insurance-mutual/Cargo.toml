@@ -1,5 +1,4 @@
 [package]
-license.workspace = true
 name = "crucible-example-insurance-mutual"
 version.workspace = true
 edition.workspace = true

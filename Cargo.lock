@@ -277,6 +277,168 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
 dependencies = [
  "rustversion",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sha1",
+ "sync_wrapper",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
+dependencies = [
+ "axum-core 0.5.6",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "itoa",
+ "matchit 0.8.4",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde_core",
+ "sync_wrapper",
+ "tower",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09f2bd6146b97ae3359fa0cc6d6b376d9539582c7b4220f041a33ec24c226199"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "rustversion",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "http",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57d123550fa8d071b7255cb0cc04dc302baa6c8c4a79f55701552684d8399bce"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "backend"
+version = "1.26.0"
+dependencies = [
+ "anyhow",
+ "apalis",
+ "apalis-redis",
+ "arc-swap",
+ "async-trait",
+ "axum 0.7.9",
+ "base64 0.22.1",
+ "chrono",
+ "config",
+ "criterion",
+ "cron",
+ "csv",
+ "dotenvy",
+ "futures-util",
+ "hex",
+ "hmac 0.12.1",
+ "http",
+ "http-body-util",
+ "hyper",
+ "mime",
+ "mockall",
+ "moka",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
+ "prometheus",
+ "proptest",
+ "redis",
+ "regex",
+ "reqwest",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "soroban-sdk",
+ "sqlx",
+ "stellar-xdr",
+ "temp-env",
+ "testcontainers",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
+ "toml 0.8.23",
+ "tonic",
+ "tower",
+ "tower-http",
+ "tower_governor",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "url",
+ "utoipa",
+ "utoipa-swagger-ui",
+ "uuid",
+ "validator",
+ "wiremock",
+]
+
+[[package]]
+name = "backon"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
+dependencies = [
+ "fastrand",
 ]
 
 [[package]]
@@ -807,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "cross-contract"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -858,7 +1020,7 @@ checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "crucible"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "arbitrary",
  "crucible-macros",
@@ -876,7 +1038,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-amm-pool"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -884,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-bounty-escrow"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -892,7 +1054,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-counter"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -900,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-circuit-breaker"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -908,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-stop"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -916,7 +1078,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-escrow-multi-arbiter"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -924,7 +1086,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-flash-mint"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -932,7 +1094,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-gaming-crafting"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -940,7 +1102,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-gasless"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -948,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-insurance-mutual"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -956,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lending"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -964,7 +1126,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-liquid-staking"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -972,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lottery"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -980,7 +1142,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-nft-rental"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -988,7 +1150,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-options-protocol"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -996,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-payment-streaming"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1004,7 +1166,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-portfolio-index"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1012,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-prediction-market"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1020,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-quadratic-funding"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1028,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-smart-wallet"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1036,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-staking"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1044,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-time-locked-vault"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1052,7 +1214,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-token"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1060,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-vesting"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1068,7 +1230,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-macros"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "proc-macro2",
@@ -1591,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "example-yield-vault"
-version = "1.32.3"
+version = "1.26.0"
 dependencies = [
  "crucible",
  "soroban-sdk",

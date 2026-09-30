@@ -1,5 +1,4 @@
 [package]
-license.workspace = true
 name = "crucible-example-portfolio-index"
 version.workspace = true
 edition.workspace = true

@@ -1,5 +1,4 @@
 [package]
-license.workspace = true
 name = "crucible-example-payment-streaming"
 version.workspace = true
 edition.workspace = true

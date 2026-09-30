@@ -17,7 +17,21 @@ members = [
     "examples/cross-contract",
     "examples/lending",
     "examples/prediction-market",
-    "examples/reputation",
+    "examples/escrow-multi-arbiter",
+    "examples/options-protocol",
+    "examples/amm-pool",
+    "examples/yield-vault",
+    "examples/bounty-escrow",
+    "examples/nft-rental",
+    "examples/payment-streaming",
+    "examples/insurance-mutual",
+    "examples/portfolio-index",
+    "examples/flash-mint",
+    "examples/lottery",
+    "examples/gaming-crafting",
+    "examples/smart-wallet",
+    "examples/quadratic-funding",
+    "examples/liquid-staking",
 ]
 resolver = "2"
 
@@ -39,4 +53,4 @@ strip = true
 
 [workspace.dependencies]
 soroban-sdk = { version = "26", features = ["testutils"] }
-crucible-macros = { path = "crucible-macros" }
+crucible-macros = { path = "crucible-macros", version = "1.16.0" }

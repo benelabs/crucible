@@ -101,13 +101,14 @@ fn test_quadratic_funding_broad_support_vs_single_whale() {
         )
     });
 
-    // Proj A gets 100 each from 2 donors (sum sqrt = sqrt(100) + sqrt(100) = 10 + 10 = 20, (20)^2 = 400)
+    // Proj A gets two contributions from donor 1 and one from donor 2.
     ctx.env.with_mock_all_auths(|| {
+        ctx.client().contribute(&ctx.donor_1, &proj_a, &100);
         ctx.client().contribute(&ctx.donor_1, &proj_a, &100);
         ctx.client().contribute(&ctx.donor_2, &proj_a, &100);
     });
 
-    // Proj B gets 200 from single donor 3 (sum sqrt = sqrt(200) = 14, (14)^2 = 196)
+    // Proj A weight is (sqrt(200) + sqrt(100))^2 = 576; Proj B weight is sqrt(200)^2 = 196.
     ctx.env.with_mock_all_auths(|| {
         ctx.client().contribute(&ctx.donor_3, &proj_b, &200);
     });
@@ -123,8 +124,10 @@ fn test_quadratic_funding_broad_support_vs_single_whale() {
         .env
         .with_mock_all_auths(|| ctx.client().claim_payout(&proj_b));
 
-    assert_eq!(direct_a, 200);
+    assert_eq!(direct_a, 300);
     assert_eq!(direct_b, 200);
+    assert_eq!(match_a, 74_611);
+    assert_eq!(match_b, 25_388);
 
     // Project A has broader community consensus, so matching grant subsidy is significantly higher
     assert!(match_a > match_b);

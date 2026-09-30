@@ -44,7 +44,10 @@ pub async fn revoke_token(
     State(state): State<AuthState>,
     Json(payload): Json<RevokeTokenRequest>,
 ) -> Result<impl IntoResponse, crate::error::AppError> {
-    state.blocklist.revoke_token(payload).await?;
+    state
+        .blocklist
+        .revoke_token(payload, &state.key_manager)
+        .await?;
     Ok(axum::http::StatusCode::OK)
 }
 

@@ -67,6 +67,9 @@ tonic = "0.14"
 # Utilities
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+rsa = { version = "0.9", features = ["pem"] }
+jsonwebtoken = "9.3"
 dotenvy = "0.15"
 thiserror = "2.0"
 anyhow = "1.0"

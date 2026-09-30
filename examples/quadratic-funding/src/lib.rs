@@ -29,6 +29,7 @@ enum DataKey {
     Contribution(u32, Address), // (project_id, contributor) -> amount
     TotalWeightedSumSqrts,
     ProjectsCount,
+    TotalQfWeight,
 }
 
 #[contract]
@@ -73,6 +74,9 @@ impl QuadraticFundingDistributor {
         env.storage().instance().set(&DataKey::ClaimPeriodEnd, &claim_period_end);
         env.storage().instance().set(&DataKey::TotalWeightedSumSqrts, &0i128);
         env.storage().instance().set(&DataKey::ProjectsCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalQfWeight, &0i128);
     }
 
     /// Register a public goods project proposal for the funding round.
@@ -159,7 +163,17 @@ impl QuadraticFundingDistributor {
         let new_sqrt = new_contrib.isqrt();
         let delta_sqrt = new_sqrt - prev_sqrt;
 
+        let old_project_weight = project.sum_sqrt_contributions * project.sum_sqrt_contributions;
         project.sum_sqrt_contributions += delta_sqrt;
+        let new_project_weight = project.sum_sqrt_contributions * project.sum_sqrt_contributions;
+        let mut total_qf_weight: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalQfWeight)
+            .unwrap_or(0);
+        total_qf_weight += new_project_weight - old_project_weight;
+        env.storage().instance().set(&DataKey::TotalQfWeight, &total_qf_weight);
+
         project.total_contributions += amount;
         if prev_contrib == 0 {
             project.contributors_count += 1;
@@ -198,16 +212,12 @@ impl QuadraticFundingDistributor {
 
         project.recipient.require_auth();
 
-        // Calculate total sum of (sum_sqrt)^2 across all projects to allocate matching pool proportionally
-        let projects_count: u32 = env.storage().instance().get(&DataKey::ProjectsCount).unwrap_or(0);
-        let mut total_qf_weight: i128 = 0;
-
-        for i in 1..=projects_count {
-            if let Some(p) = env.storage().instance().get::<_, ProjectProposal>(&DataKey::Project(i)) {
-                let weight = p.sum_sqrt_contributions * p.sum_sqrt_contributions;
-                total_qf_weight += weight;
-            }
-        }
+        // Read the aggregate QF weight maintained as projects receive contributions.
+        let total_qf_weight: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalQfWeight)
+            .unwrap_or(0);
 
         let matching_pool: i128 = env.storage().instance().get(&DataKey::MatchingPool).unwrap();
         let project_weight = project.sum_sqrt_contributions * project.sum_sqrt_contributions;

@@ -817,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transfer_from_consumes_allowance_and_updates_balances() {
+    fn test_transfer_from_uses_allowance() {
         let env = MockEnv::builder()
             .with_account("alice", Stroops::from(0))
             .with_account("spender", Stroops::from(0))
@@ -831,23 +831,28 @@ mod tests {
 
         token.mint(&alice.address(), 1_000_000);
         token.approve(&alice.address(), &spender.address(), 500_000, 1000);
+
+        // Spender moves part of the allowance from alice to bob.
         token.transfer_from(
             &spender.address(),
             &alice.address(),
             &bob.address(),
-            300_000,
+            200_000,
         );
 
-        assert_eq!(token.balance(&alice.address()), 700_000);
-        assert_eq!(token.balance(&bob.address()), 300_000);
+        // Balances reflect the transfer.
+        assert_eq!(token.balance(&alice.address()), 800_000);
+        assert_eq!(token.balance(&bob.address()), 200_000);
+
+        // The allowance is drawn down by the spent amount.
         assert_eq!(
             token.allowance(&alice.address(), &spender.address()),
-            200_000
+            300_000
         );
     }
 
     #[test]
-    fn test_transfer_from_exceeds_allowance_reverts() {
+    fn test_transfer_from_fails_without_sufficient_allowance() {
         let env = MockEnv::builder()
             .with_account("alice", Stroops::from(0))
             .with_account("spender", Stroops::from(0))
@@ -860,14 +865,23 @@ mod tests {
         let bob = env.account("bob");
 
         token.mint(&alice.address(), 1_000_000);
-        token.approve(&alice.address(), &spender.address(), 200_000, 1000);
+        token.approve(&alice.address(), &spender.address(), 100_000, 1000);
 
+        // Spender attempts to move more than the approved allowance.
         crate::assert_reverts!(token.transfer_from(
             &spender.address(),
             &alice.address(),
             &bob.address(),
-            300_000
+            200_000,
         ));
+
+        // Balances and allowance are unchanged.
+        assert_eq!(token.balance(&alice.address()), 1_000_000);
+        assert_eq!(token.balance(&bob.address()), 0);
+        assert_eq!(
+            token.allowance(&alice.address(), &spender.address()),
+            100_000
+        );
     }
 
     #[test]

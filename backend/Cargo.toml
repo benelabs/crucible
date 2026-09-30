@@ -37,7 +37,7 @@ testutils = ["mockall"]
 axum = { version = "0.7", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["full", "util"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "request-id"] }
-tower_governor = "0.4"
+tower_governor = "0.8"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, IntoVal};
 
 /// A meta-transaction (gasless) request signed by the user.
 #[contracttype]
@@ -88,12 +88,13 @@ impl Gasless {
         // Bind domain separator: contract address & network ID to prevent cross-chain / cross-contract replay attacks.
         let domain_contract = env.current_contract_address();
         let domain_network = env.ledger().network_id();
-        meta_tx.from.require_auth_for_args((
-            domain_contract,
-            domain_network,
-            meta_tx.nonce,
-            meta_tx.deadline,
-        ));
+        meta_tx.from.require_auth_for_args(soroban_sdk::vec![
+            &env,
+            domain_contract.into_val(&env),
+            domain_network.into_val(&env),
+            meta_tx.nonce.into_val(&env),
+            meta_tx.deadline.into_val(&env),
+        ]);
 
         // Advance nonce.
         env.storage()

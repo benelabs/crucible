@@ -140,6 +140,23 @@ fn test_durability_degradation_and_broken_rejection() {
 }
 
 #[test]
+fn test_durability_underflow_prevention() {
+    let ctx = Ctx::setup();
+    ctx.init_and_register_recipe();
+
+    let item_id = ctx
+        .env
+        .with_mock_all_auths(|| ctx.client().craft_item(&ctx.player, &RECIPE_ID));
+
+    // Excessive degradation cost exceeding current durability
+    let broken_item = ctx
+        .env
+        .with_mock_all_auths(|| ctx.client().use_item(&ctx.player, &item_id, &150));
+    assert_eq!(broken_item.current_durability, 0);
+    assert_eq!(broken_item.is_broken, true);
+}
+
+#[test]
 fn test_repair_broken_item() {
     let ctx = Ctx::setup();
     ctx.init_and_register_recipe();

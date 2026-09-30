@@ -1265,6 +1265,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-example-gaming-crafting"
+version = "0.1.0"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "crucible-example-gasless"
 version = "1.32.3"
 dependencies = [

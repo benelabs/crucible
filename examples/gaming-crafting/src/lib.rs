@@ -182,11 +182,9 @@ impl GamingCraftingEngine {
             panic!("durability cost must be positive");
         }
 
-        if item.current_durability <= durability_cost {
-            item.current_durability = 0;
+        item.current_durability = item.current_durability.saturating_sub(durability_cost);
+        if item.current_durability == 0 {
             item.is_broken = true;
-        } else {
-            item.current_durability -= durability_cost;
         }
 
         env.storage().instance().set(&DataKey::Item(item_id), &item);

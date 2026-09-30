@@ -326,11 +326,16 @@ pub fn parse_database_url(database_url: &str) -> Result<PgConnParts, AppError> {
         .ok_or_else(|| AppError::Internal("DATABASE_URL missing database name".into()))?
         .to_string();
 
+    let password = url::Url::parse(database_url)
+        .ok()
+        .and_then(|u| u.password().map(|p| p.to_string()))
+        .unwrap_or_default();
+
     Ok(PgConnParts {
         host: opts.get_host().to_string(),
         port: opts.get_port(),
         user,
-        password: opts.get_password().unwrap_or("").to_string(),
+        password,
         database,
     })
 }

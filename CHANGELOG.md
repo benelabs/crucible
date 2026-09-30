@@ -1,3 +1,11 @@
+## [1.32.4](https://github.com/benelabs/crucible/compare/v1.32.3...v1.32.4) (2026-09-30)
+
+### Bug Fixes
+
+* clawback flags, treasury timelock, zk curve checks, fixture hygiene ([55caad2](https://github.com/benelabs/crucible/commit/55caad2d2c2e43ec57bb355902b3fac67f233c8c)), closes [#991](https://github.com/benelabs/crucible/issues/991) [#998](https://github.com/benelabs/crucible/issues/998) [#999](https://github.com/benelabs/crucible/issues/999) [#1004](https://github.com/benelabs/crucible/issues/1004)
+* harden backup credentials, AMM swap guards, CI Node 24, and read-only containers ([f3d2427](https://github.com/benelabs/crucible/commit/f3d24278195b53771ce389c6467ff0c905503a74)), closes [#1028](https://github.com/benelabs/crucible/issues/1028) [#1034](https://github.com/benelabs/crucible/issues/1034) [#1035](https://github.com/benelabs/crucible/issues/1035) [#1036](https://github.com/benelabs/crucible/issues/1036)
+* harden macros, governance overflow, quickcheck depth, and test env cleanup ([7c06bf2](https://github.com/benelabs/crucible/commit/7c06bf274b8e6125881e0e2d89fd1b14b2477cd7)), closes [#1002](https://github.com/benelabs/crucible/issues/1002) [#1003](https://github.com/benelabs/crucible/issues/1003) [#1005](https://github.com/benelabs/crucible/issues/1005)
+
 ## [1.32.3](https://github.com/benelabs/crucible/compare/v1.32.2...v1.32.3) (2026-09-28)
 
 ### Bug Fixes

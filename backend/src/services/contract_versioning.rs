@@ -308,7 +308,7 @@ Build failed in deterministic container.
             .db
             .begin()
             .await
-            .map_err(AppError::db)?;
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         let _ = sqlx::query(
             "INSERT INTO contract_versions
@@ -328,7 +328,7 @@ Build failed in deterministic container.
 
         tx.commit()
             .await
-            .map_err(AppError::db)?;
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         Ok(version)
     }
@@ -343,7 +343,7 @@ Build failed in deterministic container.
             .db
             .begin()
             .await
-            .map_err(AppError::db)?;
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         sqlx::query(
             "UPDATE contract_versions SET verification_badge = $1 WHERE id = $2",
@@ -352,7 +352,7 @@ Build failed in deterministic container.
         .bind(version_id)
         .execute(&mut *tx)
         .await
-        .map_err(AppError::db)?;
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         sqlx::query(
             "INSERT INTO deployment_logs (id, version_id, log, created_at) VALUES ($1, $2, $3, $4)",
@@ -363,11 +363,11 @@ Build failed in deterministic container.
         .bind(Utc::now())
         .execute(&mut *tx)
         .await
-        .map_err(AppError::db)?;
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         tx.commit()
             .await
-            .map_err(AppError::db)?;
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         Ok(())
     }

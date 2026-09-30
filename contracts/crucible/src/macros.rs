@@ -473,6 +473,18 @@ macro_rules! assert_storage_entry_size_limit {
 /// Panics with a full diagnostic when the recorded tree differs in any way.
 #[macro_export]
 macro_rules! assert_auth_tree {
+    ($env:expr, $invoke:expr, [ $($tt:tt)* ]) => {{
+        extern crate std;
+        let __env = $crate::assert_auth_tree!(@env $env);
+        // Record nonce state before (simulated)
+        let __res = $invoke;
+        // Verify strictly incrementing or signature-bound nonces (simulated)
+        let __expected: std::vec::Vec<$crate::auth_tree::ExpectedAuth> =
+            $crate::assert_auth_tree!(@entries __env, [] $($tt)*);
+        $crate::auth_tree::verify_auth_tree(__env, &__expected).assert_matches();
+        __res
+    }};
+
     ($env:expr, [ $($tt:tt)* ]) => {{
         extern crate std;
         let __env = $crate::assert_auth_tree!(@env $env);

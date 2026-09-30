@@ -125,6 +125,11 @@ impl ZkVerifier {
             return Err(ZkError::InvalidProofFormat);
         }
 
+        const MAX_PUBLIC_INPUTS: u32 = 32;
+        if public_inputs.len() > MAX_PUBLIC_INPUTS {
+            return Err(ZkError::InvalidPublicInputs);
+        }
+
         // IC length must equal public inputs length + 1 (for 1 + sum(input_i * IC_i))
         if vk.ic.len() != public_inputs.len() + 1 {
             return Err(ZkError::InvalidPublicInputs);
@@ -302,7 +307,11 @@ fn groth16_pairing_check(proof: &Proof, vk: &VerificationKey, public_inputs: &Ve
     let delta_x0 = read_u64_le(&vk.delta_g2, 0);
 
     let mut l_x = read_u64_le(&vk.ic.get(0).unwrap(), 0);
-    for i in 0..public_inputs.len() {
+    let limit = public_inputs.len();
+    if limit > 32 {
+        return false;
+    }
+    for i in 0..limit {
         let input = read_u64_le(&public_inputs.get(i).unwrap(), 0);
         let ic_x = read_u64_le(&vk.ic.get(i + 1).unwrap(), 0);
         l_x = l_x.wrapping_add(input.wrapping_mul(ic_x));

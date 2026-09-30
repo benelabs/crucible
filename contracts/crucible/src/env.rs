@@ -269,9 +269,9 @@ impl Stroops {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProtocolVersion {
-    V20 = 20,
-    V21 = 21,
-    V22 = 22,
+    Protocol20 = 20,
+    Protocol21 = 21,
+    Protocol22 = 22,
 }
 
 impl ProtocolVersion {
@@ -295,12 +295,12 @@ impl ProtocolVersion {
 
     /// Returns the maximum supported protocol version known to Crucible.
     pub fn max_supported() -> Self {
-        ProtocolVersion::V22
+        ProtocolVersion::Protocol22
     }
 
     /// Returns an iterator over all supported protocol versions.
     pub fn all() -> impl Iterator<Item = ProtocolVersion> {
-        [ProtocolVersion::V20, ProtocolVersion::V21, ProtocolVersion::V22]
+        [ProtocolVersion::Protocol20, ProtocolVersion::Protocol21, ProtocolVersion::Protocol22]
             .into_iter()
     }
 }
@@ -314,9 +314,9 @@ impl std::fmt::Display for ProtocolVersion {
 impl From<u32> for ProtocolVersion {
     fn from(value: u32) -> Self {
         match value {
-            20 => ProtocolVersion::V20,
-            21 => ProtocolVersion::V21,
-            22 => ProtocolVersion::V22,
+            20 => ProtocolVersion::Protocol20,
+            21 => ProtocolVersion::Protocol21,
+            22 => ProtocolVersion::Protocol22,
             _ => panic!(
                 "Unsupported protocol version: {}. Supported versions are 20, 21, 22.",
                 value

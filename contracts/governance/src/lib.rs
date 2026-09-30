@@ -40,6 +40,11 @@ enum DataKey {
 #[derive(Default)]
 pub struct Governance;
 
+/// Minimum voting period: 3 days in seconds (3 * 24 * 60 * 60)
+const MIN_VOTING_PERIOD: u64 = 259200;
+/// Maximum voting period: 14 days in seconds (14 * 24 * 60 * 60)
+const MAX_VOTING_PERIOD: u64 = 1209600;
+
 #[contractimpl]
 impl Governance {
     /// Initialize governance with admin and initial token supply
@@ -74,6 +79,20 @@ impl Governance {
         let mut counter: u64 = storage.get(&DataKey::ProposalCounter).unwrap_or(0);
         counter += 1;
 
+        let created_at = env.ledger().timestamp();
+
+        // Validate deadline is within acceptable range
+        let min_deadline = created_at + MIN_VOTING_PERIOD;
+        let max_deadline = created_at + MAX_VOTING_PERIOD;
+
+        if deadline < min_deadline {
+            return Err("Deadline must be at least 3 days from creation");
+        }
+
+        if deadline > max_deadline {
+            return Err("Deadline must be at most 14 days from creation");
+        }
+
         let proposal = Proposal {
             id: counter,
             title,
@@ -81,7 +100,7 @@ impl Governance {
             proposer,
             votes_for: 0,
             votes_against: 0,
-            created_at: env.ledger().timestamp(),
+            created_at,
             deadline,
             executed: false,
         };

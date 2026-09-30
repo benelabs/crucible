@@ -242,7 +242,7 @@ fn verify_hs256_jwt(token: &str, secret: &str) -> Option<JwtClaims> {
     mac.update(signing_input.as_bytes());
     let expected = mac.finalize().into_bytes();
     let actual = b64url_decode(signature)?;
-    if expected.as_slice() != actual.as_slice() {
+    if expected.as_ref() != actual.as_slice() {
         return None;
     }
 

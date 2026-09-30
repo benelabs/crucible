@@ -144,11 +144,18 @@ impl Governance {
 
         storage.set(&DataKey::Vote(voter.clone(), proposal_id), &vote);
 
-        // Update proposal vote counts
+        // Update proposal vote counts with checked arithmetic so large token
+        // supplies / vote multipliers cannot overflow i128 (#1002).
         if direction {
-            proposal.votes_for += amount;
+            proposal.votes_for = proposal
+                .votes_for
+                .checked_add(amount)
+                .ok_or("Vote total overflow")?;
         } else {
-            proposal.votes_against += amount;
+            proposal.votes_against = proposal
+                .votes_against
+                .checked_add(amount)
+                .ok_or("Vote total overflow")?;
         }
 
         storage.set(&DataKey::Proposal(proposal_id), &proposal);
@@ -217,11 +224,17 @@ impl Governance {
         }
 
         // Update from power
-        storage.set(&DataKey::VotingPower(from.clone()), &(current_power - amount));
+        let from_power = current_power
+            .checked_sub(amount)
+            .ok_or("Voting power underflow")?;
+        storage.set(&DataKey::VotingPower(from.clone()), &from_power);
 
         // Update to power
         let to_power: i128 = storage.get(&DataKey::VotingPower(to.clone())).unwrap_or(0);
-        storage.set(&DataKey::VotingPower(to.clone()), &(to_power + amount));
+        let to_power = to_power
+            .checked_add(amount)
+            .ok_or("Voting power overflow")?;
+        storage.set(&DataKey::VotingPower(to.clone()), &to_power);
 
         env.events()
             .publish((symbol_short!("deleg"), from), amount);

@@ -1,41 +1,29 @@
 #![no_std]
-#![allow(deprecated)]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+//! Reputation contract example.
+//!
+//! Demonstrates an admin-gated on-chain reputation system and how to test
+//! it with the crucible testing toolkit.
 
-/// Per-user reputation record.
-#[contracttype]
-#[derive(Clone)]
-pub struct Reputation {
-    /// Cumulative score (positive endorsements - negative flags).
-    pub score: i32,
-    /// Total number of endorsements received.
-    pub endorsements: u32,
-    /// Total number of flags received.
-    pub flags: u32,
-}
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
 
 #[contracttype]
 enum DataKey {
     Admin,
-    /// Reputation(subject)
-    Rep(Address),
-    /// Whether an endorser has already endorsed a subject.
-    Endorsed(Address, Address),
-    /// Whether a flagger has already flagged a subject.
-    Flagged(Address, Address),
+    Reputation(Address),
 }
 
-/// On-chain reputation contract.
+/// A simple admin-gated reputation contract.
 ///
-/// Any address may endorse or flag any other address once.
-/// An admin may revoke (reset) a reputation record.
+/// The admin is set at initialization and is the only address allowed to
+/// modify reputation scores.
 #[contract]
-#[derive(Default)]
 pub struct ReputationContract;
 
 #[contractimpl]
 impl ReputationContract {
-    /// Initialise the contract and set the admin.
+    /// Initialize the contract with an admin address.
+    ///
+    /// Panics if the contract has already been initialized.
     pub fn initialize(env: Env, admin: Address) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("already initialized");
@@ -43,79 +31,72 @@ impl ReputationContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
     }
 
-    /// Endorse `subject`. Each caller may endorse a given subject at most once.
-    pub fn endorse(env: Env, endorser: Address, subject: Address) {
-        endorser.require_auth();
-        if endorser == subject {
-            panic!("cannot endorse yourself");
-        }
-        let key = DataKey::Endorsed(endorser.clone(), subject.clone());
-        if env.storage().instance().has(&key) {
-            panic!("already endorsed");
-        }
-        env.storage().instance().set(&key, &true);
-
-        let mut rep = Self::get_or_default(&env, &subject);
-        rep.score += 1;
-        rep.endorsements += 1;
+    /// Set the reputation score for `account` to `score`. Admin only.
+    pub fn set_reputation(env: Env, caller: Address, account: Address, score: i32) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        assert_eq!(caller, admin, "not admin");
         env.storage()
             .instance()
-            .set(&DataKey::Rep(subject.clone()), &rep);
+            .set(&DataKey::Reputation(account.clone()), &score);
         env.events()
-            .publish((symbol_short!("endorse"),), (endorser, subject));
+            .publish((symbol_short!("rep_set"), account), score);
     }
 
-    /// Flag `subject` negatively. Each caller may flag a given subject at most once.
-    pub fn flag(env: Env, flagger: Address, subject: Address) {
-        flagger.require_auth();
-        if flagger == subject {
-            panic!("cannot flag yourself");
-        }
-        let key = DataKey::Flagged(flagger.clone(), subject.clone());
-        if env.storage().instance().has(&key) {
-            panic!("already flagged");
-        }
-        env.storage().instance().set(&key, &true);
-
-        let mut rep = Self::get_or_default(&env, &subject);
-        rep.score -= 1;
-        rep.flags += 1;
+    /// Increase the reputation of `account` by `amount`. Admin only.
+    pub fn increase_reputation(env: Env, caller: Address, account: Address, amount: i32) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        assert_eq!(caller, admin, "not admin");
+        let current: i32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Reputation(account.clone()))
+            .unwrap_or(0);
+        let new_score = current + amount;
         env.storage()
             .instance()
-            .set(&DataKey::Rep(subject.clone()), &rep);
+            .set(&DataKey::Reputation(account.clone()), &new_score);
         env.events()
-            .publish((symbol_short!("flag"),), (flagger, subject));
+            .publish((symbol_short!("rep_inc"), account), amount);
     }
 
-    /// Return the reputation for `subject`. Defaults to zero if no record exists.
-    pub fn reputation(env: Env, subject: Address) -> Reputation {
-        Self::get_or_default(&env, &subject)
-    }
-
-    /// Admin: reset a subject's reputation record.
-    pub fn revoke(env: Env, subject: Address) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+    /// Decrease the reputation of `account` by `amount`. Admin only.
+    pub fn decrease_reputation(env: Env, caller: Address, account: Address, amount: i32) {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        assert_eq!(caller, admin, "not admin");
+        let current: i32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Reputation(account.clone()))
+            .unwrap_or(0);
+        let new_score = current - amount;
         env.storage()
             .instance()
-            .remove(&DataKey::Rep(subject.clone()));
+            .set(&DataKey::Reputation(account.clone()), &new_score);
         env.events()
-            .publish((symbol_short!("revoke"),), subject);
+            .publish((symbol_short!("rep_dec"), account), amount);
     }
 
-    // -----------------------------------------------------------------------
-    // Internal helpers
-    // -----------------------------------------------------------------------
-
-    fn get_or_default(env: &Env, subject: &Address) -> Reputation {
+    /// Return the current reputation score for `account` (defaults to 0).
+    pub fn get_reputation(env: Env, account: Address) -> i32 {
         env.storage()
             .instance()
-            .get(&DataKey::Rep(subject.clone()))
-            .unwrap_or(Reputation {
-                score: 0,
-                endorsements: 0,
-                flags: 0,
-            })
+            .get(&DataKey::Reputation(account))
+            .unwrap_or(0)
     }
 }
 

@@ -27,9 +27,6 @@ pub mod fixture_graph;
 pub use crate::fixture_graph as crucible_fixture_graph;
 pub mod macros;
 pub mod prelude;
-
-pub use crate::env::Stroops;
-
 pub mod sim;
 #[path = "time_helpers.rs"]
 pub mod time;

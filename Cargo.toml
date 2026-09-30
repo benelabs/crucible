@@ -17,21 +17,7 @@ members = [
     "examples/cross-contract",
     "examples/lending",
     "examples/prediction-market",
-    "examples/escrow-multi-arbiter",
-    "examples/options-protocol",
-    "examples/amm-pool",
-    "examples/yield-vault",
-    "examples/bounty-escrow",
-    "examples/nft-rental",
-    "examples/payment-streaming",
-    "examples/insurance-mutual",
-    "examples/portfolio-index",
-    "examples/flash-mint",
-    "examples/lottery",
-    "examples/gaming-crafting",
-    "examples/smart-wallet",
-    "examples/quadratic-funding",
-    "examples/liquid-staking",
+    "examples/reputation",
 ]
 resolver = "2"
 

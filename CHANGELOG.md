@@ -1,3 +1,9 @@
+## [1.34.0](https://github.com/benelabs/crucible/compare/v1.33.0...v1.34.0) (2026-10-01)
+
+### Features
+
+*  Treasury withdraw Omits Actual Token Transfer ([efe7d32](https://github.com/benelabs/crucible/commit/efe7d32959a7fa59b98b4dc03987e76ce74bf8ee))
+
 ## [1.33.0](https://github.com/benelabs/crucible/compare/v1.32.4...v1.33.0) (2026-09-30)
 
 ### Features

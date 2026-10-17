@@ -1,11 +1,5 @@
-error: #[fixture] does not take arguments
+error: unknown fixture argument `debug`; only `requires = [Type1, Type2, ...]` is supported
  --> tests/ui/fail-fixture-args.rs:4:11
   |
 4 | #[fixture(debug)]
   |           ^^^^^
-
-error[E0425]: cannot find type `MyFixture` in this scope
- --> tests/ui/fail-fixture-args.rs:9:6
-  |
-9 | impl MyFixture {
-  |      ^^^^^^^^^ not found in this scope

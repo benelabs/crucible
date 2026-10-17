@@ -1,0 +1,11 @@
+error: expected `[` to open the dependency list; use `requires = [Type1, Type2, ...]`
+ --> tests/ui/fail-fixture-malformed-requires.rs:6:22
+  |
+6 | #[fixture(requires = TokenFixture)]
+  |                      ^^^^^^^^^^^^
+
+error: expected `[`
+ --> tests/ui/fail-fixture-malformed-requires.rs:6:22
+  |
+6 | #[fixture(requires = TokenFixture)]
+  |                      ^^^^^^^^^^^^

@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, String};
 
 #[contracttype]
 #[derive(Clone)]
@@ -82,23 +82,35 @@ impl Insurance {
         premium: i128,
         duration_days: u64,
     ) -> Result<u64, &'static str> {
+        Self::lock_guard(&env)?;
         holder.require_auth();
 
         if coverage_amount <= 0 || premium <= 0 {
+            Self::unlock_guard(&env);
             return Err("Amounts must be positive");
         }
         if duration_days == 0 {
+            Self::unlock_guard(&env);
             return Err("Duration must be positive");
         }
 
-        let duration_secs = duration_days.checked_mul(86400).ok_or("Duration overflow")?;
+        let Some(duration_secs) = duration_days.checked_mul(86400) else {
+            Self::unlock_guard(&env);
+            return Err("Duration overflow");
+        };
         let now = env.ledger().timestamp();
-        let expires_at = now.checked_add(duration_secs).ok_or("Duration overflow")?;
+        let Some(expires_at) = now.checked_add(duration_secs) else {
+            Self::unlock_guard(&env);
+            return Err("Duration overflow");
+        };
 
         let storage = env.storage().instance();
 
         // Collect premium from holder
-        let token_addr: Address = storage.get(&DataKey::Token).ok_or("Token not set")?;
+        let Some(token_addr) = storage.get::<_, Address>(&DataKey::Token) else {
+            Self::unlock_guard(&env);
+            return Err("Token not set");
+        };
         token::Client::new(&env, &token_addr).transfer(
             &holder,
             &env.current_contract_address(),
@@ -136,6 +148,7 @@ impl Insurance {
         env.events()
             .publish((symbol_short!("policy"), counter), coverage_amount);
 
+        Self::unlock_guard(&env);
         Ok(counter)
     }
 
@@ -146,30 +159,36 @@ impl Insurance {
         amount: i128,
         failure_reason: String,
     ) -> Result<u64, &'static str> {
+        Self::lock_guard(&env)?;
         let storage = env.storage().instance();
 
         // Verify policy exists and is active
-        let mut policy: InsurancePolicy = storage
-            .get(&DataKey::Policy(policy_id))
-            .ok_or("Policy not found")?;
+        let Some(mut policy) = storage.get::<_, InsurancePolicy>(&DataKey::Policy(policy_id)) else {
+            Self::unlock_guard(&env);
+            return Err("Policy not found");
+        };
 
         if !policy.active {
+            Self::unlock_guard(&env);
             return Err("Policy is not active");
         }
 
         if env.ledger().timestamp() > policy.expires_at {
+            Self::unlock_guard(&env);
             return Err("Policy expired");
         }
 
         if amount <= 0 {
+            Self::unlock_guard(&env);
             return Err("Invalid claim amount");
         }
 
-        let new_claimed_total = policy
-            .claimed_total
-            .checked_add(amount)
-            .ok_or("Claim overflow")?;
+        let Some(new_claimed_total) = policy.claimed_total.checked_add(amount) else {
+            Self::unlock_guard(&env);
+            return Err("Claim overflow");
+        };
         if new_claimed_total > policy.coverage_amount {
+            Self::unlock_guard(&env);
             return Err("Claim exceeds remaining coverage");
         }
 
@@ -196,32 +215,38 @@ impl Insurance {
         env.events()
             .publish((symbol_short!("claim"), counter), amount);
 
+        Self::unlock_guard(&env);
         Ok(counter)
     }
 
     /// Approve a claim (admin only)
     pub fn approve_claim(env: Env, claim_id: u64) -> Result<(), &'static str> {
+        Self::lock_guard(&env)?;
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
 
         let storage = env.storage().instance();
 
-        let mut claim: Claim = storage
-            .get(&DataKey::Claim(claim_id))
-            .ok_or("Claim not found")?;
+        let Some(mut claim) = storage.get::<_, Claim>(&DataKey::Claim(claim_id)) else {
+            Self::unlock_guard(&env);
+            return Err("Claim not found");
+        };
 
         if claim.status != 0 {
+            Self::unlock_guard(&env);
             return Err("Claim already processed");
         }
 
         let reserves: i128 = storage.get(&DataKey::TotalReserves).unwrap_or(0);
         if reserves < claim.amount {
+            Self::unlock_guard(&env);
             return Err("Insufficient reserves");
         }
 
-        let policy: InsurancePolicy = storage
-            .get(&DataKey::Policy(claim.policy_id))
-            .ok_or("Policy not found")?;
+        let Some(policy) = storage.get::<_, InsurancePolicy>(&DataKey::Policy(claim.policy_id)) else {
+            Self::unlock_guard(&env);
+            return Err("Policy not found");
+        };
 
         // Effects before interaction
         claim.status = 1; // approved
@@ -229,7 +254,10 @@ impl Insurance {
         storage.set(&DataKey::TotalReserves, &(reserves - claim.amount));
 
         // Pay out to policy holder
-        let token_addr: Address = storage.get(&DataKey::Token).ok_or("Token not set")?;
+        let Some(token_addr) = storage.get::<_, Address>(&DataKey::Token) else {
+            Self::unlock_guard(&env);
+            return Err("Token not set");
+        };
         token::Client::new(&env, &token_addr).transfer(
             &env.current_contract_address(),
             &policy.holder,
@@ -239,21 +267,25 @@ impl Insurance {
         env.events()
             .publish((symbol_short!("apprv"), claim_id), claim.amount);
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
     /// Reject a claim (admin only)
     pub fn reject_claim(env: Env, claim_id: u64) -> Result<(), &'static str> {
+        Self::lock_guard(&env)?;
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
 
         let storage = env.storage().instance();
 
-        let mut claim: Claim = storage
-            .get(&DataKey::Claim(claim_id))
-            .ok_or("Claim not found")?;
+        let Some(mut claim) = storage.get::<_, Claim>(&DataKey::Claim(claim_id)) else {
+            Self::unlock_guard(&env);
+            return Err("Claim not found");
+        };
 
         if claim.status != 0 {
+            Self::unlock_guard(&env);
             return Err("Claim already processed");
         }
 
@@ -261,15 +293,17 @@ impl Insurance {
         storage.set(&DataKey::Claim(claim_id), &claim);
 
         // Release the rejected amount back to the policy's remaining coverage
-        let mut policy: InsurancePolicy = storage
-            .get(&DataKey::Policy(claim.policy_id))
-            .ok_or("Policy not found")?;
+        let Some(mut policy) = storage.get::<_, InsurancePolicy>(&DataKey::Policy(claim.policy_id)) else {
+            Self::unlock_guard(&env);
+            return Err("Policy not found");
+        };
         policy.claimed_total -= claim.amount;
         storage.set(&DataKey::Policy(claim.policy_id), &policy);
 
         env.events()
             .publish((symbol_short!("rejct"), claim_id), 0);
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
@@ -299,39 +333,47 @@ impl Insurance {
 
     /// Renew policy
     pub fn renew_policy(env: Env, policy_id: u64, extension_days: u64) -> Result<(), &'static str> {
+        Self::lock_guard(&env)?;
         let storage = env.storage().instance();
 
-        let mut policy: InsurancePolicy = storage
-            .get(&DataKey::Policy(policy_id))
-            .ok_or("Policy not found")?;
+        let Some(mut policy) = storage.get::<_, InsurancePolicy>(&DataKey::Policy(policy_id)) else {
+            Self::unlock_guard(&env);
+            return Err("Policy not found");
+        };
 
         policy.holder.require_auth();
 
         if !policy.active {
+            Self::unlock_guard(&env);
             return Err("Policy is not active");
         }
 
         if extension_days == 0 {
+            Self::unlock_guard(&env);
             return Err("Extension must be positive");
         }
 
-        let extension_secs = extension_days
-            .checked_mul(86400)
-            .ok_or("Duration overflow")?;
-        let new_expires_at = policy
-            .expires_at
-            .checked_add(extension_secs)
-            .ok_or("Duration overflow")?;
+        let Some(extension_secs) = extension_days.checked_mul(86400) else {
+            Self::unlock_guard(&env);
+            return Err("Duration overflow");
+        };
+        let Some(new_expires_at) = policy.expires_at.checked_add(extension_secs) else {
+            Self::unlock_guard(&env);
+            return Err("Duration overflow");
+        };
 
         // Pro-rata renewal premium: premium * extension_days / duration_days (rounded up)
-        let renewal_premium = policy
-            .premium
-            .checked_mul(extension_days as i128)
-            .ok_or("Premium overflow")?;
+        let Some(renewal_premium) = policy.premium.checked_mul(extension_days as i128) else {
+            Self::unlock_guard(&env);
+            return Err("Premium overflow");
+        };
         let duration = policy.duration_days as i128;
         let renewal_premium = (renewal_premium + duration - 1) / duration;
 
-        let token_addr: Address = storage.get(&DataKey::Token).ok_or("Token not set")?;
+        let Some(token_addr) = storage.get::<_, Address>(&DataKey::Token) else {
+            Self::unlock_guard(&env);
+            return Err("Token not set");
+        };
         token::Client::new(&env, &token_addr).transfer(
             &policy.holder,
             &env.current_contract_address(),
@@ -347,6 +389,7 @@ impl Insurance {
         env.events()
             .publish((symbol_short!("renew"), policy_id), extension_days as i128);
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 }

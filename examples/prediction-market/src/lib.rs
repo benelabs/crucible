@@ -15,6 +15,7 @@ pub enum Outcome {
 pub enum MarketStatus {
     Open,
     Resolved,
+    Refund,
 }
 
 /// Market-level state stored under a single instance key.
@@ -136,7 +137,15 @@ impl PredictionMarket {
         }
         admin.require_auth();
 
-        state.status = MarketStatus::Resolved;
+        let winning_total = match &winning_outcome {
+            Outcome::Yes => state.yes_total,
+            Outcome::No => state.no_total,
+        };
+        state.status = if winning_total <= 0 {
+            MarketStatus::Refund
+        } else {
+            MarketStatus::Resolved
+        };
         state.winning_outcome = winning_outcome.clone();
         env.storage().instance().set(&DataKey::State, &state);
         env.events()
@@ -146,10 +155,38 @@ impl PredictionMarket {
     /// Claim the caller's proportional payout after resolution.
     pub fn claim(env: Env, trader: Address) -> i128 {
         let state = Self::require_state(&env);
-        if state.status != MarketStatus::Resolved {
+        if state.status != MarketStatus::Resolved && state.status != MarketStatus::Refund {
             panic!("market is not resolved");
         }
         trader.require_auth();
+
+        if state.status == MarketStatus::Refund {
+            let yes_key = DataKey::Position(PositionKey {
+                trader: trader.clone(),
+                outcome: Outcome::Yes,
+            });
+            let no_key = DataKey::Position(PositionKey {
+                trader: trader.clone(),
+                outcome: Outcome::No,
+            });
+            let yes_position: i128 = env.storage().instance().get(&yes_key).unwrap_or(0);
+            let no_position: i128 = env.storage().instance().get(&no_key).unwrap_or(0);
+            let refund = Self::checked_add(yes_position, no_position);
+            if refund <= 0 {
+                panic!("no position");
+            }
+
+            env.storage().instance().set(&yes_key, &0_i128);
+            env.storage().instance().set(&no_key, &0_i128);
+            token::TokenClient::new(&env, &state.token).transfer(
+                &env.current_contract_address(),
+                &trader,
+                &refund,
+            );
+            env.events()
+                .publish((symbol_short!("refund"), trader), refund);
+            return refund;
+        }
 
         let key = DataKey::Position(PositionKey {
             trader: trader.clone(),

@@ -1,5 +1,12 @@
 name: Release
 
+# Location: .github/workflows/release.yml
+# Production requirement: Continuous Release & Automated Semantic Versioning Pipeline
+#
+# Parses Conventional Commit headers (feat:, fix:, feat!:, etc.) to compute the
+# next semver version, generates GitHub Releases with structured changelogs,
+# publishes Rust crates to crates.io, and publishes npm packages to npmjs.
+
 on:
   push:
     branches: [main]
@@ -9,6 +16,10 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
 
 jobs:
   release:
@@ -25,6 +36,9 @@ jobs:
         with:
           node-version: 20
 
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install semantic-release and plugins
         run: |
           mkdir -p "$RUNNER_TEMP/semantic-release-deps"
@@ -38,9 +52,51 @@ jobs:
             @semantic-release/github@10 \
             conventional-changelog-conventionalcommits@8
 
-      - name: Run semantic-release
+      - name: Run semantic-release (version + GitHub Release)
+        # Computes the next semver from Conventional Commits, rewrites
+        # Cargo.toml versions, updates CHANGELOG.md, pushes the release
+        # commit, and creates a GitHub Release with a structured changelog.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           export PATH="$RUNNER_TEMP/semantic-release-deps/node_modules/.bin:$PATH"
           semantic-release
+
+      - name: Restore updated version files after release
+        # semantic-release (via @semantic-release/git) commits the bumped
+        # Cargo.toml / CHANGELOG.md; pull them so the publish steps below see
+        # the released version.
+        run: git pull --ff-only origin main || true
+
+      - name: Publish crates to crates.io
+        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish --workspace --token "$CARGO_REGISTRY_TOKEN" 2>&1 \
+            | tee cargo-publish.log || {
+              # Ignore "already uploaded" races between workspace members.
+              if grep -q "already uploaded" cargo-publish.log; then
+                echo "Some crates already published; continuing."
+              else
+                exit 1
+              fi
+            }
+
+      - name: Publish npm packages to npmjs
+        if: ${{ env.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm config set "//registry.npmjs.org/:_authToken" "$NODE_AUTH_TOKEN"
+          # Publish every non-private package.json in dependency order.
+          find . -name package.json -not -path "*/node_modules/*" | while read -r pkg; do
+            dir="$(dirname "$pkg")"
+            if [ "$(node -e "console.log(require('$pkg').private === true)")" = "true" ]; then
+              echo "Skipping private package: $pkg"
+              continue
+            fi
+            echo "Publishing npm package in $dir"
+            (cd "$dir" && npm publish --access public --ignore-scripts) \
+              || echo "npm publish failed/skipped for $dir"
+          done

@@ -103,10 +103,9 @@ fn test_stake_with_explicit_delegate() {
 #[test]
 fn test_delegate_changes_voting_power() {
     let ctx = Ctx::setup();
-    ctx.env.with_mock_all_auths(|| {
-        ctx.client()
-            .stake(&ctx.alice.address(), &STAKE_AMOUNT, &None)
-    });
+    ctx.env.mock_all_auths();
+    ctx.client()
+        .stake(&ctx.alice.address(), &STAKE_AMOUNT, &None);
 
     // Alice delegates to Bob.
     ctx.client().delegate(&ctx.alice.address(), &ctx.bob);
@@ -134,10 +133,9 @@ fn test_delegate_then_redelegate() {
 #[test]
 fn test_unstake_returns_tokens() {
     let ctx = Ctx::setup();
-    ctx.env.with_mock_all_auths(|| {
-        ctx.client()
-            .stake(&ctx.alice.address(), &STAKE_AMOUNT, &None)
-    });
+    ctx.env.mock_all_auths();
+    ctx.client()
+        .stake(&ctx.alice.address(), &STAKE_AMOUNT, &None);
     ctx.client().unstake(&ctx.alice);
 
     assert_eq!(ctx.token.balance(&ctx.alice), STAKE_AMOUNT * 3);
@@ -147,10 +145,9 @@ fn test_unstake_returns_tokens() {
 #[test]
 fn test_unstake_removes_voting_power() {
     let ctx = Ctx::setup();
-    ctx.env.with_mock_all_auths(|| {
-        ctx.client()
-            .stake(&ctx.alice.address(), &STAKE_AMOUNT, &None)
-    });
+    ctx.env.mock_all_auths();
+    ctx.client()
+        .stake(&ctx.alice.address(), &STAKE_AMOUNT, &None);
     ctx.client().unstake(&ctx.alice);
 
     assert_eq!(ctx.client().voting_power(&ctx.alice), 0);

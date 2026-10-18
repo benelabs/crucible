@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Env, Symbol, Address, Map, RawVal, panic_with_error, panic};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Env, Symbol, Address, Map, RawVal, panic_with_error, panic};
 
 /// Unique identifier for an item in the supply chain.
 pub type ItemId = u64;
@@ -15,6 +15,22 @@ pub enum Status {
     Rejected,
 }
 
+impl Status {
+    /// Validates whether a transition from `self` to `next` is allowed.
+    /// Strictly allowable transitions:
+    /// Created -> InTransit -> Received -> Inspected -> Completed / Rejected
+    pub fn is_valid_transition(&self, next: &Status) -> bool {
+        matches!(
+            (self, next),
+            (Status::Created, Status::InTransit)
+                | (Status::InTransit, Status::Received)
+                | (Status::Received, Status::Inspected)
+                | (Status::Inspected, Status::Completed)
+                | (Status::Inspected, Status::Rejected)
+        )
+    }
+}
+
 /// Data stored for each item.
 #[derive(Clone, Debug, PartialEq, Eq, contracttype)]
 pub struct ItemInfo {
@@ -26,6 +42,20 @@ pub struct ItemInfo {
 
 #[contract]
 pub struct SupplyChain;
+
+impl SupplyChain {
+    /// Validates whether a status transition is allowable.
+    pub fn is_valid_transition(current: &Status, next: &Status) -> bool {
+        current.is_valid_transition(next)
+    }
+
+    /// Enforces strictly allowable transitions, panicking if invalid.
+    pub fn validate_transition(current: &Status, next: &Status) {
+        if !current.is_valid_transition(next) {
+            panic!("invalid status transition");
+        }
+    }
+}
 
 #[contractimpl]
 impl SupplyChain {
@@ -59,6 +89,8 @@ impl SupplyChain {
         if env.sender() != item.current_holder {
             panic!("unauthorized");
         }
+        // State transition validation.
+        Self::validate_transition(&item.status, &new_status);
         item.status = new_status;
         env.storage().instance().set(&key, &item);
     }
@@ -80,3 +112,32 @@ impl SupplyChain {
         env.storage().instance().get_unchecked(&key)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_transition() {
+        // Valid transitions
+        assert!(Status::Created.is_valid_transition(&Status::InTransit));
+        assert!(Status::InTransit.is_valid_transition(&Status::Received));
+        assert!(Status::Received.is_valid_transition(&Status::Inspected));
+        assert!(Status::Inspected.is_valid_transition(&Status::Completed));
+        assert!(Status::Inspected.is_valid_transition(&Status::Rejected));
+
+        // Associated function on SupplyChain
+        assert!(SupplyChain::is_valid_transition(
+            &Status::Created,
+            &Status::InTransit
+        ));
+
+        // Invalid transitions
+        assert!(!Status::Created.is_valid_transition(&Status::Completed));
+        assert!(!Status::Created.is_valid_transition(&Status::Received));
+        assert!(!Status::Rejected.is_valid_transition(&Status::InTransit));
+        assert!(!Status::Completed.is_valid_transition(&Status::InTransit));
+        assert!(!Status::Created.is_valid_transition(&Status::Created));
+    }
+}
+

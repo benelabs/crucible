@@ -1,0 +1,63 @@
+{
+  "app": {
+    "title": "Crucible",
+    "subtitle": "Soroban 智能合约开发者工具包",
+    "nav": {
+      "dashboard": "仪表板",
+      "simulator": "交易模拟器",
+      "abiExplorer": "ABI 浏览器",
+      "events": "事件监听器",
+      "gas": "Gas 估算器",
+      "onboarding": "开发者教程"
+    },
+    "language": "语言",
+    "footer": "为 Stellar 和 Soroban 开发者构建"
+  },
+  "dashboard": {
+    "title": "多链开发者仪表板",
+    "networkStatus": "网络状态",
+    "activeContracts": "活跃合约",
+    "totalTransactions": "总交易数",
+    "avgGasFee": "平均 Gas 费用",
+    "recentActivity": "近期活动"
+  },
+  "simulator": {
+    "title": "交易模拟器",
+    "contractId": "合约 ID",
+    "functionName": "函数名称",
+    "simulate": "模拟交易",
+    "result": "模拟结果",
+    "success": "模拟成功",
+    "failed": "模拟失败"
+  },
+  "abi": {
+    "title": "合约 ABI 浏览器",
+    "search": "搜索函数...",
+    "functions": "函数",
+    "types": "数据类型"
+  },
+  "events": {
+    "title": "事件监听仪表板",
+    "liveFeed": "实时事件流",
+    "filterTopics": "按主题过滤",
+    "clearFeed": "清除事件流"
+  },
+  "gas": {
+    "title": "Gas 成本估算器",
+    "estimateBtn": "估算 Gas",
+    "instructions": "指令数量",
+    "memory": "内存字节数"
+  },
+  "onboarding": {
+    "title": "开发者引导教程",
+    "welcome": "欢迎使用 Crucible",
+    "getStarted": "开始使用",
+    "nextStep": "下一步",
+    "prevStep": "上一步"
+  },
+  "wallet": {
+    "connect": "连接钱包",
+    "disconnect": "断开连接",
+    "connected": "已连接"
+  }
+}

@@ -108,6 +108,12 @@ impl TracingConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OtlpProtocol {
+    Grpc,
+    HttpBinary,
+}
+
 impl TracingService {
     /// Initialize the global tracer provider with OTLP exporter
     pub fn init(config: TracingConfig) -> anyhow::Result<TracingGuard> {
@@ -124,7 +130,7 @@ impl TracingService {
             .with_attributes(vec![
                 KeyValue::new(resource::SERVICE_NAME, config.service_name.clone()),
                 KeyValue::new(resource::SERVICE_VERSION, config.service_version.clone()),
-                KeyValue::new(resource::DEPLOYMENT_ENVIRONMENT, config.environment.clone()),
+                KeyValue::new(resource::DEPLOYMENT_ENVIRONMENT_NAME, config.environment.clone()),
                 KeyValue::new("service.namespace", "crucible"),
             ])
             .build();
@@ -299,11 +305,49 @@ impl TracingService {
         let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
         propagator.extract(carrier)
     }
+
+    /// Extract W3C Trace Context headers from HTTP request headers and attach to span
+    pub fn extract_and_attach_trace_context(headers: &axum::http::HeaderMap, span: &tracing::Span) {
+        use opentelemetry::propagation::TextMapPropagator;
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+        let mut carrier = std::collections::HashMap::new();
+        for (name, val) in headers.iter() {
+            if let Ok(v) = val.to_str() {
+                carrier.insert(name.as_str().to_string(), v.to_string());
+            }
+        }
+        let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+        let parent_cx = propagator.extract(&carrier);
+        span.set_parent(parent_cx);
+    }
+
+    /// Spawn an asynchronous background task with current OpenTelemetry trace span context attached.
+    pub fn spawn_instrumented<F, T>(future: F) -> tokio::task::JoinHandle<T>
+    where
+        F: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        use tracing::Instrument;
+        tokio::spawn(future.instrument(tracing::Span::current()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_trace_context_extraction_and_injection() {
+        let mut carrier = std::collections::HashMap::new();
+        carrier.insert(
+            "traceparent".to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        );
+        let cx = TracingService::extract_trace_context(&carrier);
+        let injected = TracingService::inject_trace_context(&cx);
+        assert!(injected.contains_key("traceparent"));
+    }
 
     #[test]
     fn test_tracing_config_default() {
@@ -361,5 +405,18 @@ mod tests {
 
         let config = TracingConfig::default().with_sampling_ratio(-0.5);
         assert_eq!(config.sampling_ratio, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_instrumented_context_propagation() {
+        let parent_span = TracingService::job_span("test_async_job", "job-1023");
+        let _guard = parent_span.enter();
+
+        let handle = TracingService::spawn_instrumented(async {
+            tracing::Span::current().is_none()
+        });
+
+        let is_span_none = handle.await.unwrap();
+        assert!(!is_span_none);
     }
 }

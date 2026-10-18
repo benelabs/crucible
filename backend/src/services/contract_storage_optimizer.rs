@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -34,6 +35,41 @@ pub struct StorageOptimizationReport {
     pub generated_at: DateTime<Utc>,
 }
 
+// ---------------------------------------------------------------------------
+// Storage Diff Engine Types (#860)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageChangeType {
+    Added,
+    Modified,
+    Deleted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageDiffEntry {
+    pub key: String,
+    pub old_value: Option<String>,
+    pub new_value: Option<String>,
+    pub change_type: StorageChangeType,
+    pub visual_indicator: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageDiffReport {
+    pub contract_id: String,
+    pub from_sequence: u64,
+    pub to_sequence: u64,
+    pub changes: Vec<StorageDiffEntry>,
+    pub added_count: usize,
+    pub modified_count: usize,
+    pub deleted_count: usize,
+    pub generated_at: DateTime<Utc>,
+}
+
 #[derive(Clone)]
 pub struct ContractStorageOptimizer {
     db: PgPool,
@@ -42,6 +78,75 @@ pub struct ContractStorageOptimizer {
 impl ContractStorageOptimizer {
     pub fn new(db: PgPool) -> Self {
         Self { db }
+    }
+
+    /// Compare two ledger sequence storage maps and generate fine-grained key-value diffs.
+    pub fn compare_storage_diff(
+        contract_id: &str,
+        from_sequence: u64,
+        to_sequence: u64,
+        before_state: &HashMap<String, String>,
+        after_state: &HashMap<String, String>,
+    ) -> StorageDiffReport {
+        let mut changes = Vec::new();
+        let mut added_count = 0;
+        let mut modified_count = 0;
+        let mut deleted_count = 0;
+
+        // Check modified & deleted
+        for (key, old_val) in before_state {
+            match after_state.get(key) {
+                Some(new_val) => {
+                    if old_val != new_val {
+                        modified_count += 1;
+                        changes.push(StorageDiffEntry {
+                            key: key.clone(),
+                            old_value: Some(old_val.clone()),
+                            new_value: Some(new_val.clone()),
+                            change_type: StorageChangeType::Modified,
+                            visual_indicator: format!("~ Modified: {} -> {}", old_val, new_val),
+                        });
+                    }
+                }
+                None => {
+                    deleted_count += 1;
+                    changes.push(StorageDiffEntry {
+                        key: key.clone(),
+                        old_value: Some(old_val.clone()),
+                        new_value: None,
+                        change_type: StorageChangeType::Deleted,
+                        visual_indicator: format!("- Deleted: {}", old_val),
+                    });
+                }
+            }
+        }
+
+        // Check added
+        for (key, new_val) in after_state {
+            if !before_state.contains_key(key) {
+                added_count += 1;
+                changes.push(StorageDiffEntry {
+                    key: key.clone(),
+                    old_value: None,
+                    new_value: Some(new_val.clone()),
+                    change_type: StorageChangeType::Added,
+                    visual_indicator: format!("+ Added: {}", new_val),
+                });
+            }
+        }
+
+        changes.sort_by(|a, b| a.key.cmp(&b.key));
+
+        StorageDiffReport {
+            contract_id: contract_id.to_string(),
+            from_sequence,
+            to_sequence,
+            changes,
+            added_count,
+            modified_count,
+            deleted_count,
+            generated_at: Utc::now(),
+        }
     }
 
     pub async fn optimize(
@@ -209,5 +314,48 @@ mod tests {
 
         assert_eq!(report.storage_entries_estimate, 1);
         assert_eq!(report.recommendations[0].recommended_storage, "temporary");
+    }
+
+    #[test]
+    fn compares_storage_diff_accurately() {
+        let mut before = HashMap::new();
+        before.insert("balance:user1".to_string(), "100".to_string());
+        before.insert("balance:user2".to_string(), "500".to_string());
+        before.insert("admin".to_string(), "GB345".to_string());
+
+        let mut after = HashMap::new();
+        after.insert("balance:user1".to_string(), "200".to_string()); // Modified
+        after.insert("admin".to_string(), "GB345".to_string());       // Unchanged
+        after.insert("balance:user3".to_string(), "50".to_string());  // Added
+        // user2 deleted
+
+        let report = ContractStorageOptimizer::compare_storage_diff(
+            "C123CONTRACT",
+            1000,
+            1005,
+            &before,
+            &after,
+        );
+
+        assert_eq!(report.contract_id, "C123CONTRACT");
+        assert_eq!(report.from_sequence, 1000);
+        assert_eq!(report.to_sequence, 1005);
+        assert_eq!(report.added_count, 1);
+        assert_eq!(report.modified_count, 1);
+        assert_eq!(report.deleted_count, 1);
+        assert_eq!(report.changes.len(), 3);
+
+        let added = report.changes.iter().find(|c| c.change_type == StorageChangeType::Added).unwrap();
+        assert_eq!(added.key, "balance:user3");
+        assert_eq!(added.new_value, Some("50".to_string()));
+
+        let modified = report.changes.iter().find(|c| c.change_type == StorageChangeType::Modified).unwrap();
+        assert_eq!(modified.key, "balance:user1");
+        assert_eq!(modified.old_value, Some("100".to_string()));
+        assert_eq!(modified.new_value, Some("200".to_string()));
+
+        let deleted = report.changes.iter().find(|c| c.change_type == StorageChangeType::Deleted).unwrap();
+        assert_eq!(deleted.key, "balance:user2");
+        assert_eq!(deleted.old_value, Some("500".to_string()));
     }
 }

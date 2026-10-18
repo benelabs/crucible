@@ -384,7 +384,7 @@ async fn test_status_reflects_recovery_tasks() {
 #[tokio::test]
 async fn test_status_reflects_updated_metrics() {
     let metrics_exporter = Arc::new(MetricsExporter::new());
-    metrics_exporter.update_metrics(55.0, 2048, 300).await;
+    metrics_exporter.update_metrics(55.0, 2048, 300, 1024, 512).await;
 
     let (log_aggregator, _rx) = backend::services::log_aggregator::LogAggregator::new();
     let state = Arc::new(AppState {

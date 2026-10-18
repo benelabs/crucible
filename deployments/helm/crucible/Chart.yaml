@@ -1,0 +1,79 @@
+# Location: deployments/helm/crucible/Chart.yaml
+# Production requirement: Kubernetes Helm Charts & Production Infrastructure as Code (IaC)
+#
+# This is the top-level Helm chart descriptor for the crucible platform.
+# The chart bundles the backend API, frontend, and supporting infrastructure
+# into a single deployable unit with sensible production defaults.
+
+apiVersion: v2
+name: crucible
+description: >
+  Production Helm chart for the Crucible Soroban smart-contract testing platform.
+  Deploys the Rust backend API, React frontend, Istio mTLS policies, HPA, and
+  Ingress controllers for AWS EKS / GCP GKE.
+
+# Chart type: application (not library).
+type: application
+
+# Chart version — bump on every chart change (semver).
+version: 1.0.0
+
+# Application version that this chart deploys.
+appVersion: "0.1.0"
+
+# Minimum Helm version required to render this chart.
+# Helm 3.12+ required for `lookup` and post-renderer support.
+kubeVersion: ">=1.27.0"
+
+keywords:
+  - crucible
+  - soroban
+  - stellar
+  - smart-contracts
+  - testing
+
+home: https://github.com/your-org/crucible
+sources:
+  - https://github.com/your-org/crucible
+
+maintainers:
+  - name: Crucible Core Team
+    email: engineering@your-org.example.com
+    url: https://github.com/your-org/crucible
+
+icon: https://raw.githubusercontent.com/your-org/crucible/main/frontend/public/favicon.svg
+
+annotations:
+  # Artifact Hub annotations for chart discoverability.
+  artifacthub.io/changes: |
+    - kind: added
+      description: "Initial production chart with mTLS, HPA, and Vault integration"
+  artifacthub.io/license: MIT
+  artifacthub.io/prerelease: "false"
+
+# Sub-charts (dependencies). Pin exact versions to prevent supply-chain drift.
+dependencies:
+  # cert-manager issues TLS certificates for the Ingress and Vault PKI backend.
+  - name: cert-manager
+    version: "1.14.5"
+    repository: "https://charts.jetstack.io"
+    condition: cert-manager.enabled
+    tags:
+      - security
+
+  # Vault is deployed as a dependency for local/dev environments.
+  # In production, Vault runs outside the cluster — set `vault.enabled: false`.
+  - name: vault
+    version: "0.28.1"
+    repository: "https://helm.releases.hashicorp.com"
+    condition: vault.enabled
+    tags:
+      - secrets
+
+  # Metrics Server is needed by the HPA in clusters that don't ship it.
+  - name: metrics-server
+    version: "3.12.0"
+    repository: "https://kubernetes-sigs.github.io/metrics-server/"
+    condition: metrics-server.enabled
+    tags:
+      - autoscaling

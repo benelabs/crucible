@@ -10,6 +10,7 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     Implementation,
+    Version,
 }
 
 #[contracterror]
@@ -29,7 +30,7 @@ pub struct ProxyContract;
 impl ProxyContract {
     /// Initialize the Proxy contract with an admin and an initial implementation address or WASM hash.
     pub fn initialize(env: Env, admin: Address, implementation: BytesN<32>) {
-        if env.storage().instance().has(&DataKey::Admin) {
+        if env.storage().instance().has(&DataKey::Version) {
             panic_with_error!(&env, ProxyError::AlreadyInitialized);
         }
 
@@ -37,6 +38,7 @@ impl ProxyContract {
         env.storage()
             .instance()
             .set(&DataKey::Implementation, &implementation);
+        env.storage().instance().set(&DataKey::Version, &1u32);
 
         env.events().publish(
             (symbol_short!("init"),),
@@ -77,6 +79,10 @@ impl ProxyContract {
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         let admin = Self::get_admin(env.clone());
         admin.require_auth();
+
+        let mut version: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
+        version += 1;
+        env.storage().instance().set(&DataKey::Version, &version);
 
         // Update stored implementation hash reference
         env.storage()

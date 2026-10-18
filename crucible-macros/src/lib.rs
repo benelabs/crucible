@@ -12,170 +12,11 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Ident, Meta, Path, Type};
-
-// ---------------------------------------------------------------------------
-// Path normalization utilities (Issue #1068)
-// ---------------------------------------------------------------------------
-
-/// Normalizes a type path to its last segment string for identity comparison.
-///
-/// This ensures that `TokenFixture` and `crate::fixtures::TokenFixture` (or any
-/// other fully/partially qualified path pointing to the same type) are
-/// recognized as identical during cycle and duplicate detection.
-///
-/// Single-segment paths like `TokenFixture` are returned as-is. Multi-segment
-/// paths like `crate::fixtures::TokenFixture` are also reduced to their final
-/// segment (`TokenFixture`) for comparison purposes.
-fn normalize_path_name(path: &Path) -> String {
-    // Use the last segment as the canonical identity.  This is a pragmatic
-    // heuristic that handles the common aliases: `Foo`, `crate::Foo`,
-    // `crate::fixtures::Foo`, `super::Foo`, etc.
-    path.segments
-        .last()
-        .map(|seg| seg.ident.to_string())
-        .unwrap_or_default()
-}
-
-/// Returns the first duplicate dependency after normalization, if any.
-///
-/// Two dependency paths are considered equal when [`normalize_path_name`]
-/// produces the same string for both.
-fn first_duplicate(deps: &[Path]) -> Option<&Path> {
-    let mut seen = std::collections::HashSet::new();
-    for dep in deps {
-        let key = normalize_path_name(dep);
-        if !seen.insert(key) {
-            return Some(dep);
-        }
-    }
-    None
-}
-
-/// Detects trivial self-cycles where the fixture lists itself as a dependency
-/// (after path normalization).
-fn is_self_referential(fixture_name: &Ident, deps: &[Path]) -> Option<&Path> {
-    let name = fixture_name.to_string();
-    deps.iter().find(|dep| normalize_path_name(dep) == name)
-}
-
-// ---------------------------------------------------------------------------
-// Argument parsing for #[fixture(requires = [...])] (Issue #1069)
-// ---------------------------------------------------------------------------
-
-/// Parsed arguments from `#[fixture(...)]`.
-struct FixtureArgs {
-    /// The dependency paths declared via `requires = [Dep1, Dep2, ...]`.
-    requires: Vec<Path>,
-}
-
-/// Parses the attribute arguments for `#[fixture]`.
-///
-/// Accepted forms:
-/// - `#[fixture]` — no arguments (empty `requires`).
-/// - `#[fixture(requires = [Dep1, Dep2])]` — explicit dependency list.
-///
-/// # Error handling (Issue #1069)
-///
-/// Instead of masking all parse failures behind a single generic message, this
-/// function preserves the underlying [`syn::Error`] and chains a diagnostic
-/// note that describes the expected format. This way, syntax errors such as
-/// unclosed brackets or trailing commas are surfaced to the user.
-fn parse_fixture_args(tokens: proc_macro2::TokenStream) -> Result<FixtureArgs, proc_macro2::TokenStream> {
-    use syn::parse::Parse;
-    use syn::parse::ParseStream;
-    use syn::punctuated::Punctuated;
-    use syn::token::Bracket;
-
-    if tokens.is_empty() {
-        return Ok(FixtureArgs { requires: Vec::new() });
-    }
-
-    struct RawArgs {
-        requires: Vec<Path>,
-    }
-
-    impl Parse for RawArgs {
-        fn parse(input: ParseStream) -> syn::Result<Self> {
-            let ident: Ident = input.parse().map_err(|e| {
-                let mut err = syn::Error::new(
-                    e.span(),
-                    "expected `requires = [Type1, Type2, ...]`",
-                );
-                err.combine(e);
-                err
-            })?;
-
-            if ident != "requires" {
-                return Err(syn::Error::new(
-                    ident.span(),
-                    format!(
-                        "unknown fixture argument `{ident}`; \
-                         only `requires = [Type1, Type2, ...]` is supported"
-                    ),
-                ));
-            }
-
-            input.parse::<syn::Token![=]>().map_err(|e| {
-                let mut err = syn::Error::new(
-                    e.span(),
-                    "expected `=` after `requires`; \
-                     use `requires = [Type1, Type2, ...]`",
-                );
-                err.combine(e);
-                err
-            })?;
-
-            let content;
-            let _bracket: Bracket = syn::bracketed!(content in input).map_err(|e| {
-                let mut err = syn::Error::new(
-                    e.span(),
-                    "expected `[` to open the dependency list; \
-                     use `requires = [Type1, Type2, ...]`",
-                );
-                err.combine(e);
-                err
-            })?;
-
-            let paths: Punctuated<Path, syn::Token![,]> =
-                content.parse_terminated(Path::parse, syn::Token![,]).map_err(|e| {
-                    let mut err = syn::Error::new(
-                        e.span(),
-                        "malformed dependency list inside `requires = [...]`",
-                    );
-                    // Chain the original error so users see the precise syntax
-                    // issue (e.g., unclosed bracket, unexpected token).
-                    err.combine(e);
-                    err
-                })?;
-
-            // Reject trailing tokens after the closing `]`.
-            if !input.is_empty() {
-                return Err(syn::Error::new(
-                    input.span(),
-                    "unexpected tokens after `requires = [...]`; \
-                     #[fixture] accepts at most one argument",
-                ));
-            }
-
-            Ok(RawArgs {
-                requires: paths.into_iter().collect(),
-            })
-        }
-    }
-
-    syn::parse2::<RawArgs>(tokens.clone()).map(|r| FixtureArgs { requires: r.requires }).map_err(|e| {
-        e.to_compile_error()
-    })
-}
-
-// ---------------------------------------------------------------------------
-// #[fixture] attribute macro
-// ---------------------------------------------------------------------------
+use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta};
 
 /// Marks a struct as a reusable test fixture.
 ///
-/// This attribute macro does two things:
+/// This attribute macro does three things:
 ///
 /// 1. **Auto-derives [`Debug`]** — adds `#[derive(Debug)]` to the struct if it is not
 ///    already present, so fixture values can be printed in test failure output.
@@ -184,17 +25,9 @@ fn parse_fixture_args(tokens: proc_macro2::TokenStream) -> Result<FixtureArgs, p
 ///    assigns the result to `*self`, allowing a fixture to be cheaply reset to its initial
 ///    state at any point inside a test.
 ///
-/// # Dependency declaration
-///
-/// Optionally, you can declare fixture dependencies using:
-///
-/// ```rust,ignore
-/// #[fixture(requires = [DepFixture1, DepFixture2])]
-/// ```
-///
-/// This generates an `AcyclicFixture` trait implementation that performs
-/// compile-time cycle detection and duplicate checking across the fixture
-/// dependency graph.
+/// 3. **Resolves the dependency graph** — records the fixtures named in
+///    `requires` and generates a `setup_deps()` constructor that builds them,
+///    so a suite composes shared environments instead of duplicating setup.
 ///
 /// # Requirements
 ///
@@ -206,6 +39,37 @@ fn parse_fixture_args(tokens: proc_macro2::TokenStream) -> Result<FixtureArgs, p
 ///
 /// If `setup()` is absent the code will not compile; the compiler will emit an error
 /// indicating that no associated function `setup` was found on the type.
+///
+/// # Dependency composition
+///
+/// A fixture declares what it builds on with `requires`:
+///
+/// ```rust,ignore
+/// #[fixture(requires = [TokenFixture, OracleFixture])]
+/// pub struct DexFixture {
+///     pub token: TokenFixture,
+///     pub oracle: OracleFixture,
+/// }
+///
+/// impl DexFixture {
+///     pub fn setup() -> Self {
+///         // Builds each dependency, in declaration order.
+///         let (token, oracle) = Self::setup_deps();
+///         Self { token, oracle }
+///     }
+/// }
+/// ```
+///
+/// Alongside `setup_deps()`, the macro generates a `DEPENDENCY_COUNT` constant
+/// and a `FixtureDeps` implementation whose `DEPENDENCY_NAMES` lists the
+/// required fixtures.
+///
+/// ## Cycle detection
+///
+/// A circular dependency is rejected at compile time. A fixture that names
+/// itself produces a diagnostic identifying it directly; a longer cycle is
+/// caught by the generated acyclicity bound, which the compiler reports as an
+/// overflow evaluating `AcyclicFixture` for the fixtures in the loop.
 ///
 /// # Generated code
 ///
@@ -231,13 +95,15 @@ fn parse_fixture_args(tokens: proc_macro2::TokenStream) -> Result<FixtureArgs, p
 ///     pub fn reset(&mut self) {
 ///         *self = Self::setup();
 ///     }
+///
+///     pub const DEPENDENCY_COUNT: usize = 0;
 /// }
 /// ```
 ///
 /// # Examples
 ///
-/// ```rust
-/// use crucible_macros::fixture;
+/// ```rust,ignore
+/// use crucible::prelude::*;
 ///
 /// #[fixture]
 /// pub struct CounterFixture {
@@ -260,11 +126,9 @@ fn parse_fixture_args(tokens: proc_macro2::TokenStream) -> Result<FixtureArgs, p
 #[proc_macro_attribute]
 pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
     let args2 = proc_macro2::TokenStream::from(args);
-
-    // Parse fixture arguments (supports empty or `requires = [...]`).
-    let fixture_args = match parse_fixture_args(args2) {
-        Ok(a) => a,
-        Err(compile_err) => return compile_err.into(),
+    let requires = match parse_fixture_args(args2) {
+        Ok(requires) => requires,
+        Err(err) => return err.to_compile_error().into(),
     };
 
     let mut ast = parse_macro_input!(input as DeriveInput);
@@ -277,37 +141,36 @@ pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     let ident = &ast.ident;
+
+    // A fixture that requires itself is a cycle of length one, which is
+    // detectable from this item alone.
+    for dependency in &requires {
+        if dependency.is_ident(ident) || normalize_path_name(dependency) == ident.to_string() {
+            return Error::new_spanned(
+                dependency,
+                format!(
+                    "circular fixture dependency: `{ident}` requires itself\n\
+                     note: a fixture cannot appear in its own `requires` list"
+                ),
+            )
+            .to_compile_error()
+            .into();
+        }
+    }
+
+    if let Some(duplicate) = first_duplicate(&requires) {
+        return Error::new_spanned(
+            duplicate,
+            format!(
+                "duplicate fixture dependency: `{}` is required more than once",
+                normalize_path_name(duplicate)
+            ),
+        )
+        .to_compile_error()
+        .into();
+    }
+
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
-
-    // --- Dependency validation (Issue #1068) ---
-
-    // Check for self-referential dependencies.
-    if let Some(self_dep) = is_self_referential(ident, &fixture_args.requires) {
-        return Error::new_spanned(
-            self_dep,
-            format!(
-                "fixture `{ident}` cannot list itself as a dependency"
-            ),
-        )
-        .to_compile_error()
-        .into();
-    }
-
-    // Check for duplicate dependencies (with path normalization).
-    if let Some(dup) = first_duplicate(&fixture_args.requires) {
-        let normalized = normalize_path_name(dup);
-        return Error::new_spanned(
-            dup,
-            format!(
-                "duplicate dependency `{normalized}` in fixture `{ident}`; \
-                 each dependency must appear only once (note: paths are compared \
-                 by their final segment, so `{normalized}` and \
-                 `crate::fixtures::{normalized}` are considered identical)"
-            ),
-        )
-        .to_compile_error()
-        .into();
-    }
 
     // Add #[derive(Debug)] if the user has not already derived it.
     if !has_derive(&ast.attrs, "Debug") {
@@ -315,54 +178,7 @@ pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
         ast.attrs.push(debug_attr);
     }
 
-    // --- Generate AcyclicFixture trait impl when dependencies are declared ---
-    let acyclic_impl = if fixture_args.requires.is_empty() {
-        // No dependencies — emit a trivial AcyclicFixture impl (leaf node).
-        quote! {
-            #[doc(hidden)]
-            impl #impl_generics AcyclicFixture for #ident #ty_generics #where_clause {
-                const DEPS: &'static [&'static str] = &[];
-            }
-        }
-    } else {
-        // Build the dependency name list (normalized) for the const.
-        let dep_names: Vec<String> = fixture_args
-            .requires
-            .iter()
-            .map(|p| normalize_path_name(p))
-            .collect();
-        let dep_name_lits: Vec<_> = dep_names.iter().map(|n| quote! { #n }).collect();
-
-        // Generate compile-time type equality assertions.  These force the
-        // compiler to resolve each dependency path to a concrete type and
-        // verify that aliased paths (e.g. `Foo` vs `crate::fixtures::Foo`)
-        // actually refer to the same type.
-        let dep_paths = &fixture_args.requires;
-        let type_assertions: Vec<_> = dep_paths
-            .iter()
-            .map(|dep| {
-                quote! {
-                    // Ensure the dependency type exists and implements AcyclicFixture.
-                    const _: fn() = || {
-                        fn _assert_acyclic<T: AcyclicFixture>() {}
-                        _assert_acyclic::<#dep>();
-                    };
-                }
-            })
-            .collect();
-
-        quote! {
-            #[doc(hidden)]
-            impl #impl_generics AcyclicFixture for #ident #ty_generics #where_clause {
-                const DEPS: &'static [&'static str] = &[#(#dep_name_lits),*];
-            }
-
-            // Compile-time assertions that all declared dependencies implement
-            // `AcyclicFixture`, preventing cycles from being silently introduced
-            // through re-exports or path aliases.
-            #(#type_assertions)*
-        }
-    };
+    let dependency_graph = dependency_graph_impl(ident, &ast.generics, &requires);
 
     let expanded = quote! {
         #ast
@@ -382,10 +198,192 @@ pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
             }
         }
 
-        #acyclic_impl
+        #dependency_graph
     };
 
     expanded.into()
+}
+
+/// Parses the `#[fixture]` argument list.
+///
+/// The only supported form is `requires = [Path, ...]`; a bare `#[fixture]`
+/// yields an empty dependency list.
+fn parse_fixture_args(args: proc_macro2::TokenStream) -> Result<Vec<syn::Path>, Error> {
+    if args.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let meta: syn::Meta = syn::parse2(args.clone()).map_err(|err| {
+        let mut note = Error::new_spanned(
+            &args,
+            "#[fixture] takes no arguments other than `requires = [..]`",
+        );
+        note.combine(err);
+        note
+    })?;
+
+    let syn::Meta::NameValue(name_value) = meta else {
+        return Err(Error::new_spanned(
+            &args,
+            "#[fixture] takes no arguments other than `requires = [..]`",
+        ));
+    };
+
+    if !name_value.path.is_ident("requires") {
+        return Err(Error::new_spanned(
+            &name_value.path,
+            "#[fixture] takes no arguments other than `requires = [..]`",
+        ));
+    }
+
+    let syn::Expr::Array(array) = &name_value.value else {
+        return Err(Error::new_spanned(
+            &name_value.value,
+            "`requires` expects a list of fixture types, as in `requires = [TokenFixture, OracleFixture]`",
+        ));
+    };
+
+    array
+        .elems
+        .iter()
+        .map(|element| match element {
+            syn::Expr::Path(path) => Ok(path.path.clone()),
+            other => Err(Error::new_spanned(
+                other,
+                "each entry in `requires` must be a fixture type name",
+            )),
+        })
+        .collect()
+}
+
+/// Returns the first path that appears more than once in `paths`.
+fn first_duplicate(paths: &[syn::Path]) -> Option<&syn::Path> {
+    for (index, path) in paths.iter().enumerate() {
+        let name = normalize_path_name(path);
+        if paths[..index]
+            .iter()
+            .any(|prior| normalize_path_name(prior) == name)
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Returns the canonical identity string for a dependency path.
+///
+/// Normalizes paths by their trailing identifier so that unqualified paths like
+/// `TokenFixture` and qualified paths like `crate::fixtures::TokenFixture` are
+/// recognized as identical types during duplicate and cycle detection.
+fn normalize_path_name(path: &syn::Path) -> String {
+    path.segments
+        .last()
+        .map(|segment| segment.ident.to_string())
+        .unwrap_or_default()
+}
+
+/// Renders a path as the `::`-joined source text of its segments.
+#[allow(dead_code)]
+fn path_name(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+/// Generates the dependency-graph wiring for a fixture.
+///
+/// Emits three things:
+///
+/// 1. A [`FixtureDeps`] impl naming the fixture's direct dependencies, which is
+///    what makes the graph visible to the compiler.
+/// 2. A `setup_deps()` constructor returning each dependency already set up, so
+///    a `setup()` implementation composes rather than duplicating the wiring.
+/// 3. An acyclicity obligation: the fixture asserts that each dependency's
+///    *own* dependency closure is well-formed. A cycle makes that requirement
+///    refer back to the fixture itself, which the compiler rejects as an
+///    infinitely recursive obligation rather than accepting silently.
+fn dependency_graph_impl(
+    ident: &syn::Ident,
+    generics: &syn::Generics,
+    requires: &[syn::Path],
+) -> proc_macro2::TokenStream {
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
+    let deps_tuple = quote! { (#(#requires,)*) };
+    let deps_setup =
+        quote! { (#(<#requires as crucible_fixture_graph::FixtureDeps>::setup_checked(),)*) };
+    let dep_count = requires.len();
+    let dep_names = requires.iter().map(normalize_path_name);
+
+    // Each dependency must itself be acyclic before this fixture can be, so a
+    // cycle becomes an obligation with no base case and the compiler rejects it
+    // rather than accepting a graph that could never be constructed.
+    let acyclic_bounds = requires.iter().map(|dependency| {
+        quote! { #dependency: crucible_fixture_graph::AcyclicFixture }
+    });
+
+    // Fully qualified type equality assertions in the generated AcyclicFixture trait
+    // implementation. Forces the compiler to verify that each dependency path resolves
+    // to a concrete type implementing AcyclicFixture, preventing cycles introduced
+    // by path aliases or re-exports.
+    let type_assertions = requires.iter().map(|dep| {
+        quote! {
+            const _: fn() = || {
+                fn _assert_acyclic<T: ?Sized + crucible_fixture_graph::AcyclicFixture>() {}
+                _assert_acyclic::<#dep>();
+            };
+        }
+    });
+
+    quote! {
+        #[doc(hidden)]
+        #[allow(non_snake_case, unused_imports)]
+        const _: () = {
+            impl #impl_generics crucible_fixture_graph::FixtureDeps for #ident #ty_generics #where_clause {
+                type Deps = #deps_tuple;
+
+                const DEPENDENCY_NAMES: &'static [&'static str] = &[#(#dep_names),*];
+
+                fn setup_checked() -> Self {
+                    Self::setup()
+                }
+            }
+
+            impl #impl_generics crucible_fixture_graph::AcyclicFixture for #ident #ty_generics
+            where
+                #(#acyclic_bounds,)*
+                #where_clause
+            {
+            }
+
+            #(#type_assertions)*
+        };
+
+        impl #impl_generics #ident #ty_generics #where_clause {
+            /// Number of fixtures this one directly requires.
+            pub const DEPENDENCY_COUNT: usize = #dep_count;
+
+            /// Sets up every fixture named in `requires`, in declaration order.
+            ///
+            /// Use this inside `setup()` to compose shared environments instead
+            /// of repeating their wiring:
+            ///
+            /// ```ignore
+            /// pub fn setup() -> Self {
+            ///     let (token, oracle) = Self::setup_deps();
+            ///     Self { token, oracle }
+            /// }
+            /// ```
+            pub fn setup_deps() -> #deps_tuple
+            where
+                Self: crucible_fixture_graph::AcyclicFixture,
+            {
+                #deps_setup
+            }
+        }
+    }
 }
 
 /// Returns `true` if any `#[derive(...)]` attribute in `attrs` lists the given `name`.
@@ -433,7 +431,7 @@ fn has_derive(attrs: &[syn::Attribute], name: &str) -> bool {
 #[proc_macro_derive(Fixture, attributes(contract_client))]
 pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    let name = input.ident.clone();
 
     let mut has_debug = false;
     for attr in &input.attrs {
@@ -455,8 +453,12 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
     }
 
     let mut contract_types = Vec::new();
+    let mut field_bindings = Vec::new();
     let mut field_inits = Vec::new();
     let mut has_env = false;
+    // Hygienic temporary for the generated MockEnv so a caller-side `env`
+    // binding cannot accidentally shadow or collide with the macro injection.
+    let env_ident = syn::Ident::new("__crucible_env", proc_macro2::Span::mixed_site());
 
     if let Data::Struct(data) = &ast.data {
         if let Fields::Named(fields) = &data.fields {
@@ -480,27 +482,44 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                         );
                         if let Ok(metas) = meta {
                             for m in metas {
-                                if m.path().is_ident("contract") {
-                                    if let Meta::Path(path) = m.value {
-                                        contract_ty = Some(path);
+                                // `#[contract_client(contract = T)]` parses as a
+                                // name-value pair whose value is an expression, so
+                                // the type is reached through `Expr::Path`. The bare
+                                // `#[contract_client(contract)]` form is also
+                                // tolerated and handled by the `Meta::Path` arm.
+                                match &m {
+                                    Meta::NameValue(nv) if nv.path.is_ident("contract") => {
+                                        if let syn::Expr::Path(expr) = &nv.value {
+                                            contract_ty = Some(expr.path.clone());
+                                        }
                                     }
+                                    Meta::Path(path) if !path.is_ident("contract") => {
+                                        contract_ty = Some(path.clone());
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
+
                     }
                 }
 
                 if is_contract_client {
                     if let Some(ct) = contract_ty {
                         contract_types.push(ct.clone());
-                        field_inits.push(quote! {
-                            #field_name: <#field_ty>::new(env.inner(), &env.contract_id::<#ct>()),
+                        field_bindings.push(quote! {
+                            let #field_name = <#field_ty>::new(
+                                env.inner(),
+                                &env.contract_id::<#ct>(),
+                            );
                         });
+                        field_inits.push(quote! { #field_name, });
                     }
                 } else {
-                    field_inits.push(quote! {
-                        #field_name: Default::default(),
+                    field_bindings.push(quote! {
+                        let #field_name = Default::default();
                     });
+                    field_inits.push(quote! { #field_name, });
                 }
             }
         }
@@ -515,9 +534,10 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let with_contracts = contract_types.iter().map(|ty| quote! { .with_contract::<#ty>() });
     let env_init = quote! { MockEnv::builder() #(#with_contracts)* .build() };
 
+    // A derive macro only *adds* items; re-emitting the struct would define it
+    // twice. `Debug` likewise cannot be injected from a derive, so the field
+    // walk below reads the original input rather than a rewritten copy.
     let expanded = quote! {
-        #ast
-
         impl #name {
             /// Creates a new instance with all fields initialized.
             ///
@@ -526,8 +546,11 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
             /// fields (besides `env`) are set to their `Default` value.
             pub fn setup() -> Self {
                 let env = #env_init;
+                // Fields are bound before the struct literal so `env` is still
+                // borrowable while the contract clients are built.
+                #(#field_bindings)*
                 Self {
-                    env,
+                    env: #env_ident,
                     #(#field_inits)*
                 }
             }
@@ -535,4 +558,265 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
     };
 
     expanded.into()
+}
+
+/// Turns a function into a property-based fuzz test.
+///
+/// The annotated function's parameters are treated as *generated* inputs: the
+/// macro emits a `#[test]` that runs the body against many random values and,
+/// when the body panics, shrinks the input to a minimal reproducing case before
+/// reporting it.
+///
+/// Every parameter type must implement [`crucible::quickcheck::Arbitrary`],
+/// which is provided for the integer primitives, `bool`, `char`, `String`,
+/// `Option<T>`, `Vec<T>`, tuples, and the Soroban-bounded newtypes such as
+/// `SorobanAmount`.
+///
+/// # Arguments
+///
+/// * `cases = N` — number of inputs to generate (default 256).
+/// * `shrink = N` — maximum shrink steps (default 1024).
+/// * `seed = N` — fix the seed, making the run fully reproducible.
+/// * `size = N` — soft budget bounding generated collection lengths (default 32).
+/// * `max_depth = N` — recursion depth cap for nested generators (default 8).
+///
+/// Unset arguments fall back to the `CRUCIBLE_QUICKCHECK_CASES`,
+/// `CRUCIBLE_QUICKCHECK_SHRINK`, `CRUCIBLE_QUICKCHECK_SEED` and
+/// `CRUCIBLE_QUICKCHECK_MAX_DEPTH` environment variables, then to the defaults
+/// above.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use crucible::prelude::*;
+///
+/// #[crucible::quickcheck]
+/// fn minting_never_decreases_the_balance(amount: SorobanAmount) {
+///     let amount = amount.get() % 1_000_000;
+///     let env = MockEnv::builder().build();
+///     let token = MockToken::xlm(&env);
+///     let alice = AccountBuilder::new(&env).name("alice").build();
+///
+///     let before = token.balance(&alice.address());
+///     token.mint(&alice.address(), amount);
+///     assert!(token.balance(&alice.address()) >= before);
+/// }
+///
+/// #[crucible::quickcheck(cases = 32, seed = 42)]
+/// fn addition_is_commutative(a: i64, b: i64) {
+///     assert_eq!(a.wrapping_add(b), b.wrapping_add(a));
+/// }
+/// ```
+///
+/// # Generated code
+///
+/// The body is moved into a closure that destructures the generated tuple, so
+/// parameter names and patterns work exactly as written:
+///
+/// ```rust,ignore
+/// #[test]
+/// fn addition_is_commutative() {
+///     crucible::quickcheck::check::<(i64, i64), _>(
+///         "addition_is_commutative",
+///         crucible::quickcheck::Config { cases: 32, seed: Some(42), ..Default::default() },
+///         |(a, b)| { /* original body */ },
+///     );
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn quickcheck(args: TokenStream, input: TokenStream) -> TokenStream {
+    let config = match QuickcheckArgs::parse(args.into()) {
+        Ok(config) => config,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let func = parse_macro_input!(input as syn::ItemFn);
+    match expand_quickcheck(config, func) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// The `cases` / `shrink` / `seed` / `size` / `max_depth` arguments of `#[quickcheck]`.
+#[derive(Default)]
+struct QuickcheckArgs {
+    cases: Option<syn::Expr>,
+    shrink: Option<syn::Expr>,
+    seed: Option<syn::Expr>,
+    size: Option<syn::Expr>,
+    max_depth: Option<syn::Expr>,
+}
+
+impl QuickcheckArgs {
+    /// Parses a comma-separated list of `name = value` pairs.
+    fn parse(tokens: proc_macro2::TokenStream) -> Result<Self, Error> {
+        let mut parsed = Self::default();
+        if tokens.is_empty() {
+            return Ok(parsed);
+        }
+
+        let metas = syn::parse::Parser::parse2(
+            syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated,
+            tokens,
+        )?;
+
+        for meta in metas {
+            let slot = if meta.path.is_ident("cases") {
+                &mut parsed.cases
+            } else if meta.path.is_ident("shrink") {
+                &mut parsed.shrink
+            } else if meta.path.is_ident("seed") {
+                &mut parsed.seed
+            } else if meta.path.is_ident("size") {
+                &mut parsed.size
+            } else if meta.path.is_ident("max_depth") {
+                &mut parsed.max_depth
+            } else {
+                return Err(Error::new_spanned(
+                    &meta.path,
+                    "unknown #[quickcheck] argument; expected one of `cases`, `shrink`, `seed`, `size`, `max_depth`",
+                ));
+            };
+
+            if slot.is_some() {
+                return Err(Error::new_spanned(
+                    &meta.path,
+                    "duplicate #[quickcheck] argument",
+                ));
+            }
+            *slot = Some(meta.value);
+        }
+
+        Ok(parsed)
+    }
+}
+
+/// Builds the `#[test]` function that drives the property.
+fn expand_quickcheck(
+    args: QuickcheckArgs,
+    func: syn::ItemFn,
+) -> Result<proc_macro2::TokenStream, Error> {
+    // Bind every ItemFn field explicitly so syn 2.x/3.x AST additions (e.g.
+    // `modifiers`) surface as compile errors here instead of being silently
+    // dropped by `..`, which previously masked missing-attribute / return-type
+    // diagnostics for #[crucible::quickcheck] / #[test] wrappers.
+    let syn::ItemFn {
+        attrs,
+        vis,
+        modifiers,
+        sig,
+        block,
+    } = func;
+
+    if let Some(defaultness) = &modifiers.defaultness {
+        return Err(Error::new_spanned(
+            defaultness,
+            "#[quickcheck] does not support `default` function modifiers",
+        ));
+    }
+    if let Some(asyncness) = &sig.asyncness {
+        return Err(Error::new_spanned(
+            asyncness,
+            "#[quickcheck] does not support async functions",
+        ));
+    }
+    if let Some(constness) = &sig.constness {
+        return Err(Error::new_spanned(
+            constness,
+            "#[quickcheck] does not support const functions",
+        ));
+    }
+    if let Some(abi) = &sig.abi {
+        return Err(Error::new_spanned(
+            abi,
+            "#[quickcheck] does not support functions with an explicit ABI",
+        ));
+    }
+    // Explicit return-signature validation: only bare `()` / omitted return is
+    // allowed so Result/Option/typed returns fail at expansion time with a
+    // clear diagnostic rather than expanding into a broken #[test].
+    match &sig.output {
+        syn::ReturnType::Default => {}
+        syn::ReturnType::Type(_, ty) => {
+            return Err(Error::new_spanned(
+                ty,
+                "#[quickcheck] properties must return `()`; assert inside the body instead",
+            ));
+        }
+    }
+    if sig.inputs.is_empty() {
+        return Err(Error::new_spanned(
+            &sig.ident,
+            "#[quickcheck] requires at least one parameter to generate; \
+             a function with no inputs is an ordinary #[test]",
+        ));
+    }
+
+    // Split the parameter list into the patterns to destructure and the types
+    // to generate. A generated tuple is destructured back into the original
+    // patterns, so the body needs no rewriting.
+    let mut patterns = Vec::new();
+    let mut types = Vec::new();
+    for arg in &sig.inputs {
+        match arg {
+            syn::FnArg::Typed(pat_type) => {
+                patterns.push(pat_type.pat.clone());
+                types.push(pat_type.ty.clone());
+            }
+            syn::FnArg::Receiver(receiver) => {
+                return Err(Error::new_spanned(
+                    receiver,
+                    "#[quickcheck] cannot be applied to methods taking `self`",
+                ));
+            }
+        }
+    }
+
+    let name = &sig.ident;
+    let name_literal = name.to_string();
+    let generics = &sig.generics;
+    let where_clause = &sig.generics.where_clause;
+
+    let field = |value: &Option<syn::Expr>, name: &str| -> proc_macro2::TokenStream {
+        let ident = syn::Ident::new(name, proc_macro2::Span::call_site());
+        match value {
+            Some(expr) => quote! { #ident: #expr, },
+            None => quote! {},
+        }
+    };
+    let cases = field(&args.cases, "cases");
+    let shrink = field(&args.shrink, "shrink_iters");
+    let size = field(&args.size, "size");
+    let max_depth = field(&args.max_depth, "max_depth");
+    // `seed` is an `Option<u64>` in the config, so the literal has to be wrapped.
+    let seed = match &args.seed {
+        Some(expr) => quote! { seed: ::core::option::Option::Some(#expr), },
+        None => quote! {},
+    };
+
+    // Preserve outer attributes from the source AST — especially `///` doc
+    // comments (`#[doc = ...]`) — so IDE hover tooltips and
+    // `cargo test -- --nocapture` summaries keep the author's documentation.
+    let doc_attrs = attrs.iter().filter(|attr| attr.path().is_ident("doc"));
+    let other_attrs = attrs.iter().filter(|attr| !attr.path().is_ident("doc"));
+
+    Ok(quote! {
+        #(#doc_attrs)*
+        #(#other_attrs)*
+        #[test]
+        #vis fn #name #generics () #where_clause {
+            ::crucible::quickcheck::check::<( #(#types,)* ), _>(
+                #name_literal,
+                ::crucible::quickcheck::Config {
+                    #cases
+                    #shrink
+                    #seed
+                    #size
+                    #max_depth
+                    ..::core::default::Default::default()
+                },
+                |( #(#patterns,)* )| #block,
+            );
+        }
+    })
 }

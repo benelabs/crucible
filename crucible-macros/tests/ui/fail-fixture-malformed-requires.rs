@@ -1,9 +1,8 @@
-// Malformed requires syntax must produce a detailed error that preserves the
-// underlying parse failure, not a generic message.
+// Malformed requires syntax (unclosed bracket) must preserve the underlying parse failure.
 // This validates Issue #1069: incomplete error propagation.
-use crucible_macros::fixture;
+use crucible::prelude::*;
 
-#[fixture(requires = TokenFixture)]
+#[fixture(requires = [TokenFixture))]
 pub struct MyFixture {
     pub value: i32,
 }

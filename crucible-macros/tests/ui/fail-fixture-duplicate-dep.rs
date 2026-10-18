@@ -1,10 +1,19 @@
 // A fixture that lists duplicate dependencies (via path alias) must fail.
 // This validates Issue #1068: path normalization for cycle detection.
-use crucible_macros::fixture;
+use crucible::prelude::*;
 
 mod fixtures {
+    use super::*;
+    #[fixture]
     pub struct TokenFixture;
+    impl TokenFixture {
+        pub fn setup() -> Self {
+            Self
+        }
+    }
 }
+
+pub use fixtures::TokenFixture;
 
 #[fixture(requires = [TokenFixture, fixtures::TokenFixture])]
 pub struct DexFixture {
@@ -16,7 +25,5 @@ impl DexFixture {
         Self { value: 0 }
     }
 }
-
-struct TokenFixture;
 
 fn main() {}

@@ -89,6 +89,20 @@ impl Ctx {
             );
         });
     }
+
+    fn create_escrow_with_quorum(&self, quorum: u32) {
+        self.env.with_mock_all_auths(|| {
+            self.client().create_with_quorum(
+                &self.depositor,
+                &self.recipient,
+                &self.arbiters(),
+                &self.token.address(),
+                &AMOUNT,
+                &(BASE_TIME + LOCK_DURATION),
+                &quorum,
+            );
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +209,19 @@ fn test_depositor_cannot_approve() {
         ctx.client().approve(&ctx.depositor),
         "caller is not a registered arbiter"
     );
+}
+
+#[test]
+fn test_legacy_approve_cannot_bypass_quorum() {
+    let ctx = Ctx::setup();
+    ctx.create_escrow_with_quorum(2);
+
+    ctx.env.mock_all_auths();
+    assert_reverts!(
+        ctx.client().approve(&ctx.arbiter_a),
+        "approve is disabled for quorum escrows"
+    );
+    assert_eq!(ctx.client().get_state().status, EscrowStatus::Pending);
 }
 
 // ---------------------------------------------------------------------------

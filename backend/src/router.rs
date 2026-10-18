@@ -91,6 +91,8 @@ pub fn build_router(
         audit: audit_service,
     } = states;
 
+    let dlq_coordinator = Arc::new(crate::workers::retry::DlqCoordinator::new(Arc::new(redis_client.clone())));
+
     let contracts_router = Router::new()
         .route("/compile", post(contract_handlers::compile_contract))
         .route(
@@ -124,6 +126,18 @@ pub fn build_router(
         .route("/", get(|| async { "Crucible Backend API" }))
         .route("/metrics", get(profiling::get_prometheus_metrics))
         .route("/.well-known/stellar.toml", get(stellar::get_stellar_toml))
+        .route("/api/stellar/faucet", post(stellar::fund_testnet_account))
+        .route("/api/stellar/faucet/status", get(stellar::get_faucet_status))
+        .route("/api/v1/faucet", post(stellar::fund_testnet_account))
+        .route("/api/v1/faucet/status", get(stellar::get_faucet_status))
+        .merge(
+            Router::new()
+                .route(
+                    "/api/v1/jobs/dlq/replay",
+                    post(crate::workers::retry::handle_dlq_replay),
+                )
+                .with_state(dlq_coordinator),
+        )
         .merge(
             Router::new()
                 .route("/api/config", get(handle_get_config))
@@ -238,9 +252,35 @@ pub fn build_router(
         ))
         .layer(middleware::from_fn(request_id_middleware))
         .layer(middleware::from_fn(require_json_content_type))
+        .layer(middleware::from_fn(security_headers_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .fallback(crate::api::errors::api_fallback)
+}
+
+async fn security_headers_middleware(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::X_CONTENT_TYPE_OPTIONS,
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        axum::http::header::X_FRAME_OPTIONS,
+        axum::http::HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        axum::http::header::CONTENT_SECURITY_POLICY,
+        axum::http::HeaderValue::from_static("default-src 'self'"),
+    );
+    headers.insert(
+        axum::http::header::STRICT_TRANSPORT_SECURITY,
+        axum::http::HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+    );
+    response
 }
 
 fn build_cors_layer(config: &AppConfig) -> CorsLayer {

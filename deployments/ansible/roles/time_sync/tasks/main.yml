@@ -1,0 +1,80 @@
+---
+# Location: deployments/ansible/roles/time_sync/tasks/main.yml
+# Production requirement: High-Precision Microsecond NTP Server Time Synchronization
+#
+# Deploys a chrony NTP client configured with multiple reliable Stratum-1
+# time servers, validates the system clock accuracy, and ships a Prometheus
+# alert that fires when the clock skew exceeds 10ms (the tolerance budget for
+# consensus / transaction-timeout simulation).
+
+- name: Install chrony NTP client
+  package:
+    name: chrony
+    state: present
+  become: true
+
+- name: Ensure chrony configuration directory exists
+  file:
+    path: "{{ chrony_conf_path | dirname }}"
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Deploy chrony configuration with multiple Stratum-1 servers
+  template:
+    src: chrony.conf.j2
+    dest: "{{ chrony_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: restart chrony
+
+- name: Enable and start chrony
+  service:
+    name: "{{ chrony_service_name }}"
+    state: started
+    enabled: true
+  become: true
+
+- name: Wait for clock synchronization
+  # `waitsync` blocks until chronyd has selected a source and the clock is
+  # settled, failing the play if it cannot sync within 30 seconds.
+  command: chronyc waitsync 30
+  become: true
+  changed_when: false
+
+- name: Deploy clock-skew validation test
+  copy:
+    src: validate_clock.sh
+    dest: /usr/local/bin/validate_clock.sh
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Validate system clock accuracy (< {{ max_allowed_offset_ms }}ms offset)
+  # Hard gate: the play fails if the measured offset exceeds the threshold,
+  # preventing a misconfigured node from participating in simulations.
+  command: /usr/local/bin/validate_clock.sh
+  environment:
+    MAX_OFFSET_MS: "{{ max_allowed_offset_ms }}"
+  become: true
+  changed_when: false
+
+- name: Ensure Prometheus rules directory exists
+  file:
+    path: "{{ prometheus_rules_dir }}"
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Deploy Prometheus clock-skew alert (offset > {{ max_allowed_offset_ms }}ms)
+  template:
+    src: clock_skew_alert.yml.j2
+    dest: "{{ prometheus_rules_dir }}/{{ prometheus_alert_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: reload prometheus

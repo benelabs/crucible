@@ -8,20 +8,50 @@
 //! contexts on the host and are not available inside contract WASM builds.
 
 use crate::account::AccountHandle;
+use crate::assertions::RevertAssertion;
+use crate::checkpoint::{CheckpointId, CheckpointStack, CheckpointStats};
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use crate::token::MockToken;
+use ed25519_dalek::{Signer as _, SigningKey as Ed25519SigningKey};
+use k256::ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey};
+use p256::ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey};
+use rand::SeedableRng as _;
+use rand_chacha::ChaCha8Rng;
+use crate::zk::{
+    self, G1, G2, Groth16Proof, Groth16VerifyingKey, PairingCurve, PlonkProof,
+};
 use soroban_sdk::{
     testutils::{ContractEvents, Events, Ledger, Register},
     Address, Env, FromVal, IntoVal, Val, Vec as SorobanVec,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration as StdDuration;
 
+/// The ledger's storage time-to-live settings.
+///
+/// Soroban ties a storage entry's lifetime to the ledger sequence: a temporary
+/// entry lives at least `min_temp` ledgers, a persistent one at least
+/// `min_persistent`, and no entry may be extended beyond `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryTtlSettings {
+    /// Minimum lifetime, in ledgers, of a temporary storage entry.
+    pub min_temp: u32,
+    /// Minimum lifetime, in ledgers, of a persistent storage entry.
+    pub min_persistent: u32,
+    /// Maximum lifetime, in ledgers, any entry may be extended to.
+    pub max: u32,
+}
+
+/// Nominal seconds between Stellar ledger closes.
+///
+/// Used as the default cadence by [`MockEnv::advance_ledgers`].
+pub const DEFAULT_SECONDS_PER_LEDGER: u64 = 5;
+
 /// A duration helper type for time-based test operations.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Duration {
     seconds: u64,
 }
@@ -221,6 +251,86 @@ impl Stroops {
     }
 }
 
+/// Supported Soroban protocol versions for compatibility testing.
+///
+/// Crucible environments can be configured to target a specific protocol version
+/// so that contracts can be tested against multiple Soroban network upgrades
+/// (Protocol 20, 21, 22, …).
+///
+/// # Example
+///
+/// ```ignore
+/// use crucible::prelude::*;
+///
+/// let env = MockEnv::builder()
+///     .with_protocol_version(ProtocolVersion::V21)
+///     .build();
+/// assert_eq!(env.protocol_version(), 21);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProtocolVersion {
+    Protocol20 = 20,
+    Protocol21 = 21,
+    Protocol22 = 22,
+}
+
+impl ProtocolVersion {
+    /// Returns the numeric protocol version.
+    pub fn value(&self) -> u32 {
+        *self as u32
+    }
+
+    /// Returns `true` if this protocol version supports the given host function
+    /// name.  The list is intentionally conservative: if a function is not
+    /// listed here we assume it is available in all supported versions.
+    pub fn supports_host_function(&self, _function: &str) -> bool {
+        let version = self.value();
+        match _function {
+            "v1_low_level_operations" | "v1_wasm_host_function_with_abi" => version >= 20,
+            "v2_low_level_operations" | "v2_wasm_host_function_with_abi" => version >= 21,
+            "v3_low_level_operations" | "v3_wasm_host_function_with_abi" => version >= 22,
+            _ => true,
+        }
+    }
+
+    /// Returns the maximum supported protocol version known to Crucible.
+    pub fn max_supported() -> Self {
+        ProtocolVersion::Protocol22
+    }
+
+    /// Returns an iterator over all supported protocol versions.
+    pub fn all() -> impl Iterator<Item = ProtocolVersion> {
+        [ProtocolVersion::Protocol20, ProtocolVersion::Protocol21, ProtocolVersion::Protocol22]
+            .into_iter()
+    }
+}
+
+impl std::fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Protocol {}", self.value())
+    }
+}
+
+impl From<u32> for ProtocolVersion {
+    fn from(value: u32) -> Self {
+        match value {
+            20 => ProtocolVersion::Protocol20,
+            21 => ProtocolVersion::Protocol21,
+            22 => ProtocolVersion::Protocol22,
+            _ => panic!(
+                "Unsupported protocol version: {}. Supported versions are 20, 21, 22.",
+                value
+            ),
+        }
+    }
+}
+
+impl From<ProtocolVersion> for u32 {
+    fn from(version: ProtocolVersion) -> Self {
+        version.value()
+    }
+}
+
 /// **Thread‑safety:** `MockEnv` is deliberately single‑threaded; it uses `Rc`/`RefCell` and does **not** implement `Send` or `Sync`. This ensures deterministic behavior in tests but means fixtures cannot be moved across async tasks.
 /// A wrapper around the Soroban test environment with additional helpers.
 ///
@@ -234,7 +344,89 @@ pub struct MockEnv {
     contract_ids: Rc<RefCell<HashMap<String, Address>>>,
     tokens: Rc<RefCell<HashMap<String, MockToken>>>,
     xlm_token_address: Rc<RefCell<Option<Address>>>,
+    prng_state: Rc<RefCell<[u8; 32]>>,
     track_costs: bool,
+    crypto_registry: Rc<RefCell<MockCryptoRegistry>>,
+    checkpoints: Rc<RefCell<CheckpointStack>>,
+    /// Host event-buffer indices suppressed after speculative rollback, plus
+    /// bookkeeping so a metering-driven buffer clear invalidates stale hides.
+    event_rollback: Rc<RefCell<EventRollbackState>>,
+    /// Counter for auto-generated `unnamed_<N>` account names, scoped to this
+    /// environment so parallel tests never share or race on it.
+    unnamed_account_counter: Rc<Cell<u64>>,
+    /// Contract error code → `#[contracterror]` variant names, used to
+    /// demangle `Error(Contract, #N)` reverts.
+    error_registry: Rc<RefCell<ErrorRegistry>>,
+}
+
+// Location: contracts/crucible/src/env.rs // Production requirement: Comprehensive Error Variant & Panic Reason Demangler
+
+/// Maps contract error codes back to the `#[contracterror]` enum variants that
+/// produce them.
+///
+/// The Soroban host reports contract failures only as `Error(Contract, #N)`.
+/// Registering a contract's error enum lets Crucible render that as
+/// `ContractError::Variant` in assertion failures. Several contracts may reuse
+/// the same code, so a code can map to more than one variant.
+#[derive(Clone, Debug, Default)]
+pub struct ErrorRegistry {
+    variants: HashMap<u32, std::vec::Vec<String>>,
+}
+
+impl ErrorRegistry {
+    /// Creates an empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers each variant of a `#[contracterror]` enum under its code.
+    ///
+    /// Non-contract errors are ignored, and registering a variant twice is a
+    /// no-op.
+    pub fn register<E>(&mut self, variants: &[E])
+    where
+        E: Copy + std::fmt::Debug + Into<soroban_sdk::Error>,
+    {
+        use soroban_sdk::xdr::ScErrorType;
+        for variant in variants {
+            let error: soroban_sdk::Error = (*variant).into();
+            if !error.is_type(ScErrorType::Contract) {
+                continue;
+            }
+            let name = Self::variant_name(variant);
+            let names = self.variants.entry(error.get_code()).or_default();
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+
+    /// Returns the variant name(s) registered for `code`, joined with ` | `
+    /// when several contracts share it.
+    pub fn lookup(&self, code: u32) -> Option<String> {
+        self.variants.get(&code).map(|names| names.join(" | "))
+    }
+
+    /// Decodes a host panic message such as `HostError: Error(Contract, #1)`
+    /// into the registered variant name(s).
+    pub fn demangle(&self, message: &str) -> Option<String> {
+        crate::assertions::parse_contract_error_code(message).and_then(|code| self.lookup(code))
+    }
+
+    /// Renders an error enum value as `Enum::Variant`.
+    pub fn variant_name<E: std::fmt::Debug>(variant: &E) -> String {
+        let type_name = std::any::type_name::<E>();
+        let short = type_name.rsplit("::").next().unwrap_or(type_name);
+        std::format!("{short}::{variant:?}")
+    }
+}
+
+/// Tracks speculative event hides and detects host buffer resets.
+#[derive(Clone, Default)]
+struct EventRollbackState {
+    hidden_indices: std::collections::HashSet<usize>,
+    last_len: usize,
+    last_head_fingerprint: Option<u64>,
 }
 
 // Typed event wrapper to provide ergonomic access to event fields and typed data conversion.
@@ -286,6 +478,36 @@ impl CapturedEvent {
     /// ```
     pub fn data_as<T: FromVal<Env, Val>>(&self) -> T {
         T::from_val(&self.env, &self.data)
+    }
+
+    /// Checks whether the event's topics match the given topic pattern (with wildcard support via the `_` symbol).
+    pub fn matches_topic_pattern(&self, pattern: &SorobanVec<Val>) -> bool {
+        crate::event_topic_match::topics_match(&self.env, pattern, &self.topics)
+    }
+
+    /// Checks whether the event's topics match the given topic tuple or vector pattern.
+    pub fn matches_topics<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> bool {
+        let pattern_vec = pattern.into_val(&self.env);
+        self.matches_topic_pattern(&pattern_vec)
+    }
+
+    /// Safely decodes a topic segment at `index` into a typed Rust value if present.
+    pub fn topic_as<T: FromVal<Env, Val>>(&self, index: usize) -> Option<T> {
+        if (index as u32) < self.topics.len() {
+            let val = self.topics.get(index as u32).unwrap();
+            Some(T::from_val(&self.env, &val))
+        } else {
+            None
+        }
+    }
+
+    /// Validates the event topic segment count and applies a schema validator closure to the data payload.
+    pub fn assert_schema<F: FnOnce(&Val) -> bool>(
+        &self,
+        expected_topic_count: usize,
+        data_validator: F,
+    ) -> bool {
+        (self.topics.len() as usize) == expected_topic_count && data_validator(&self.data)
     }
 }
 
@@ -343,6 +565,22 @@ impl EventMatches {
     /// Returns the underlying Soroban `Env`.
     pub fn env(&self) -> &Env {
         &self.env
+    }
+
+    /// Filter matching events by topic pattern supporting wildcards (the `_` symbol).
+    pub fn filter_by_topic_pattern<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> EventMatches {
+        let pattern_vec = pattern.into_val(&self.env);
+        let mut filtered = SorobanVec::new(&self.env);
+        for item in self.items.iter() {
+            let topics = &item.1;
+            if crate::event_topic_match::topics_match(&self.env, &pattern_vec, topics) {
+                filtered.push_back(item);
+            }
+        }
+        EventMatches {
+            env: self.env.clone(),
+            items: filtered,
+        }
     }
 
     /// Returns a reference to the inner SorobanVec.
@@ -471,9 +709,33 @@ impl MockEnv {
         &self.inner
     }
 
+    /// Returns the current Soroban protocol version configured on the ledger.
+    pub fn protocol_version(&self) -> u32 {
+        self.inner.ledger().get().protocol_version
+    }
+
     /// Creates a new `MockEnvBuilder` for fluent environment construction.
     pub fn builder() -> MockEnvBuilder {
         MockEnvBuilder::new()
+    }
+
+    /// Set the deterministic pseudo-random seed used by test helpers.
+    pub fn set_prng_seed(&self, seed: [u8; 32]) {
+        *self.prng_state.borrow_mut() = seed;
+    }
+
+    /// Advance and return the deterministic pseudo-random stream.
+    ///
+    /// This is deliberately a test PRNG, not a source of cryptographic
+    /// randomness. Equal seeds produce equal sequences across environments.
+    pub fn next_prng_u64(&self) -> u64 {
+        let mut state = self.prng_state.borrow_mut();
+        let mut value = u64::from_le_bytes(state[..8].try_into().expect("fixed seed width"));
+        value ^= value << 13;
+        value ^= value >> 7;
+        value ^= value << 17;
+        state[..8].copy_from_slice(&value.to_le_bytes());
+        value
     }
 
     /// Get an account handle by name.
@@ -608,6 +870,11 @@ impl MockEnv {
         self.inner.ledger().get().timestamp
     }
 
+    /// Returns the current ledger sequence number.
+    pub fn ledger_sequence(&self) -> u32 {
+        self.inner.ledger().get().sequence_number
+    }
+
     /// Advance the ledger timestamp by a duration.
     ///
     /// # Panics
@@ -673,7 +940,155 @@ impl MockEnv {
         });
     }
 
+    /// Advances the ledger clock by `ledgers`, moving time and sequence together.
+    ///
+    /// Time-dependent contracts — vesting schedules, auctions, timelocks — read
+    /// both the ledger timestamp and its sequence number, and Soroban ties
+    /// storage entry lifetimes to the sequence. Advancing only the timestamp
+    /// with [`advance_time`](Self::advance_time) leaves the sequence behind, so
+    /// entries never age; advancing only the sequence with
+    /// [`advance_sequence`](Self::advance_sequence) ages entries while the clock
+    /// stands still. Either produces a ledger state that cannot occur on the
+    /// network, and the resulting TTL expirations are artefacts of the test
+    /// rather than behaviour of the contract.
+    ///
+    /// This method moves both in step: the sequence advances by `ledgers` and
+    /// the timestamp by `ledgers * seconds_per_ledger`. Soroban's own close
+    /// time is roughly 5 seconds, which [`advance_ledgers`](Self::advance_ledgers)
+    /// uses as its default.
+    ///
+    /// Temporary storage whose time-to-live elapses over the advance is
+    /// collected by the host exactly as it would be on-chain, so a test can
+    /// assert that a temporary entry is gone and a persistent one survives.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the timestamp or sequence number overflows.
+    ///
+    /// ```ignore
+    /// // Roll a vesting schedule forward one full day of ledgers.
+    /// env.advance_ledger(17_280, 5);
+    /// assert!(vesting.claimable(&alice) > 0);
+    /// ```
+    pub fn advance_ledger(&self, ledgers: u32, seconds_per_ledger: u64) {
+        if ledgers == 0 {
+            return;
+        }
+
+        let info = self.inner.ledger().get();
+        let elapsed = (ledgers as u64)
+            .checked_mul(seconds_per_ledger)
+            .expect("elapsed seconds overflow in advance_ledger");
+        let timestamp = info
+            .timestamp
+            .checked_add(elapsed)
+            .expect("timestamp overflow in advance_ledger");
+        let sequence_number = info
+            .sequence_number
+            .checked_add(ledgers)
+            .expect("sequence number overflow in advance_ledger");
+
+        self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
+            sequence_number,
+            timestamp,
+            protocol_version: info.protocol_version,
+            base_reserve: info.base_reserve,
+            network_id: info.network_id,
+            min_temp_entry_ttl: info.min_temp_entry_ttl,
+            min_persistent_entry_ttl: info.min_persistent_entry_ttl,
+            max_entry_ttl: info.max_entry_ttl,
+        });
+    }
+
+    /// Advances the ledger clock by `ledgers` at Soroban's nominal close time.
+    ///
+    /// Shorthand for [`advance_ledger(ledgers, 5)`](Self::advance_ledger); the
+    /// Stellar network closes a ledger roughly every 5 seconds.
+    pub fn advance_ledgers(&self, ledgers: u32) {
+        self.advance_ledger(ledgers, DEFAULT_SECONDS_PER_LEDGER);
+    }
+
+    /// Advances the ledger clock far enough to cover `duration`.
+    ///
+    /// The complement of [`advance_ledger`](Self::advance_ledger) for tests
+    /// expressed in wall-clock terms: it derives the ledger count from the
+    /// duration so the sequence still moves with the timestamp, rather than
+    /// leaving it behind as [`advance_time`](Self::advance_time) does.
+    ///
+    /// The ledger count is rounded up, so the clock never stops short of
+    /// `duration`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `seconds_per_ledger` is zero, or if the ledger count exceeds
+    /// [`u32::MAX`].
+    ///
+    /// ```ignore
+    /// // Cross a 30-day cliff with a consistent sequence number.
+    /// env.advance_ledger_time(Duration::days(30), 5);
+    /// ```
+    pub fn advance_ledger_time(&self, duration: Duration, seconds_per_ledger: u64) {
+        assert!(
+            seconds_per_ledger > 0,
+            "seconds_per_ledger must be greater than zero"
+        );
+
+        let seconds = duration.as_seconds();
+        if seconds == 0 {
+            return;
+        }
+
+        // Round up so the clock never stops short of the requested duration.
+        let ledgers = seconds.div_ceil(seconds_per_ledger);
+        let ledgers = u32::try_from(ledgers)
+            .expect("advance_ledger_time requires at most u32::MAX ledgers");
+        self.advance_ledger(ledgers, seconds_per_ledger);
+    }
+
+    /// Returns the ledger's time-to-live settings.
+    ///
+    /// These bound how long storage entries survive: a temporary entry starts
+    /// with at least `min_temp`, a persistent entry with at least
+    /// `min_persistent`, and neither may be extended past `max`.
+    pub fn entry_ttl_settings(&self) -> EntryTtlSettings {
+        let info = self.inner.ledger().get();
+        EntryTtlSettings {
+            min_temp: info.min_temp_entry_ttl,
+            min_persistent: info.min_persistent_entry_ttl,
+            max: info.max_entry_ttl,
+        }
+    }
+
+    /// Overrides the ledger's time-to-live settings.
+    ///
+    /// Lower the minimums to reach an expiry in a handful of ledgers rather
+    /// than the thousands the network defaults to, so a test for expiring
+    /// escrow or vesting state stays fast and readable.
+    ///
+    /// ```ignore
+    /// // A temporary entry now lapses after 4 ledgers instead of 16.
+    /// env.set_entry_ttl_settings(EntryTtlSettings { min_temp: 4, ..env.entry_ttl_settings() });
+    /// ```
+    pub fn set_entry_ttl_settings(&self, settings: EntryTtlSettings) {
+        let info = self.inner.ledger().get();
+        self.inner.ledger().set(soroban_sdk::testutils::LedgerInfo {
+            sequence_number: info.sequence_number,
+            timestamp: info.timestamp,
+            protocol_version: info.protocol_version,
+            base_reserve: info.base_reserve,
+            network_id: info.network_id,
+            min_temp_entry_ttl: settings.min_temp,
+            min_persistent_entry_ttl: settings.min_persistent,
+            max_entry_ttl: settings.max,
+        });
+    }
+
     /// Advance the ledger sequence number by n.
+    ///
+    /// This moves the sequence without moving the clock, which ages storage
+    /// entries while the timestamp stands still. Prefer
+    /// [`advance_ledger`](Self::advance_ledger) unless a test specifically
+    /// needs the two to diverge.
     pub fn advance_sequence(&self, n: u32) {
         // Guard: zero is a no-op
         if n == 0 {
@@ -731,6 +1146,13 @@ impl MockEnv {
         self.accounts.borrow_mut().insert(name.to_string(), address);
     }
 
+    /// Returns the next id for an auto-generated `unnamed_<N>` account name.
+    pub(crate) fn next_unnamed_account_id(&self) -> u64 {
+        let id = self.unnamed_account_counter.get();
+        self.unnamed_account_counter.set(id + 1);
+        id
+    }
+
     /// Register a contract with its type name.
     pub fn register_contract<C>(&self, address: Address) {
         let type_name = std::any::type_name::<C>();
@@ -741,9 +1163,19 @@ impl MockEnv {
 
     /// Returns all events emitted during the test.
     ///
+    /// Prefer [`events_from_contract`](Self::events_from_contract) /
+    /// [`events_matching`](Self::events_matching) when asserting after
+    /// [`speculate`](Self::speculate): those helpers honour speculative event
+    /// rollback. This method forwards to the host buffer directly.
+    ///
     /// In Soroban SDK v25.x, this returns the ContractEvents wrapper.
     pub fn events_all(&self) -> ContractEvents {
         self.inner.events().all()
+    }
+
+    /// Number of contract events still visible after speculative rollbacks.
+    pub fn visible_event_count(&self) -> usize {
+        self.visible_host_events().len()
     }
 
     /// Returns all events emitted by a specific contract address.
@@ -762,9 +1194,8 @@ impl MockEnv {
         contract_id: &Address,
     ) -> SorobanVec<(Address, SorobanVec<Val>, Val)> {
         use soroban_sdk::xdr::{self, ScAddress};
-        let all_events = self.inner.events().all();
         let mut result = SorobanVec::new(&self.inner);
-        for event in all_events.events() {
+        for event in self.visible_host_events() {
             if let Some(ref id) = event.contract_id {
                 let sc_addr = ScAddress::Contract(id.clone());
                 let addr = Address::from_val(&self.inner, &sc_addr);
@@ -1024,6 +1455,122 @@ impl MockEnv {
         SimulatedTx::new(fee, instructions, auths, true, Some(result))
     }
 
+    /// Records the cross-contract invocation tree produced by `f`.
+    ///
+    /// The returned [`CallTrace`] mirrors the frames the host actually
+    /// executed: callee address, function symbol, arguments, return value, and
+    /// the gas apportioned to each nested frame. Use it to understand — or to
+    /// assert on — the shape of a multi-contract invocation, and
+    /// [`CallTrace::to_json_pretty`] to export the tree.
+    ///
+    /// State changes made by `f` are **kept**. Unlike
+    /// [`simulate`](Self::simulate), this is an observation of a real call, not
+    /// a dry run, so auth is left exactly as the caller configured it.
+    ///
+    /// A panic inside `f` propagates to the caller. To inspect the tree of a
+    /// call that fails, use [`try_trace`](Self::try_trace), which captures the
+    /// panic and still returns the frames recorded up to the failure.
+    ///
+    /// ```ignore
+    /// let trace = env.trace(|| router.swap(&alice, &100));
+    /// trace.assert_called("transfer");
+    /// assert_eq!(trace.max_depth(), 2);
+    /// ```
+    pub fn trace<F, T>(&self, f: F) -> (T, crate::call_graph::CallTrace)
+    where
+        F: FnOnce() -> T,
+    {
+        let before = self.begin_trace();
+        let result = f();
+        let trace = self.end_trace(before);
+        (result, trace)
+    }
+
+    /// Records the invocation tree of a call that may panic.
+    ///
+    /// Behaves like [`trace`](Self::trace) but captures a panic raised by `f`,
+    /// returning `Err` with the frames recorded up to the failure. The frame
+    /// that panicked has no return value, so
+    /// [`CallTrace::panicked_frames`] identifies exactly where the invocation
+    /// tree broke — which is the case an opaque host panic code leaves
+    /// undiagnosable.
+    ///
+    /// ```ignore
+    /// let (result, trace) = env.try_trace(|| router.swap(&alice, &too_much));
+    /// assert!(result.is_err());
+    /// let failed = trace.panicked_frames();
+    /// assert_eq!(failed[0].function, "transfer");
+    /// ```
+    pub fn try_trace<F, T>(
+        &self,
+        f: F,
+    ) -> (
+        Result<T, Box<dyn std::any::Any + Send>>,
+        crate::call_graph::CallTrace,
+    )
+    where
+        F: FnOnce() -> T,
+    {
+        let before = self.begin_trace();
+        // `MockEnv` holds `Rc<RefCell<..>>` and so is not `RefUnwindSafe`; the
+        // environment is only read after the unwind, never left half-updated by
+        // it, so the assertion is sound here.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        let trace = self.end_trace(before);
+        (result, trace)
+    }
+
+    /// Enables host diagnostics, resets the budget, and snapshots the buffer.
+    ///
+    /// The host clears its diagnostic event buffer at the start of every
+    /// top-level invocation, so after a call the buffer holds exactly that
+    /// call's frames. A closure that invokes no contract leaves the previous
+    /// call's buffer in place, so the snapshot taken here lets `end_trace`
+    /// recognise that nothing new ran and report an empty trace.
+    ///
+    /// The budget is reset so the instruction and fee figures attributed to the
+    /// tree describe this call rather than everything the test has run so far.
+    fn begin_trace(&self) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+        self.inner
+            .host()
+            .enable_debug()
+            .expect("enabling host diagnostics must succeed");
+        self.inner.cost_estimate().budget().reset_default();
+        self.diagnostic_events()
+    }
+
+    /// Builds the call tree from the diagnostic events of the traced call.
+    fn end_trace(
+        &self,
+        before: std::vec::Vec<soroban_sdk::xdr::ContractEvent>,
+    ) -> crate::call_graph::CallTrace {
+        let after = self.diagnostic_events();
+
+        // An unchanged buffer means the closure invoked no contract, so the
+        // events still present belong to an earlier call and are not this
+        // trace's to report. The fee estimate is a running total the budget
+        // reset does not clear, so it is likewise not attributable here.
+        if after == before {
+            return crate::call_graph::build_trace(&self.inner, &[], 0, 0);
+        }
+
+        let instructions = self.inner.cost_estimate().budget().cpu_instruction_cost();
+        let fee = self.inner.cost_estimate().fee().total;
+        crate::call_graph::build_trace(&self.inner, &after, instructions, fee)
+    }
+
+    /// Reads the host's current diagnostic event buffer.
+    fn diagnostic_events(&self) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+        self.inner
+            .host()
+            .get_diagnostic_events()
+            .map(|events| events.0)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|host_event| host_event.event)
+            .collect()
+    }
+
     /// Inspect a contract call without the ability to commit.
     ///
     /// Unlike `simulate`, this method does not require the closure to be `'static`,
@@ -1069,8 +1616,130 @@ impl MockEnv {
             contract_ids: Rc::new(RefCell::new(self.contract_ids.borrow().clone())),
             tokens: Rc::new(RefCell::new(self.tokens.borrow().clone())),
             xlm_token_address: Rc::new(RefCell::new(self.xlm_token_address.borrow().clone())),
+            prng_state: Rc::new(RefCell::new(*self.prng_state.borrow())),
             track_costs: self.track_costs,
+            crypto_registry: Rc::new(RefCell::new(self.crypto_registry.borrow().clone())),
+            // A fork gets a fresh stack: checkpoints taken in one environment
+            // must never be redeemable in the other.
+            checkpoints: Rc::new(RefCell::new(self.checkpoints.borrow().forked())),
+            event_rollback: Rc::new(RefCell::new(self.event_rollback.borrow().clone())),
+            // Continue from the current value so unnamed accounts created in
+            // the fork never collide with names copied from the original.
+            unnamed_account_counter: Rc::new(Cell::new(self.unnamed_account_counter.get())),
+            error_registry: Rc::new(RefCell::new(self.error_registry.borrow().clone())),
         }
+    }
+
+    // Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
+
+    /// Mock BN254 G1 addition (`bn254_g1_add` host function stand-in).
+    pub fn bn254_g1_add(&self, p: G1, q: G1) -> G1 {
+        let _ = self;
+        zk::g1_add(p, q)
+    }
+
+    /// Mock BN254 G1 scalar multiplication (`bn254_g1_mul` host function stand-in).
+    pub fn bn254_g1_mul(&self, p: G1, scalar: u64) -> G1 {
+        let _ = self;
+        zk::g1_mul(p, scalar)
+    }
+
+    /// Mock BN254 G2 addition (`bn254_g2_add` host function stand-in).
+    pub fn bn254_g2_add(&self, p: G2, q: G2) -> G2 {
+        let _ = self;
+        zk::g2_add(p, q)
+    }
+
+    /// Mock BN254 G2 scalar multiplication (`bn254_g2_mul` host function stand-in).
+    pub fn bn254_g2_mul(&self, p: G2, scalar: u64) -> G2 {
+        let _ = self;
+        zk::g2_mul(p, scalar)
+    }
+
+    /// Mock BN254 multi-pairing check (`bn254_pairing_check` host function stand-in).
+    pub fn bn254_pairing_check(&self, pairs: &[(G1, G2)]) -> bool {
+        let _ = self;
+        zk::pairing_check(pairs)
+    }
+
+    /// Mock BLS12-381 G1 addition (`bls12_381_g1_add` host function stand-in).
+    pub fn bls12_381_g1_add(&self, p: G1, q: G1) -> G1 {
+        let _ = self;
+        zk::g1_add(p, q)
+    }
+
+    /// Mock BLS12-381 G1 scalar multiplication (`bls12_381_g1_mul` host function stand-in).
+    pub fn bls12_381_g1_mul(&self, p: G1, scalar: u64) -> G1 {
+        let _ = self;
+        zk::g1_mul(p, scalar)
+    }
+
+    /// Mock BLS12-381 G2 addition (`bls12_381_g2_add` host function stand-in).
+    pub fn bls12_381_g2_add(&self, p: G2, q: G2) -> G2 {
+        let _ = self;
+        zk::g2_add(p, q)
+    }
+
+    /// Mock BLS12-381 G2 scalar multiplication (`bls12_381_g2_mul` host function stand-in).
+    pub fn bls12_381_g2_mul(&self, p: G2, scalar: u64) -> G2 {
+        let _ = self;
+        zk::g2_mul(p, scalar)
+    }
+
+    /// Mock BLS12-381 multi-pairing check (`bls12_381_pairing_check` host function stand-in).
+    pub fn bls12_381_pairing_check(&self, pairs: &[(G1, G2)]) -> bool {
+        let _ = self;
+        zk::pairing_check(pairs)
+    }
+
+    /// Sample a Groth16 verifying key for `n_public` public inputs on `curve`.
+    pub fn groth16_verifying_key(
+        &self,
+        curve: PairingCurve,
+        n_public: usize,
+    ) -> Groth16VerifyingKey {
+        let _ = self;
+        zk::sample_verifying_key(curve, n_public)
+    }
+
+    /// Generate a valid Groth16 proof for `vk` and `public_inputs`.
+    pub fn generate_groth16_proof(
+        &self,
+        vk: &Groth16VerifyingKey,
+        public_inputs: &[u64],
+    ) -> Groth16Proof {
+        let _ = self;
+        zk::generate_groth16_proof(vk, public_inputs)
+            .expect("public input count must match verifying key IC length")
+    }
+
+    /// Verify a Groth16 proof against `vk` using the mock pairing check.
+    pub fn verify_groth16(
+        &self,
+        vk: &Groth16VerifyingKey,
+        proof: &Groth16Proof,
+        public_inputs: &[u64],
+    ) -> bool {
+        let _ = self;
+        zk::verify_groth16(vk, proof, public_inputs)
+    }
+
+    /// Produce a structurally valid but algebraically invalid Groth16 proof.
+    pub fn tamper_groth16_proof(&self, proof: Groth16Proof) -> Groth16Proof {
+        let _ = self;
+        zk::tamper_groth16_proof(proof)
+    }
+
+    /// Generate a valid Plonk proof for a single public input.
+    pub fn generate_plonk_proof(&self, curve: PairingCurve, public_input: u64) -> PlonkProof {
+        let _ = self;
+        zk::generate_plonk_proof(curve, public_input)
+    }
+
+    /// Verify a Plonk proof using the mock pairing check.
+    pub fn verify_plonk(&self, curve: PairingCurve, proof: &PlonkProof, public_input: u64) -> bool {
+        let _ = self;
+        zk::verify_plonk(curve, proof, public_input)
     }
 
     /// Simulate a contract call that is expected to fail (panic/revert).
@@ -1092,7 +1761,7 @@ impl MockEnv {
     /// ```
     pub fn simulate_failing_call<F, T>(&self, f: F) -> FailedCallResult
     where
-        F: FnOnce() -> T + std::panic::UnwindSafe,
+        F: FnOnce() -> T,
     {
         self.inner.mock_all_auths();
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1120,6 +1789,318 @@ impl MockEnv {
                 message: None,
             },
         }
+    }
+
+    /// Captures the current ledger state and returns a handle to it.
+    ///
+    /// Contract instance, persistent and temporary storage are all captured.
+    /// Registered contracts, accounts and tokens are *not* part of the
+    /// snapshot and are never disturbed by a rollback, so any client or handle
+    /// obtained before the checkpoint stays valid afterwards.
+    ///
+    /// Snapshots share their entries structurally, so a checkpoint is cheap
+    /// enough to take at every node of a speculative execution tree.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let before = env.checkpoint();
+    /// vault.liquidate(&borrower.address());
+    /// env.rollback_to(before);
+    /// ```
+    ///
+    /// See also [`rollback_to`](Self::rollback_to) and
+    /// [`release_checkpoint`](Self::release_checkpoint).
+    pub fn checkpoint(&self) -> CheckpointId {
+        self.checkpoints.borrow_mut().capture(self.inner.host())
+    }
+
+    /// Restores the ledger to the state captured by `id`.
+    ///
+    /// Entries written since the checkpoint are reverted, and entries created
+    /// since the checkpoint are removed. `id` itself remains valid, so the same
+    /// point can be rolled back to repeatedly while exploring alternative
+    /// branches.
+    ///
+    /// Every checkpoint taken *after* `id` is discarded, since the state those
+    /// checkpoints described no longer exists.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` came from a different environment (including a
+    /// [`fork`](Self::fork)), or if it was invalidated by an earlier rollback
+    /// to an older checkpoint.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let before = env.checkpoint();
+    /// counter.increment();
+    /// assert_eq!(counter.value(), 1);
+    ///
+    /// env.rollback_to(before);
+    /// assert_eq!(counter.value(), 0);
+    /// ```
+    pub fn rollback_to(&self, id: CheckpointId) {
+        self.checkpoints
+            .borrow_mut()
+            .rollback(self.inner.host(), id);
+    }
+
+    /// Discards `id` and every checkpoint taken after it without restoring.
+    ///
+    /// Use this when a speculative branch is accepted: the work stays, and the
+    /// snapshots backing it are released.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`rollback_to`](Self::rollback_to).
+    pub fn release_checkpoint(&self, id: CheckpointId) {
+        self.checkpoints.borrow_mut().release(id);
+    }
+
+    /// Returns how many checkpoints are currently live.
+    pub fn checkpoint_depth(&self) -> usize {
+        self.checkpoints.borrow().depth()
+    }
+
+    /// Returns the entry counts captured by `id`, broken down by durability.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`rollback_to`](Self::rollback_to).
+    pub fn checkpoint_stats(&self, id: CheckpointId) -> CheckpointStats {
+        self.checkpoints.borrow().stats(id)
+    }
+
+    /// Runs `f` inside a checkpoint and always rolls back afterwards.
+    ///
+    /// This is the speculative-execution shorthand: whatever `f` writes to the
+    /// ledger is discarded, while its return value is handed back to the
+    /// caller. The rollback also happens if `f` panics, so a reverted
+    /// speculative branch cannot leak state into the rest of the test.
+    ///
+    /// Contract events emitted during speculation are pruned as well: the host
+    /// event-stream index is snapshotted before `f` runs, and any events
+    /// recorded after that pointer are hidden from MockEnv event observers on
+    /// exit (including panic unwind).
+    ///
+    /// Unlike [`simulate`](Self::simulate), which reports the cost and auth
+    /// profile of a call, this is about ledger state: it answers "what would
+    /// this do?" without leaving any trace.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Find out what the liquidation would pay out, without performing it.
+    /// let payout = env.speculate(|| vault.liquidate(&borrower.address()));
+    /// assert_eq!(vault.collateral(&borrower.address()), 1_000); // untouched
+    /// ```
+    pub fn speculate<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        let id = self.checkpoint();
+        // Snapshot the event stream prior to speculation.
+        let events_before = self
+            .inner
+            .host()
+            .get_events()
+            .map(|events| events.0)
+            .unwrap_or_default();
+
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+
+        self.rollback_to(id);
+        self.release_checkpoint(id);
+        // Truncate / hide the event log back to the snapshot on exit.
+        self.rollback_events_to(&events_before);
+
+        match outcome {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    /// Hide host events that appeared after `events_before`, accounting for
+    /// metering clears that replace the buffer during speculation.
+    fn rollback_events_to(&self, events_before: &[soroban_env_host::events::HostEvent]) {
+        let events_after = self
+            .inner
+            .host()
+            .get_events()
+            .map(|events| events.0)
+            .unwrap_or_default();
+
+        let mut common = 0usize;
+        while common < events_before.len()
+            && common < events_after.len()
+            && Self::host_event_fingerprint(&events_before[common])
+                == Self::host_event_fingerprint(&events_after[common])
+        {
+            common += 1;
+        }
+
+        let mut state = self.event_rollback.borrow_mut();
+        // Drop hides that referred to a previous buffer generation, then hide
+        // everything past the common prefix (the speculative suffix).
+        state.hidden_indices.clear();
+        state.hidden_indices.extend(common..events_after.len());
+        state.last_len = events_after.len();
+        state.last_head_fingerprint = events_after.first().map(Self::host_event_fingerprint);
+    }
+
+    fn host_event_fingerprint(event: &soroban_env_host::events::HostEvent) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        // ContractEvent / failed_call are the observable identity of a host event.
+        format!("{:?}", event.event).hash(&mut hasher);
+        event.failed_call.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Drop stale hides when the host event buffer has been reset (e.g. by
+    /// invocation metering at the start of a later top-level call).
+    fn sync_event_rollback_state(&self) {
+        let events = self
+            .inner
+            .host()
+            .get_events()
+            .map(|events| events.0)
+            .unwrap_or_default();
+        let mut state = self.event_rollback.borrow_mut();
+        let head = events.first().map(Self::host_event_fingerprint);
+        let cleared = events.len() < state.last_len
+            || (state.last_len > 0
+                && head != state.last_head_fingerprint
+                && !state.hidden_indices.is_empty());
+        if cleared {
+            // A fresh buffer generation — previous speculative hides no longer apply.
+            state.hidden_indices.clear();
+        } else {
+            state.hidden_indices.retain(|&index| index < events.len());
+        }
+        state.last_len = events.len();
+        state.last_head_fingerprint = head;
+    }
+
+    /// Host contract events with speculative / failed entries removed.
+    fn visible_host_events(&self) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+        self.sync_event_rollback_state();
+        let hidden = self.event_rollback.borrow().hidden_indices.clone();
+        self.inner
+            .host()
+            .get_events()
+            .map(|events| events.0)
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, host_event)| {
+                if host_event.failed_call || hidden.contains(&index) {
+                    None
+                } else if host_event.event.type_ == soroban_sdk::xdr::ContractEventType::Contract
+                    && host_event.event.contract_id.is_some()
+                {
+                    Some(host_event.event)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Runs `f` and returns a chainable assertion that it reverted.
+    ///
+    /// This is the fluent counterpart to the [`assert_reverts!`](crate::assert_reverts)
+    /// macro. Unlike the macro, the returned [`RevertAssertion`] is a value: it
+    /// can be stored, passed around, and refined with
+    /// [`with_error`](RevertAssertion::with_error),
+    /// [`with_any_error`](RevertAssertion::with_any_error) or
+    /// [`with_message_containing`](RevertAssertion::with_message_containing)
+    /// before being checked with [`verify`](RevertAssertion::verify) or
+    /// [`and_assert`](RevertAssertion::and_assert).
+    ///
+    /// `f` runs immediately, so any state the revert was supposed to leave
+    /// untouched can be inspected inside `and_assert`.
+    ///
+    /// The assertion is `#[must_use]` and panics if dropped unchecked, so a
+    /// forgotten `.verify()` fails the test rather than passing silently.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use crucible::prelude::*;
+    ///
+    /// env.expect_revert(|| client.transfer(&alice.address(), &bob.address(), &200_i128))
+    ///     .with_error(ContractError::Unauthorized)
+    ///     .verify();
+    ///
+    /// env.expect_revert(|| client.withdraw(&alice.address(), &999_i128))
+    ///     .with_any_error()
+    ///     .and_assert(|| {
+    ///         // The failed withdrawal must not have moved any balance.
+    ///         assert_eq!(token.balance(&alice.address()), 500_i128);
+    ///     });
+    /// ```
+    pub fn expect_revert<F, T>(&self, f: F) -> RevertAssertion
+    where
+        F: FnOnce() -> T,
+    {
+        RevertAssertion::capture(f)
+    }
+
+    /// Registers the variants of a `#[contracterror]` enum so reverts carrying
+    /// their codes are demangled back to `Enum::Variant` names.
+    ///
+    /// ```ignore
+    /// env.register_errors(&[VaultError::Unauthorized, VaultError::InsufficientBalance]);
+    /// assert_reverts!(env, client.admin_only(), err = VaultError::Unauthorized);
+    /// ```
+    pub fn register_errors<E>(&self, variants: &[E])
+    where
+        E: Copy + std::fmt::Debug + Into<soroban_sdk::Error>,
+    {
+        self.error_registry.borrow_mut().register(variants);
+    }
+
+    /// Returns a reference guard to the contract error registry.
+    pub fn error_registry(&self) -> std::cell::Ref<'_, ErrorRegistry> {
+        self.error_registry.borrow()
+    }
+
+    /// Decodes a host panic message such as `HostError: Error(Contract, #1)`
+    /// into the registered `Enum::Variant` name(s).
+    pub fn demangle_error(&self, message: &str) -> Option<String> {
+        self.error_registry.borrow().demangle(message)
+    }
+
+    /// Returns a mutable reference guard to the mock crypto registry.
+    pub fn crypto_registry(&self) -> std::cell::RefMut<'_, MockCryptoRegistry> {
+        self.crypto_registry.borrow_mut()
+    }
+
+    /// Generates a deterministic mock keypair for the given curve and seed.
+    pub fn generate_keypair(&self, curve: CryptoCurve, seed: u64) -> MockKeyPair {
+        match curve {
+            CryptoCurve::Ed25519 => MockKeyPair::generate_ed25519(seed),
+            CryptoCurve::Secp256k1 => MockKeyPair::generate_secp256k1(seed),
+            CryptoCurve::Secp256r1 => MockKeyPair::generate_secp256r1(seed),
+        }
+    }
+
+    /// Generates a deterministic Ed25519 keypair from a numeric seed.
+    pub fn generate_ed25519_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_ed25519(seed)
+    }
+
+    /// Generates a deterministic Secp256k1 keypair from a numeric seed.
+    pub fn generate_secp256k1_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_secp256k1(seed)
+    }
+
+    /// Generates a deterministic Secp256r1 keypair from a numeric seed.
+    pub fn generate_secp256r1_keypair(&self, seed: u64) -> MockKeyPair {
+        MockKeyPair::generate_secp256r1(seed)
     }
 }
 
@@ -1174,13 +2155,32 @@ impl Drop for MockAuthGuard {
 
 impl Default for MockEnv {
     fn default() -> Self {
+        let event_rollback = Rc::new(RefCell::new(EventRollbackState::default()));
+        let env = Env::default();
+        // Clear speculative hides whenever a new top-level host invocation
+        // starts (metering resets the event buffer at the same boundary).
+        let rollback_for_hook = Rc::clone(&event_rollback);
+        let _ = env.host().set_invocation_hook(Some(Rc::new(move |_host, event| {
+            if matches!(event, soroban_env_host::InvocationEvent::Start) {
+                let mut state = rollback_for_hook.borrow_mut();
+                state.hidden_indices.clear();
+                state.last_len = 0;
+                state.last_head_fingerprint = None;
+            }
+        })));
         Self {
-            inner: Env::default(),
+            inner: env,
             accounts: Rc::new(RefCell::new(HashMap::new())),
             contract_ids: Rc::new(RefCell::new(HashMap::new())),
             tokens: Rc::new(RefCell::new(HashMap::new())),
             xlm_token_address: Rc::new(RefCell::new(None)),
+            prng_state: Rc::new(RefCell::new([0; 32])),
             track_costs: false,
+            crypto_registry: Rc::new(RefCell::new(MockCryptoRegistry::new())),
+            checkpoints: Rc::new(RefCell::new(CheckpointStack::new())),
+            event_rollback,
+            unnamed_account_counter: Rc::new(Cell::new(0)),
+            error_registry: Rc::new(RefCell::new(ErrorRegistry::new())),
         }
     }
 }
@@ -1216,6 +2216,30 @@ mod tests {
     use super::*;
     // Ensure MockEnv does NOT implement Send or Sync.
     static_assertions::assert_not_impl_any!(MockEnv: Send, Sync);
+
+    #[test]
+    fn seeded_prng_is_repeatable_and_advances() {
+        let first = MockEnv::default();
+        let second = MockEnv::default();
+        let seed = [7u8; 32];
+        first.set_prng_seed(seed);
+        second.set_prng_seed(seed);
+
+        let first_values = [first.next_prng_u64(), first.next_prng_u64()];
+        let second_values = [second.next_prng_u64(), second.next_prng_u64()];
+
+        assert_eq!(first_values, second_values);
+        assert_ne!(first_values[0], first_values[1]);
+    }
+
+    #[test]
+    fn different_prng_seeds_produce_different_streams() {
+        let first = MockEnv::default();
+        let second = MockEnv::default();
+        first.set_prng_seed([1u8; 32]);
+        second.set_prng_seed([2u8; 32]);
+        assert_ne!(first.next_prng_u64(), second.next_prng_u64());
+    }
 }
 
 /// Builder for constructing a `MockEnv` with custom configuration.
@@ -1330,6 +2354,56 @@ impl MockEnvBuilder {
         self
     }
 
+    /// Register multiple mock tokens at once.
+    ///
+    /// Equivalent to calling [`with_token`](Self::with_token) once per entry.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let env = MockEnv::builder()
+    ///     .with_tokens([
+    ///         ("USDC", 6),
+    ///         ("EURC", 6),
+    ///         ("BTC",  8),
+    ///         ("ETH",  18),
+    ///     ])
+    ///     .build();
+    /// ```
+    pub fn with_tokens<'a, I>(mut self, tokens: I) -> Self
+    where
+        I: IntoIterator<Item = (&'a str, u32)>,
+    {
+        for (symbol, decimals) in tokens {
+            self = self.with_token(symbol, decimals);
+        }
+        self
+    }
+
+    /// Stops the environment writing a test snapshot file when it is dropped.
+    ///
+    /// The Soroban test host writes a JSON snapshot per `Env` by default, which
+    /// is useful for a handful of hand-written tests but produces one file per
+    /// generated case under
+    /// [`#[crucible::quickcheck]`](crate::quickcheck). Property tests should
+    /// build their environments with this.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// #[crucible::quickcheck]
+    /// fn some_property(amount: SorobanAmount) {
+    ///     let env = MockEnv::builder().without_snapshots().build();
+    ///     // ...
+    /// }
+    /// ```
+    pub fn without_snapshots(mut self) -> Self {
+        self.env.inner.set_config(soroban_sdk::testutils::EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        });
+        self
+    }
+
     /// Enable cost tracking for instruction counting.
     pub fn track_costs(mut self) -> Self {
         self.env.track_costs = true;
@@ -1353,6 +2427,316 @@ impl MockEnvBuilder {
             self.env.register_token(&symbol, token);
         }
         self.env
+    }
+}
+
+#[cfg(test)]
+mod builder_tests {
+    use super::*;
+
+    #[test]
+    fn with_tokens_registers_every_entry() {
+        let env = MockEnv::builder()
+            .with_tokens([("USDC", 6), ("EURC", 6), ("BTC", 8)])
+            .build();
+
+        assert_eq!(env.token("USDC").decimals(), 6);
+        assert_eq!(env.token("EURC").decimals(), 6);
+        assert_eq!(env.token("BTC").decimals(), 8);
+    }
+
+    #[test]
+    fn with_tokens_matches_repeated_with_token_calls() {
+        let via_with_tokens = MockEnv::builder()
+            .with_tokens([("USDC", 6), ("BTC", 8)])
+            .build();
+        let via_with_token = MockEnv::builder()
+            .with_token("USDC", 6)
+            .with_token("BTC", 8)
+            .build();
+
+        assert_eq!(
+            via_with_tokens.token("USDC").decimals(),
+            via_with_token.token("USDC").decimals()
+        );
+        assert_eq!(
+            via_with_tokens.token("BTC").decimals(),
+            via_with_token.token("BTC").decimals()
+        );
+    }
+}
+
+/// Supported cryptographic curves for mock signature generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CryptoCurve {
+    Ed25519,
+    Secp256k1,
+    Secp256r1,
+}
+
+/// A deterministic keypair representation for mock crypto testing.
+#[derive(Debug, Clone)]
+pub struct MockKeyPair {
+    pub curve: CryptoCurve,
+    pub seed: u64,
+    pub public_key_bytes: std::vec::Vec<u8>,
+    pub secret_key_bytes: std::vec::Vec<u8>,
+}
+
+impl MockKeyPair {
+    /// Generates a deterministic Ed25519 keypair from a numeric seed.
+    pub fn generate_ed25519(seed: u64) -> Self {
+        let mut seed_bytes = [0_u8; 32];
+        seed_bytes[..8].copy_from_slice(&seed.to_le_bytes());
+        for i in 8..32 {
+            seed_bytes[i] = seed_bytes[i % 8].wrapping_add(i as u8);
+        }
+        let signing_key = Ed25519SigningKey::from_bytes(&seed_bytes);
+        let verifying_key = signing_key.verifying_key();
+        Self {
+            curve: CryptoCurve::Ed25519,
+            seed,
+            public_key_bytes: verifying_key.to_bytes().to_vec(),
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Generates a deterministic Secp256k1 keypair from a numeric seed.
+    pub fn generate_secp256k1(seed: u64) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let signing_key = K256SigningKey::random(&mut rng);
+        let verifying_key = K256VerifyingKey::from(&signing_key);
+        let uncompressed = verifying_key.to_encoded_point(false);
+        let pub_bytes = uncompressed.as_bytes()[1..].to_vec();
+        Self {
+            curve: CryptoCurve::Secp256k1,
+            seed,
+            public_key_bytes: pub_bytes,
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Generates a deterministic Secp256r1 keypair from a numeric seed.
+    pub fn generate_secp256r1(seed: u64) -> Self {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let signing_key = P256SigningKey::random(&mut rng);
+        let verifying_key = P256VerifyingKey::from(&signing_key);
+        let uncompressed = verifying_key.to_encoded_point(false);
+        let pub_bytes = uncompressed.as_bytes()[1..].to_vec();
+        Self {
+            curve: CryptoCurve::Secp256r1,
+            seed,
+            public_key_bytes: pub_bytes,
+            secret_key_bytes: signing_key.to_bytes().to_vec(),
+        }
+    }
+
+    /// Returns the public key as a 32-byte Soroban `BytesN<32>` (used for Ed25519).
+    pub fn public_key_bytes32(&self, env: &Env) -> soroban_sdk::BytesN<32> {
+        let array: [u8; 32] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("public key must be 32 bytes");
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Returns the public key as a 64-byte Soroban `BytesN<64>` (used for Secp256k1 / Secp256r1).
+    pub fn public_key_bytes64(&self, env: &Env) -> soroban_sdk::BytesN<64> {
+        let array: [u8; 64] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("public key must be 64 bytes");
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Returns the public key in SEC-1 uncompressed form as `BytesN<65>`.
+    ///
+    /// The stored `public_key_bytes` holds the 64-byte `X || Y` affine
+    /// coordinates; SEC-1 prefixes those with the `0x04` uncompressed tag.
+    /// This is the encoding [`soroban_sdk::crypto::Crypto::secp256r1_verify`]
+    /// expects.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the keypair is not on an ECDSA curve (i.e. for Ed25519).
+    pub fn public_key_sec1_bytes65(&self, env: &Env) -> soroban_sdk::BytesN<65> {
+        let coords: [u8; 64] = self
+            .public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("SEC-1 encoding requires a 64-byte ECDSA public key");
+        let mut sec1 = [0_u8; 65];
+        sec1[0] = 0x04;
+        sec1[1..].copy_from_slice(&coords);
+        soroban_sdk::BytesN::from_array(env, &sec1)
+    }
+
+    /// Signs a pre-computed 32-byte message digest with an ECDSA curve.
+    ///
+    /// Unlike [`sign`](Self::sign), which hashes the message itself, this signs
+    /// the digest as-is. Use it when the digest was produced separately — for
+    /// example by `env.crypto().sha256(..)` — so that the signature matches
+    /// what the Soroban host verifies.
+    ///
+    /// # Panics
+    ///
+    /// Panics for Ed25519 keypairs, which sign whole messages rather than digests.
+    pub fn sign_prehash(&self, env: &Env, message_digest: &[u8; 32]) -> soroban_sdk::BytesN<64> {
+        let sig_bytes = match self.curve {
+            CryptoCurve::Ed25519 => {
+                panic!("Ed25519 signs whole messages; use `sign` instead of `sign_prehash`")
+            }
+            CryptoCurve::Secp256k1 => {
+                let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: k256::ecdsa::Signature = signing_key
+                    .sign_prehash_recoverable(message_digest)
+                    .expect("signing a 32-byte digest cannot fail")
+                    .0;
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256r1 => {
+                use p256::ecdsa::signature::hazmat::PrehashSigner as _;
+                let signing_key = P256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: p256::ecdsa::Signature = signing_key
+                    .sign_prehash(message_digest)
+                    .expect("signing a 32-byte digest cannot fail");
+                signature.to_bytes().to_vec()
+            }
+        };
+        let array: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Signs a 32-byte message digest and returns the signature together with
+    /// the ECDSA recovery id, as required by
+    /// [`soroban_sdk::crypto::Crypto::secp256k1_recover`].
+    ///
+    /// # Panics
+    ///
+    /// Panics unless the keypair is on the secp256k1 curve.
+    pub fn sign_prehash_recoverable(
+        &self,
+        env: &Env,
+        message_digest: &[u8; 32],
+    ) -> (soroban_sdk::BytesN<64>, u32) {
+        assert_eq!(
+            self.curve,
+            CryptoCurve::Secp256k1,
+            "recoverable signatures are only defined for secp256k1"
+        );
+        let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+        let (signature, recovery_id) = signing_key
+            .sign_prehash_recoverable(message_digest)
+            .expect("signing a 32-byte digest cannot fail");
+        let array: [u8; 64] = signature.to_bytes().as_slice().try_into().unwrap();
+        (
+            soroban_sdk::BytesN::from_array(env, &array),
+            recovery_id.to_byte() as u32,
+        )
+    }
+
+    /// Returns the public key as a Soroban `Bytes`.
+    pub fn public_key_bytes(&self, env: &Env) -> soroban_sdk::Bytes {
+        soroban_sdk::Bytes::from_slice(env, &self.public_key_bytes)
+    }
+
+    /// Signs a message slice and produces a valid 64-byte signature `BytesN<64>`.
+    pub fn sign(&self, env: &Env, message: &[u8]) -> soroban_sdk::BytesN<64> {
+        let sig_bytes = match self.curve {
+            CryptoCurve::Ed25519 => {
+                let sk_array: [u8; 32] = self.secret_key_bytes.as_slice().try_into().unwrap();
+                let signing_key = Ed25519SigningKey::from_bytes(&sk_array);
+                let signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256k1 => {
+                use k256::ecdsa::signature::Signer as _;
+                let signing_key = K256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: k256::ecdsa::Signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+            CryptoCurve::Secp256r1 => {
+                use p256::ecdsa::signature::Signer as _;
+                let signing_key = P256SigningKey::from_slice(&self.secret_key_bytes).unwrap();
+                let signature: p256::ecdsa::Signature = signing_key.sign(message);
+                signature.to_bytes().to_vec()
+            }
+        };
+        let array: [u8; 64] = sig_bytes.as_slice().try_into().unwrap();
+        soroban_sdk::BytesN::from_array(env, &array)
+    }
+
+    /// Signs a Soroban `Bytes` payload and produces a valid 64-byte signature `BytesN<64>`.
+    pub fn sign_bytes(&self, env: &Env, message: &soroban_sdk::Bytes) -> soroban_sdk::BytesN<64> {
+        let mut buf = std::vec::Vec::with_capacity(message.len() as usize);
+        for i in 0..message.len() {
+            buf.push(message.get(i).unwrap());
+        }
+        self.sign(env, &buf)
+    }
+
+    /// Generates a corrupt (invalid) signature for negative path verification testing.
+    pub fn corrupt_signature(&self, env: &Env, message: &[u8]) -> soroban_sdk::BytesN<64> {
+        let mut valid_sig = self.sign(env, message).to_array();
+        valid_sig[63] ^= 0xff;
+        soroban_sdk::BytesN::from_array(env, &valid_sig)
+    }
+
+    /// Generates a corrupt signature from a Soroban `Bytes` payload.
+    pub fn corrupt_signature_bytes(
+        &self,
+        env: &Env,
+        message: &soroban_sdk::Bytes,
+    ) -> soroban_sdk::BytesN<64> {
+        let mut valid_sig = self.sign_bytes(env, message).to_array();
+        valid_sig[63] ^= 0xff;
+        soroban_sdk::BytesN::from_array(env, &valid_sig)
+    }
+}
+
+/// Deterministic mock cryptographic registry managing pre-built keypairs and signature synthesis.
+#[derive(Debug, Clone, Default)]
+pub struct MockCryptoRegistry {
+    keypairs: HashMap<String, MockKeyPair>,
+}
+
+impl MockCryptoRegistry {
+    /// Creates a new empty `MockCryptoRegistry`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a named keypair.
+    pub fn register(&mut self, name: impl Into<String>, keypair: MockKeyPair) {
+        self.keypairs.insert(name.into(), keypair);
+    }
+
+    /// Retrieves a registered keypair by name.
+    pub fn get(&self, name: &str) -> Option<&MockKeyPair> {
+        self.keypairs.get(name)
+    }
+
+    /// Gets or generates an Ed25519 keypair by name.
+    pub fn ed25519_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_ed25519(seed))
+    }
+
+    /// Gets or generates a Secp256k1 keypair by name.
+    pub fn secp256k1_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_secp256k1(seed))
+    }
+
+    /// Gets or generates a Secp256r1 keypair by name.
+    pub fn secp256r1_keypair(&mut self, name: &str, seed: u64) -> &MockKeyPair {
+        self.keypairs
+            .entry(name.to_string())
+            .or_insert_with(|| MockKeyPair::generate_secp256r1(seed))
     }
 }
 
@@ -1576,7 +2960,7 @@ mod extra_tests {
 #[cfg(test)]
 mod time_advance_tests {
     use super::*;
-    use crate::time_helpers::{add_months, datetime_to_unix};
+    use crate::time::{add_months, datetime_to_unix};
 
     const JAN_31_2024: u64 = 1_706_704_245;
     const MAR_15_2024: u64 = 1_710_489_600;
@@ -1629,6 +3013,39 @@ mod time_advance_tests {
         
         env.advance_sequence(0);
         
+        assert_eq!(env.ledger_sequence(), initial_seq);
+    }
+
+    #[test]
+    fn advance_epoch_advances_sequence_and_timestamp() {
+        let env = MockEnv::builder().at_timestamp(1_000_000).build();
+        let initial_seq = env.ledger_sequence();
+
+        env.advance_epoch((Duration::days(7), 1000));
+
+        assert_eq!(env.timestamp(), 1_000_000 + 7 * 86400);
+        assert_eq!(env.ledger_sequence(), initial_seq + 1000);
+    }
+
+    #[test]
+    fn advance_sequence_and_time_advances_both() {
+        let env = MockEnv::builder().at_timestamp(1_000_000).build();
+        let initial_seq = env.ledger_sequence();
+
+        env.advance_sequence_and_time(Duration::hours(2), 50);
+
+        assert_eq!(env.timestamp(), 1_000_000 + 7200);
+        assert_eq!(env.ledger_sequence(), initial_seq + 50);
+    }
+
+    #[test]
+    fn advance_epoch_edge_cases_zero_duration_and_sequences() {
+        let env = MockEnv::builder().at_timestamp(1_000_000).build();
+        let initial_seq = env.ledger_sequence();
+
+        env.advance_epoch((Duration::seconds(0), 0));
+
+        assert_eq!(env.timestamp(), 1_000_000);
         assert_eq!(env.ledger_sequence(), initial_seq);
     }
 }
@@ -1816,3 +3233,269 @@ mod missing_lookup_tests {
     }
 }
 
+#[cfg(test)]
+mod protocol_version_tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_version_getter_returns_default() {
+        let env = MockEnv::default();
+        assert_eq!(env.protocol_version(), 26);
+    }
+
+    #[test]
+    fn test_with_protocol_version_sets_ledger() {
+        let env = MockEnv::builder()
+            .with_protocol_version(26)
+            .build();
+        assert_eq!(env.protocol_version(), 26);
+    }
+
+    #[test]
+    fn test_protocol_version_enum_values() {
+        assert_eq!(ProtocolVersion::V20.value(), 20);
+        assert_eq!(ProtocolVersion::V21.value(), 21);
+        assert_eq!(ProtocolVersion::V22.value(), 22);
+    }
+
+    #[test]
+    fn test_protocol_version_all_versions() {
+        let versions: Vec<u32> = ProtocolVersion::all().map(|v| v.value()).collect();
+        assert_eq!(versions, vec![20, 21, 22]);
+    }
+
+    #[test]
+    fn test_protocol_version_max_supported() {
+        assert_eq!(ProtocolVersion::max_supported(), ProtocolVersion::V22);
+    }
+
+    #[test]
+    fn test_protocol_version_supports_host_function() {
+        let v20 = ProtocolVersion::V20;
+        let v21 = ProtocolVersion::V21;
+        let v22 = ProtocolVersion::V22;
+
+        assert!(v20.supports_host_function("v1_low_level_operations"));
+        assert!(!v20.supports_host_function("v2_low_level_operations"));
+        assert!(!v20.supports_host_function("v3_low_level_operations"));
+
+        assert!(v21.supports_host_function("v1_low_level_operations"));
+        assert!(v21.supports_host_function("v2_low_level_operations"));
+        assert!(!v21.supports_host_function("v3_low_level_operations"));
+
+        assert!(v22.supports_host_function("v1_low_level_operations"));
+        assert!(v22.supports_host_function("v2_low_level_operations"));
+        assert!(v22.supports_host_function("v3_low_level_operations"));
+    }
+
+    #[test]
+    fn test_protocol_version_from_u32() {
+        assert_eq!(ProtocolVersion::from(20), ProtocolVersion::V20);
+        assert_eq!(ProtocolVersion::from(21), ProtocolVersion::V21);
+        assert_eq!(ProtocolVersion::from(22), ProtocolVersion::V22);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unsupported protocol version: 99")]
+    fn test_protocol_version_from_invalid_u32_panics() {
+        let _ = ProtocolVersion::from(99);
+    }
+
+    #[test]
+    fn test_protocol_version_display() {
+        assert_eq!(format!("{}", ProtocolVersion::V20), "Protocol 20");
+        assert_eq!(format!("{}", ProtocolVersion::V21), "Protocol 21");
+        assert_eq!(format!("{}", ProtocolVersion::V22), "Protocol 22");
+    }
+}
+
+// Location: contracts/crucible/src/env.rs // Production requirement: Zero-Knowledge Proof & BN254/BLS12-381 Verifier Mock Harness
+#[cfg(test)]
+mod zk_pairing_harness_tests {
+    use super::*;
+    use crate::zk::{self, encode_scalar, G1, G2, PairingCurve};
+    use soroban_sdk::{contract, contractimpl, Bytes};
+
+    #[test]
+    fn bn254_host_mocks_add_and_mul() {
+        let env = MockEnv::default();
+        let p = G1::generator();
+        let q = env.bn254_g1_mul(p, 3);
+        let sum = env.bn254_g1_add(p, q);
+        assert_eq!(sum, zk::g1_add(p, q));
+
+        let g2 = G2::generator();
+        let g2s = env.bn254_g2_mul(g2, 5);
+        assert_eq!(env.bn254_g2_add(g2, g2s), zk::g2_add(g2, g2s));
+    }
+
+    #[test]
+    fn bls12_381_host_mocks_pairing_check() {
+        let env = MockEnv::default();
+        let p = env.bls12_381_g1_mul(G1::generator(), 2);
+        let q = env.bls12_381_g2_mul(G2::generator(), 3);
+        // e(2G, 3H) * e(-6G, H) = 1
+        let neg = zk::g1_neg(env.bls12_381_g1_mul(G1::generator(), 6));
+        assert!(env.bls12_381_pairing_check(&[(p, q), (neg, G2::generator())]));
+    }
+
+    #[test]
+    fn generate_and_verify_valid_groth16_on_bn254() {
+        let env = MockEnv::default();
+        let vk = env.groth16_verifying_key(PairingCurve::Bn254, 2);
+        let inputs = [4u64, 9];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+        assert!(env.verify_groth16(&vk, &proof, &inputs));
+    }
+
+    #[test]
+    fn negative_groth16_proof_is_rejected() {
+        let env = MockEnv::default();
+        let vk = env.groth16_verifying_key(PairingCurve::Bls12_381, 1);
+        let inputs = [12u64];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+        let bad = env.tamper_groth16_proof(proof);
+        assert!(!env.verify_groth16(&vk, &bad, &inputs));
+        assert!(!env.verify_groth16(&vk, &proof, &[99]));
+    }
+
+    #[test]
+    fn plonk_valid_and_negative_via_mock_env() {
+        let env = MockEnv::default();
+        let proof = env.generate_plonk_proof(PairingCurve::Bn254, 7);
+        assert!(env.verify_plonk(PairingCurve::Bn254, &proof, 7));
+        assert!(!env.verify_plonk(
+            PairingCurve::Bn254,
+            &zk::tamper_plonk_proof(proof),
+            7
+        ));
+    }
+
+    /// On-chain Groth16 verifier that consumes harness-encoded proof bytes
+    /// for a single public input (IC[0] + pub·IC[1]).
+    #[contract]
+    struct OnChainGroth16Verifier;
+
+    #[contractimpl]
+    impl OnChainGroth16Verifier {
+        pub fn verify_proof(
+            env: soroban_sdk::Env,
+            a: Bytes,
+            b: Bytes,
+            c: Bytes,
+            alpha: Bytes,
+            beta: Bytes,
+            gamma: Bytes,
+            delta: Bytes,
+            ic0: Bytes,
+            ic1: Bytes,
+            public_input: Bytes,
+        ) -> bool {
+            let _ = env;
+            groth16_pairing_equation(
+                &a,
+                &b,
+                &c,
+                &alpha,
+                &beta,
+                &gamma,
+                &delta,
+                &ic0,
+                &ic1,
+                &public_input,
+            )
+        }
+    }
+
+    fn groth16_pairing_equation(
+        a: &Bytes,
+        b: &Bytes,
+        c: &Bytes,
+        alpha: &Bytes,
+        beta: &Bytes,
+        gamma: &Bytes,
+        delta: &Bytes,
+        ic0: &Bytes,
+        ic1: &Bytes,
+        public_input: &Bytes,
+    ) -> bool {
+        let a_x = read_u64(a, 0);
+        let b_x0 = read_u64(b, 0);
+        let c_x = read_u64(c, 0);
+        let alpha_x = read_u64(alpha, 0);
+        let beta_x0 = read_u64(beta, 0);
+        let gamma_x0 = read_u64(gamma, 0);
+        let delta_x0 = read_u64(delta, 0);
+        let input = read_u64(public_input, 0);
+        let l_x = read_u64(ic0, 0).wrapping_add(input.wrapping_mul(read_u64(ic1, 0)));
+
+        let lhs = a_x.wrapping_mul(b_x0);
+        let rhs = alpha_x
+            .wrapping_mul(beta_x0)
+            .wrapping_add(l_x.wrapping_mul(gamma_x0))
+            .wrapping_add(c_x.wrapping_mul(delta_x0));
+        lhs == rhs
+    }
+
+    fn read_u64(bytes: &Bytes, offset: u32) -> u64 {
+        let mut out = [0u8; 8];
+        for i in 0..8u32 {
+            out[i as usize] = bytes.get(offset + i).unwrap_or(0);
+        }
+        u64::from_le_bytes(out)
+    }
+
+    #[test]
+    fn groth16_proof_verifies_on_chain() {
+        let env = MockEnv::default();
+        env.mock_all_auths();
+        let inner = env.inner();
+        let contract_id = inner.register(OnChainGroth16Verifier, ());
+        let client = OnChainGroth16VerifierClient::new(inner, &contract_id);
+
+        let vk = env.groth16_verifying_key(PairingCurve::Bn254, 1);
+        let inputs = [5u64];
+        let proof = env.generate_groth16_proof(&vk, &inputs);
+
+        let ok = client.verify_proof(
+            &proof.a.to_bytes(inner, proof.curve),
+            &proof.b.to_bytes(inner, proof.curve),
+            &proof.c.to_bytes(inner, proof.curve),
+            &vk.alpha_g1.to_bytes(inner, vk.curve),
+            &vk.beta_g2.to_bytes(inner, vk.curve),
+            &vk.gamma_g2.to_bytes(inner, vk.curve),
+            &vk.delta_g2.to_bytes(inner, vk.curve),
+            &vk.ic[0].to_bytes(inner, vk.curve),
+            &vk.ic[1].to_bytes(inner, vk.curve),
+            &encode_scalar(inner, inputs[0]),
+        );
+        assert!(ok, "valid Groth16 proof must verify on-chain");
+    }
+
+    #[test]
+    fn groth16_negative_proof_fails_on_chain() {
+        let env = MockEnv::default();
+        env.mock_all_auths();
+        let inner = env.inner();
+        let contract_id = inner.register(OnChainGroth16Verifier, ());
+        let client = OnChainGroth16VerifierClient::new(inner, &contract_id);
+
+        let vk = env.groth16_verifying_key(PairingCurve::Bls12_381, 1);
+        let inputs = [5u64];
+        let proof = env.tamper_groth16_proof(env.generate_groth16_proof(&vk, &inputs));
+
+        let ok = client.verify_proof(
+            &proof.a.to_bytes(inner, proof.curve),
+            &proof.b.to_bytes(inner, proof.curve),
+            &proof.c.to_bytes(inner, proof.curve),
+            &vk.alpha_g1.to_bytes(inner, vk.curve),
+            &vk.beta_g2.to_bytes(inner, vk.curve),
+            &vk.gamma_g2.to_bytes(inner, vk.curve),
+            &vk.delta_g2.to_bytes(inner, vk.curve),
+            &vk.ic[0].to_bytes(inner, vk.curve),
+            &vk.ic[1].to_bytes(inner, vk.curve),
+            &encode_scalar(inner, inputs[0]),
+        );
+        assert!(!ok, "tampered Groth16 proof must fail on-chain");
+    }
+}

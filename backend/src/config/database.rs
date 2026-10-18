@@ -25,10 +25,17 @@ pub struct DatabaseConfig {
     /// Duration in seconds for Retry-After header when pool is exhausted.
     #[serde(default = "default_pool_retry_after_secs")]
     pub pool_retry_after_secs: u64,
+    /// Dedicated maximum connections for background batch workers.
+    #[serde(default = "default_worker_max_connections")]
+    pub worker_max_connections: u32,
 }
 
 fn default_pool_retry_after_secs() -> u64 {
     5
+}
+
+fn default_worker_max_connections() -> u32 {
+    10
 }
 
 impl fmt::Debug for DatabaseConfig {
@@ -40,6 +47,7 @@ impl fmt::Debug for DatabaseConfig {
             .field("connect_timeout_secs", &self.connect_timeout_secs)
             .field("idle_timeout_secs", &self.idle_timeout_secs)
             .field("pool_retry_after_secs", &self.pool_retry_after_secs)
+            .field("worker_max_connections", &self.worker_max_connections)
             .finish()
     }
 }
@@ -49,6 +57,15 @@ impl DatabaseConfig {
     pub fn to_sqlx_pool_options(&self) -> PgPoolOptions {
         PgPoolOptions::new()
             .max_connections(self.max_connections)
+            .min_connections(self.min_connections)
+            .acquire_timeout(Duration::from_secs(self.connect_timeout_secs))
+            .idle_timeout(Duration::from_secs(self.idle_timeout_secs))
+    }
+
+    /// Converts the configuration into a dedicated SQLx Postgres pool builder for background batch workers.
+    pub fn to_worker_sqlx_pool_options(&self) -> PgPoolOptions {
+        PgPoolOptions::new()
+            .max_connections(self.worker_max_connections)
             .min_connections(self.min_connections)
             .acquire_timeout(Duration::from_secs(self.connect_timeout_secs))
             .idle_timeout(Duration::from_secs(self.idle_timeout_secs))

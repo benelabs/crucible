@@ -15,6 +15,8 @@
 //!
 //! All calculations are timezone-independent, operating strictly in UTC seconds.
 
+use crate::env::{DEFAULT_SECONDS_PER_LEDGER, Duration};
+
 /// Returns `true` if `year` is a leap year in the Gregorian calendar.
 pub fn is_leap_year(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
@@ -185,6 +187,76 @@ pub fn add_years(ts: u64, years: u32) -> u64 {
     datetime_to_unix(new_year, month, new_day, hour, minute, second)
 }
 
+/// Represents a combined epoch advancement of ledger timestamp and sequence number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LedgerEpoch {
+    /// Duration of time to advance.
+    pub duration: Duration,
+    /// Number of ledger sequence numbers to advance.
+    pub sequences: u32,
+    /// Ledger close time in seconds used for auto-calculation (default 5s).
+    pub close_time: u64,
+}
+
+impl LedgerEpoch {
+    /// Creates a new [`LedgerEpoch`] with explicit duration and sequence count.
+    pub fn new(duration: Duration, sequences: u32) -> Self {
+        Self {
+            duration,
+            sequences,
+            close_time: DEFAULT_SECONDS_PER_LEDGER,
+        }
+    }
+
+    /// Creates a [`LedgerEpoch`] from duration, auto-calculating sequence count based on standard ledger close time (5 seconds).
+    pub fn from_duration(duration: Duration) -> Self {
+        let seconds = duration.as_seconds();
+        let sequences = if seconds == 0 {
+            0
+        } else {
+            u32::try_from(seconds.div_ceil(DEFAULT_SECONDS_PER_LEDGER))
+                .expect("sequence count overflow in LedgerEpoch::from_duration")
+        };
+        Self {
+            duration,
+            sequences,
+            close_time: DEFAULT_SECONDS_PER_LEDGER,
+        }
+    }
+
+    /// Configures the ledger close time in seconds for auto-calculating sequence count from duration.
+    pub fn with_ledger_close_time(mut self, seconds: u64) -> Self {
+        assert!(seconds > 0, "ledger close time must be greater than zero");
+        self.close_time = seconds;
+        let total_secs = self.duration.as_seconds();
+        if total_secs > 0 {
+            let ledgers = total_secs.div_ceil(seconds);
+            self.sequences = u32::try_from(ledgers)
+                .expect("sequence count overflow in with_ledger_close_time");
+        } else {
+            self.sequences = 0;
+        }
+        self
+    }
+}
+
+impl From<(Duration, u32)> for LedgerEpoch {
+    fn from((duration, sequences): (Duration, u32)) -> Self {
+        LedgerEpoch::new(duration, sequences)
+    }
+}
+
+impl From<Duration> for LedgerEpoch {
+    fn from(duration: Duration) -> Self {
+        LedgerEpoch::from_duration(duration)
+    }
+}
+
+/// Helper function to construct a [`LedgerEpoch`] with a given duration and sequence count.
+pub fn advance_epoch(duration: Duration, sequences: u32) -> LedgerEpoch {
+    LedgerEpoch::new(duration, sequences)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +417,31 @@ mod tests {
     #[should_panic(expected = "year overflow in add_months")]
     fn add_months_overflow_panics() {
         add_months(JAN_31_2024, u32::MAX);
+    }
+
+    #[test]
+    fn ledger_epoch_creation_and_auto_calculation() {
+        let epoch = LedgerEpoch::new(Duration::days(7), 1000);
+        assert_eq!(epoch.duration.as_seconds(), 7 * 86400);
+        assert_eq!(epoch.sequences, 1000);
+
+        let epoch_auto = LedgerEpoch::from_duration(Duration::seconds(10));
+        assert_eq!(epoch_auto.sequences, 2); // 10s / 5s = 2 ledgers
+    }
+
+    #[test]
+    fn ledger_epoch_with_ledger_close_time() {
+        let epoch = LedgerEpoch::from_duration(Duration::seconds(10)).with_ledger_close_time(2);
+        assert_eq!(epoch.sequences, 5); // 10s / 2s = 5 ledgers
+
+        let epoch_zero = LedgerEpoch::from_duration(Duration::seconds(0)).with_ledger_close_time(5);
+        assert_eq!(epoch_zero.sequences, 0);
+    }
+
+    #[test]
+    fn advance_epoch_helper_constructs_epoch() {
+        let epoch = advance_epoch(Duration::days(1), 500);
+        assert_eq!(epoch.duration.as_seconds(), 86400);
+        assert_eq!(epoch.sequences, 500);
     }
 }

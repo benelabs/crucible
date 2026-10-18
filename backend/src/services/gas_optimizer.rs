@@ -27,6 +27,8 @@ pub enum OptimizationSeverity {
     Critical,
 }
 
+use chrono::{DateTime, Utc};
+
 /// Result of gas optimization analysis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationResult {
@@ -34,6 +36,17 @@ pub struct OptimizationResult {
     pub total_opportunities: usize,
     pub total_estimated_savings: u64,
     pub opportunities: Vec<OptimizationOpportunity>,
+}
+
+/// Real-time gas price and base fee forecaster output.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GasPrediction {
+    pub low_priority_fee: u64,    // 20th percentile
+    pub medium_priority_fee: u64, // 50th percentile
+    pub high_priority_fee: u64,   // 90th percentile
+    pub base_fee: u64,
+    pub ledger_count: usize,
+    pub timestamp: DateTime<Utc>,
 }
 
 /// Gas optimization service for analyzing and optimizing contracts.
@@ -44,6 +57,38 @@ impl GasOptimizer {
     /// Creates a new gas optimizer instance.
     pub fn new() -> Self {
         Self
+    }
+
+    /// Analyzes recent ledger headers to compute rolling percentile gas costs and dynamic fee recommendations.
+    /// Computes 20th (low), 50th (medium), and 90th (high) percentile fees across trailing ledgers.
+    pub fn forecast_gas_fees(&self, recent_ledger_fees: &[u64], base_fee: u64) -> GasPrediction {
+        if recent_ledger_fees.is_empty() {
+            return GasPrediction {
+                low_priority_fee: base_fee,
+                medium_priority_fee: base_fee,
+                high_priority_fee: base_fee,
+                base_fee,
+                ledger_count: 0,
+                timestamp: Utc::now(),
+            };
+        }
+
+        let mut sorted = recent_ledger_fees.to_vec();
+        sorted.sort_unstable();
+
+        let percentile = |p: f64| -> u64 {
+            let index = (p * (sorted.len() - 1) as f64).round() as usize;
+            sorted[index.min(sorted.len() - 1)]
+        };
+
+        GasPrediction {
+            low_priority_fee: percentile(0.20),
+            medium_priority_fee: percentile(0.50),
+            high_priority_fee: percentile(0.90),
+            base_fee,
+            ledger_count: sorted.len(),
+            timestamp: Utc::now(),
+        }
     }
 
     /// Analyzes contract bytecode and returns optimization opportunities.
@@ -348,5 +393,22 @@ mod tests {
         let severity = OptimizationSeverity::Critical;
         let json = serde_json::to_string(&severity).unwrap();
         assert_eq!(json, "\"critical\"");
+    }
+
+    #[test]
+    fn test_forecast_gas_fees_percentiles() {
+        let optimizer = GasOptimizer::new();
+        // Fees: 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000 (10 ledgers)
+        let ledger_fees: Vec<u64> = (1..=10).map(|i| i * 100).collect();
+        let prediction = optimizer.forecast_gas_fees(&ledger_fees, 100);
+
+        assert_eq!(prediction.base_fee, 100);
+        assert_eq!(prediction.ledger_count, 10);
+        // 20th percentile (index 0.20 * 9 = 1.8 -> 2) = 300
+        assert_eq!(prediction.low_priority_fee, 300);
+        // 50th percentile (index 0.50 * 9 = 4.5 -> 5) = 600
+        assert_eq!(prediction.medium_priority_fee, 600);
+        // 90th percentile (index 0.90 * 9 = 8.1 -> 8) = 900
+        assert_eq!(prediction.high_priority_fee, 900);
     }
 }

@@ -3,35 +3,39 @@
 #
 # Usage:
 #   docker buildx build --platform linux/amd64,linux/arm64 -t crucible:latest .
+#
+# Runtime hardening:
+#   - Distroless nonroot user (UID 65532)
+#   - Intended to run with readOnlyRootFilesystem: true
+#   - Scratch / temporary writes must go to /tmp (mount as tmpfs)
 
 # Stage 1: Dependency planning
 FROM lukemathwalker/cargo-chef:latest AS chef
 WORKDIR /app
 
 FROM chef AS planner
-COPY Cargo.toml Cargo.lock ./
-COPY backend/Cargo.toml backend/Cargo.toml
-COPY contracts/Cargo.toml contracts/Cargo.toml
-RUN mkdir -p backend/src contracts/src && \
-    echo "fn main() {}" > backend/src/main.rs && \
-    touch contracts/src/lib.rs
-RUN cargo chef prepare --recipe-path recipe.json
+COPY . .
+RUN cargo chef prepare --bin backend --recipe-path recipe.json
 
 # Stage 2: Build dependencies (cached layer)
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN CARGO_BUILD_JOBS=2 cargo chef cook --release --bin backend --recipe-path recipe.json
 
 # Stage 3: Full build
 COPY . .
-RUN cargo build --release --bin backend
+RUN CARGO_BUILD_JOBS=2 cargo build --release --bin backend
 
-# Stage 4: Runtime image
-FROM gcr.io/distroless/cc-debian12 AS runtime
+# Stage 4: Runtime image (read-only root filesystem ready)
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 WORKDIR /app
-COPY --from=builder /app/target/release/backend /app/backend
-COPY --from=builder /app/backend/migrations /app/migrations
-COPY --from=builder /app/backend/.env.example /app/.env
+
+# Ensure /tmp exists for scratch files when the root filesystem is mounted read-only
+# and /tmp is provided as a writable tmpfs / emptyDir volume at deploy time.
+COPY --from=builder --chown=nonroot:nonroot /app/target/release/backend /app/backend
+COPY --from=builder --chown=nonroot:nonroot /app/backend/migrations /app/migrations
+
+USER nonroot:nonroot
 
 EXPOSE 3000
-ENTRYPOINT ["./backend"]
+ENTRYPOINT ["/app/backend"]

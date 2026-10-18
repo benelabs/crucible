@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "crucible-example-counter"
 version.workspace = true
 edition.workspace = true

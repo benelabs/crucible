@@ -1,0 +1,161 @@
+/* Mobile navigation. The desktop `.header-tabs` / `.tab-btn` rules live in
+   App.css; this file covers the sub-768px drawer only. */
+
+.portal-nav-mobile {
+  display: flex;
+  width: 100%;
+}
+
+.portal-nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(4, 8, 15, 0.6);
+  color: #cbd5e1;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  /* Comfortable touch target. */
+  min-height: 44px;
+}
+
+.portal-nav-toggle:hover {
+  color: #f1f5f9;
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.portal-nav-current {
+  color: #38bdf8;
+}
+
+.portal-nav-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 40;
+  animation: portal-nav-fade var(--motion-duration-fast, 150ms) var(--motion-ease-decelerate, ease-out);
+}
+
+.portal-nav-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(80vw, 300px);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  background: #0b1220;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 4px 0 30px rgba(0, 0, 0, 0.45);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  animation: portal-nav-slide var(--motion-duration-base, 220ms) var(--motion-ease-decelerate, ease-out);
+}
+
+.portal-nav-drawer:focus {
+  outline: none;
+}
+
+.portal-nav-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.portal-nav-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.portal-nav-close:hover {
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.portal-nav-list {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 2px;
+}
+
+.portal-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-family: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  /* Touch target height per WCAG 2.5.5. */
+  min-height: 44px;
+}
+
+.portal-nav-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+}
+
+.portal-nav-item.active {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.portal-nav-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.tab-btn .portal-nav-icon {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+@keyframes portal-nav-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes portal-nav-slide {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-nav-backdrop,
+  .portal-nav-drawer {
+    animation: none;
+  }
+}

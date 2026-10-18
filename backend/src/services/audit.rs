@@ -257,12 +257,22 @@ impl AuditService {
         let mut has_where = false;
 
         if let Some(ref et) = event_type {
+            if et.len() > 100 {
+                return Err(AppError::ValidationError(
+                    "event_type filter parameter exceeds maximum allowed length of 100 characters".into(),
+                ));
+            }
             query_builder.push(" WHERE event_type = ");
             query_builder.push_bind(et);
             has_where = true;
         }
 
         if let Some(ref t_id) = tenant_id {
+            if t_id.len() > 100 {
+                return Err(AppError::ValidationError(
+                    "tenant_id filter parameter exceeds maximum allowed length of 100 characters".into(),
+                ));
+            }
             if has_where {
                 query_builder.push(" AND ");
             } else {
@@ -492,7 +502,7 @@ pub async fn export_audit_logs(
     State(service): State<Arc<AuditService>>,
     Query(query): Query<AuditReportQuery>,
     headers: HeaderMap,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<axum::response::Response, AppError> {
     let accept = headers
         .get(axum::http::header::ACCEPT)
         .and_then(|v| v.to_str().ok())
@@ -508,20 +518,21 @@ pub async fn export_audit_logs(
         .trim()
         .to_string();
 
-    let mut limiter = service.export_rate_limiter.lock().unwrap();
-    let now = Instant::now();
-    let (count, last_reset) = limiter.entry(client_ip.clone()).or_insert((0, now));
-    if now.duration_since(*last_reset) > Duration::from_secs(3600) {
-        *count = 0;
-        *last_reset = now;
+    {
+        let mut limiter = service.export_rate_limiter.lock().unwrap();
+        let now = Instant::now();
+        let (count, last_reset) = limiter.entry(client_ip.clone()).or_insert((0, now));
+        if now.duration_since(*last_reset) > Duration::from_secs(3600) {
+            *count = 0;
+            *last_reset = now;
+        }
+        if *count >= 5 {
+            return Err(AppError::UnsupportedMediaType(
+                "Export rate limit exceeded: 5 exports per hour".into(),
+            ));
+        }
+        *count += 1;
     }
-    if *count >= 5 {
-        return Err(AppError::UnsupportedMediaType(
-            "Export rate limit exceeded: 5 exports per hour".into(),
-        ));
-    }
-    *count += 1;
-    drop(limiter);
 
     let since = chrono::Utc::now() - chrono::Duration::days(service.max_export_days as i64);
     let records = service.export_events(query.event_type, since, query.limit).await?;
@@ -559,8 +570,9 @@ pub async fn export_audit_logs(
                 .unwrap_or("");
             let metadata = record.details.to_string();
 
+            let ts = record.timestamp.to_rfc3339();
             wtr.write_record(&[
-                record.timestamp.to_rfc3339(),
+                ts.as_str(),
                 record.user_id.as_deref().unwrap_or(""),
                 &record.event_type,
                 resource_type,
@@ -571,13 +583,13 @@ pub async fn export_audit_logs(
             ])?;
         }
         wtr.flush()?;
-        let data = wtr.into_inner();
+        let data = wtr.into_inner().map_err(|e| AppError::InternalError(e.to_string()))?;
         Ok((
             [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
             data,
-        ))
+        ).into_response())
     } else {
-        Ok(Json(records))
+        Ok(Json(records).into_response())
     }
 }
 

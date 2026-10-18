@@ -5,6 +5,7 @@
 
 use crate::error::AppError;
 use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tracing::{info, instrument};
@@ -37,7 +38,7 @@ pub async fn get_build_error_analytics(
     let pool = state.pool;
     let redis = state.redis;
     // Try cache first
-    let mut redis_conn = redis.get_async_connection().await.map_err(AppError::from)?;
+    let mut redis_conn = redis.get_multiplexed_async_connection().await.map_err(AppError::from)?;
     if let Ok(cached) = redis_conn.get::<_, String>("build_error_analytics").await {
         if let Ok(data) = serde_json::from_str::<BuildErrorAnalytics>(&cached) {
             info!(cache_hit = true, "Returning cached build error analytics");

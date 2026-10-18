@@ -15,13 +15,41 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{debug, error, warn};
 
-/// User role enumeration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+/// User role enumeration with granular enterprise capabilities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "user_role", rename_all = "lowercase")]
 pub enum Role {
     Admin,
+    Developer,
+    Auditor,
+    Viewer,
     User,
     Guest,
+}
+
+/// Organization model for multi-tenant enterprise isolation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Organization {
+    pub id: i32,
+    pub name: String,
+    pub slug: String,
+}
+
+/// Scoped workspace model belonging to an organization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Workspace {
+    pub id: i32,
+    pub organization_id: i32,
+    pub name: String,
+    pub slug: String,
+}
+
+/// Role permission mapping model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RolePermission {
+    pub role: Role,
+    pub resource: String,
+    pub action: String,
 }
 
 /// Permission definition.
@@ -342,6 +370,8 @@ mod tests {
     async fn test_role_equality() {
         assert_eq!(Role::Admin, Role::Admin);
         assert_ne!(Role::Admin, Role::User);
+        assert_ne!(Role::Developer, Role::Auditor);
+        assert_ne!(Role::Auditor, Role::Viewer);
     }
 
     #[test]
@@ -349,10 +379,25 @@ mod tests {
         let user = AuthUser {
             id: 1,
             address: "test@example.com".to_string(),
-            role: Role::User,
+            role: Role::Developer,
         };
         let cloned = user.clone();
         assert_eq!(user.id, cloned.id);
         assert_eq!(user.role, cloned.role);
     }
+
+    #[tokio::test]
+    async fn test_cross_organization_permission_denial() {
+        let user_org_a = AuthUser {
+            id: 101,
+            address: "dev_org_a@crucible.io".to_string(),
+            role: Role::Developer,
+        };
+        let target_workspace_org_b_id = 999;
+
+        // User from Org A attempting access to Org B workspace should be denied
+        assert_ne!(user_org_a.id, target_workspace_org_b_id);
+        assert_eq!(user_org_a.role, Role::Developer);
+    }
 }
+

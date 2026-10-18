@@ -1,11 +1,11 @@
-error: expected `[` to open the dependency list; use `requires = [Type1, Type2, ...]`
- --> tests/ui/fail-fixture-malformed-requires.rs:6:22
+error: #[fixture] takes no arguments other than `requires = [..]`
+ --> tests/ui/fail-fixture-malformed-requires.rs:5:11
   |
-6 | #[fixture(requires = TokenFixture)]
-  |                      ^^^^^^^^^^^^
+5 | #[fixture(requires = [TokenFixture))]
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: expected `[`
- --> tests/ui/fail-fixture-malformed-requires.rs:6:22
+error: unexpected closing delimiter: `)`
+ --> tests/ui/fail-fixture-malformed-requires.rs:5:35
   |
-6 | #[fixture(requires = TokenFixture)]
-  |                      ^^^^^^^^^^^^
+5 | #[fixture(requires = [TokenFixture))]
+  |                                   ^

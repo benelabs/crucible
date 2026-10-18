@@ -14,6 +14,7 @@
 #   Logs:          docker compose logs -f app
 #   Teardown:      docker compose down
 #   Full cleanup:  docker compose down -v  (removes volumes)
+#   Make target:   make clean-test-env     (from repo root; tears down + deletes volumes)
 #
 # Environment variables are loaded from .env (see .env.example)
 # =============================================================================

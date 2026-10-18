@@ -12,10 +12,6 @@
 use crate::env::{MockEnv, Stroops};
 use crate::token::MockToken;
 use soroban_sdk::Address;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Global counter for generating unique unnamed account identifiers.
-static UNNAMED_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A handle to a Soroban account used in tests.
 #[derive(Clone)]
@@ -54,6 +50,14 @@ impl AccountHandle {
     }
 
     /// Returns the account's balance in a given token.
+    ///
+    /// Equivalent to `token.balance(&account.address())` — both query the
+    /// same underlying token contract storage on the shared [`MockEnv`], so
+    /// either form reflects the live balance, including amounts minted via
+    /// [`MockToken::mint`](crate::token::MockToken::mint) after the account
+    /// was created. Prefer this method when you already hold an
+    /// `AccountHandle` and want to avoid re-deriving the address; prefer
+    /// `token.balance(..)` when you only have the address.
     pub fn token_balance(&self, token: &MockToken) -> i128 {
         token.balance(&self.address)
     }
@@ -94,11 +98,12 @@ pub struct AccountBuilder<'env> {
 impl<'env> AccountBuilder<'env> {
     /// Creates a new `AccountBuilder` for the given environment.
     ///
-    /// The default name is auto-generated as `"unnamed_<N>"` using a global
-    /// atomic counter, preventing collisions when multiple unnamed accounts
-    /// are built in the same test run.
+    /// The default name is auto-generated as `"unnamed_<N>"` using a counter
+    /// owned by the `MockEnv`, preventing collisions when multiple unnamed
+    /// accounts are built in the same environment without sharing state
+    /// across parallel tests.
     pub fn new(env: &'env MockEnv) -> Self {
-        let id = UNNAMED_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let id = env.next_unnamed_account_id();
         Self {
             env,
             name: format!("unnamed_{}", id),
@@ -147,7 +152,7 @@ impl<'env> AccountBuilder<'env> {
         let name = if self.name.is_empty() {
             format!(
                 "unnamed_{}",
-                UNNAMED_COUNTER.fetch_add(1, Ordering::Relaxed)
+                self.env.next_unnamed_account_id()
             )
         } else {
             self.name.clone()
@@ -241,6 +246,23 @@ mod tests {
         // Should be retrievable from env
         let charlie_ref = env.account("charlie");
         assert_eq!(charlie_ref.address(), charlie.address());
+    }
+
+    #[test]
+    fn test_token_balance_reflects_mint_after_account_creation() {
+        let env = MockEnv::builder()
+            .with_account("alice", Stroops::xlm(1_000))
+            .build();
+
+        let usdc = MockToken::new(&env, "USDC", 6);
+        let alice = env.account("alice");
+
+        // Mint happens after the account handle already exists.
+        usdc.mint(&alice.address(), 5_000_000);
+
+        assert_eq!(alice.token_balance(&usdc), 5_000_000);
+        // Both query paths must agree.
+        assert_eq!(usdc.balance(&alice.address()), 5_000_000);
     }
 
     #[test]

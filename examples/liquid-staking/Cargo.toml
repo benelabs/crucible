@@ -1,0 +1,14 @@
+[package]
+license.workspace = true
+name = "crucible-example-liquid-staking"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+crucible = { path = "../../contracts/crucible" }

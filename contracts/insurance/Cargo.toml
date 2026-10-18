@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "insurance"
 version = "0.1.0"
 edition = "2021"

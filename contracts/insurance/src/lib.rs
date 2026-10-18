@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env};
 
 #[contracttype]
 #[derive(Clone)]
@@ -9,6 +9,8 @@ struct InsurancePolicy {
     contract_address: Address,
     coverage_amount: i128,
     premium: i128,
+    duration_days: u64,
+    claimed_total: i128, // sum of pending + approved claims
     active: bool,
     created_at: u64,
     expires_at: u64,
@@ -28,6 +30,7 @@ struct Claim {
 #[contracttype]
 enum DataKey {
     Admin,
+    Token,
     TotalReserves,
     PolicyCounter,
     ClaimCounter,
@@ -61,9 +64,10 @@ impl Insurance {
         env.storage().instance().set(&DataKey::ReentrancyGuard, &false);
     }
     /// Initialize insurance contract
-    pub fn initialize(env: Env, admin: Address, initial_reserves: i128) {
+    pub fn initialize(env: Env, admin: Address, token: Address, initial_reserves: i128) {
         let storage = env.storage().instance();
         storage.set(&DataKey::Admin, &admin);
+        storage.set(&DataKey::Token, &token);
         storage.set(&DataKey::TotalReserves, &initial_reserves);
         storage.set(&DataKey::PolicyCounter, &0u64);
         storage.set(&DataKey::ClaimCounter, &0u64);
@@ -83,8 +87,24 @@ impl Insurance {
         if coverage_amount <= 0 || premium <= 0 {
             return Err("Amounts must be positive");
         }
+        if duration_days == 0 {
+            return Err("Duration must be positive");
+        }
+
+        let duration_secs = duration_days.checked_mul(86400).ok_or("Duration overflow")?;
+        let now = env.ledger().timestamp();
+        let expires_at = now.checked_add(duration_secs).ok_or("Duration overflow")?;
 
         let storage = env.storage().instance();
+
+        // Collect premium from holder
+        let token_addr: Address = storage.get(&DataKey::Token).ok_or("Token not set")?;
+        token::Client::new(&env, &token_addr).transfer(
+            &holder,
+            &env.current_contract_address(),
+            &premium,
+        );
+
         let mut counter: u64 = storage.get(&DataKey::PolicyCounter).unwrap_or(0);
         counter += 1;
 
@@ -94,9 +114,11 @@ impl Insurance {
             contract_address,
             coverage_amount,
             premium,
+            duration_days,
+            claimed_total: 0,
             active: true,
-            created_at: env.ledger().timestamp(),
-            expires_at: env.ledger().timestamp() + (duration_days * 86400),
+            created_at: now,
+            expires_at,
         };
 
         storage.set(&DataKey::Policy(counter), &policy);
@@ -107,6 +129,9 @@ impl Insurance {
             .get(&DataKey::PolicyBalance(holder.clone()))
             .unwrap_or(0);
         storage.set(&DataKey::PolicyBalance(holder), &(balance + premium));
+
+        let reserves: i128 = storage.get(&DataKey::TotalReserves).unwrap_or(0);
+        storage.set(&DataKey::TotalReserves, &(reserves + premium));
 
         env.events()
             .publish((symbol_short!("policy"), counter), coverage_amount);
@@ -124,7 +149,7 @@ impl Insurance {
         let storage = env.storage().instance();
 
         // Verify policy exists and is active
-        let policy: InsurancePolicy = storage
+        let mut policy: InsurancePolicy = storage
             .get(&DataKey::Policy(policy_id))
             .ok_or("Policy not found")?;
 
@@ -136,11 +161,22 @@ impl Insurance {
             return Err("Policy expired");
         }
 
-        if amount <= 0 || amount > policy.coverage_amount {
+        if amount <= 0 {
             return Err("Invalid claim amount");
         }
 
+        let new_claimed_total = policy
+            .claimed_total
+            .checked_add(amount)
+            .ok_or("Claim overflow")?;
+        if new_claimed_total > policy.coverage_amount {
+            return Err("Claim exceeds remaining coverage");
+        }
+
         policy.holder.require_auth();
+
+        policy.claimed_total = new_claimed_total;
+        storage.set(&DataKey::Policy(policy_id), &policy);
 
         let mut counter: u64 = storage.get(&DataKey::ClaimCounter).unwrap_or(0);
         counter += 1;
@@ -178,12 +214,27 @@ impl Insurance {
             return Err("Claim already processed");
         }
 
+        let reserves: i128 = storage.get(&DataKey::TotalReserves).unwrap_or(0);
+        if reserves < claim.amount {
+            return Err("Insufficient reserves");
+        }
+
+        let policy: InsurancePolicy = storage
+            .get(&DataKey::Policy(claim.policy_id))
+            .ok_or("Policy not found")?;
+
+        // Effects before interaction
         claim.status = 1; // approved
         storage.set(&DataKey::Claim(claim_id), &claim);
-
-        // Deduct from reserves
-        let reserves: i128 = storage.get(&DataKey::TotalReserves).unwrap_or(0);
         storage.set(&DataKey::TotalReserves, &(reserves - claim.amount));
+
+        // Pay out to policy holder
+        let token_addr: Address = storage.get(&DataKey::Token).ok_or("Token not set")?;
+        token::Client::new(&env, &token_addr).transfer(
+            &env.current_contract_address(),
+            &policy.holder,
+            &claim.amount,
+        );
 
         env.events()
             .publish((symbol_short!("apprv"), claim_id), claim.amount);
@@ -208,6 +259,13 @@ impl Insurance {
 
         claim.status = 2; // rejected
         storage.set(&DataKey::Claim(claim_id), &claim);
+
+        // Release the rejected amount back to the policy's remaining coverage
+        let mut policy: InsurancePolicy = storage
+            .get(&DataKey::Policy(claim.policy_id))
+            .ok_or("Policy not found")?;
+        policy.claimed_total -= claim.amount;
+        storage.set(&DataKey::Policy(claim.policy_id), &policy);
 
         env.events()
             .publish((symbol_short!("rejct"), claim_id), 0);
@@ -253,7 +311,37 @@ impl Insurance {
             return Err("Policy is not active");
         }
 
-        policy.expires_at += extension_days * 86400;
+        if extension_days == 0 {
+            return Err("Extension must be positive");
+        }
+
+        let extension_secs = extension_days
+            .checked_mul(86400)
+            .ok_or("Duration overflow")?;
+        let new_expires_at = policy
+            .expires_at
+            .checked_add(extension_secs)
+            .ok_or("Duration overflow")?;
+
+        // Pro-rata renewal premium: premium * extension_days / duration_days (rounded up)
+        let renewal_premium = policy
+            .premium
+            .checked_mul(extension_days as i128)
+            .ok_or("Premium overflow")?;
+        let duration = policy.duration_days as i128;
+        let renewal_premium = (renewal_premium + duration - 1) / duration;
+
+        let token_addr: Address = storage.get(&DataKey::Token).ok_or("Token not set")?;
+        token::Client::new(&env, &token_addr).transfer(
+            &policy.holder,
+            &env.current_contract_address(),
+            &renewal_premium,
+        );
+
+        let reserves: i128 = storage.get(&DataKey::TotalReserves).unwrap_or(0);
+        storage.set(&DataKey::TotalReserves, &(reserves + renewal_premium));
+
+        policy.expires_at = new_expires_at;
         storage.set(&DataKey::Policy(policy_id), &policy);
 
         env.events()

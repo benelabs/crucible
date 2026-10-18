@@ -1,5 +1,5 @@
 // Struct that already derives Debug — the macro must not add a duplicate derive.
-use crucible_macros::fixture;
+use crucible::prelude::*;
 
 #[fixture]
 #[derive(Debug, Clone)]

@@ -1,5 +1,11 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec};
+
+/// Maximum age of a price observation before it is considered stale (1 hour).
+const MAX_STALENESS_SECONDS: u64 = 3_600;
+
+/// Maximum allowed price deviation per update: 15%
+const MAX_PRICE_DEVIATION_BPS: i128 = 1500; // basis points (15% = 1500 bps)
 
 #[contracttype]
 #[derive(Clone)]
@@ -25,9 +31,12 @@ enum DataKey {
     Admin,
     SourceCounter,
     DataSource(u64),
+    SourceByAddress(Address),
     Price(String),
     PriceHistory(String, u64),
     SourceWhitelist(Address),
+    SourceSymbols(Address),
+    PriceSubmitter(String),
 }
 
 /// Oracle Contract with multiple data sources
@@ -37,6 +46,43 @@ pub struct Oracle;
 
 #[contractimpl]
 impl Oracle {
+    /// Load price data for `symbol` and verify it is fresher than [`MAX_STALENESS_SECONDS`].
+    fn load_fresh_price(env: &Env, symbol: String) -> Result<PriceData, &'static str> {
+        let storage = env.storage().instance();
+        let price_data: PriceData = storage
+            .get(&DataKey::Price(symbol))
+            .ok_or("Price not found")?;
+
+        let current_time = env.ledger().timestamp();
+        let age = current_time.saturating_sub(price_data.timestamp);
+        if age > MAX_STALENESS_SECONDS {
+            return Err("Price data is stale");
+        }
+
+        Ok(price_data)
+    }
+
+    /// Look up the `DataSource` associated with `address`.
+    fn find_source_by_address(env: &Env, address: &Address) -> Option<DataSource> {
+        let storage = env.storage().instance();
+        if let Some(source_id) = storage.get::<_, u64>(&DataKey::SourceByAddress(address.clone())) {
+            if let Some(source) = storage.get::<_, DataSource>(&DataKey::DataSource(source_id)) {
+                return Some(source);
+            }
+        }
+
+        let source_counter: u64 = storage.get(&DataKey::SourceCounter).unwrap_or(0);
+        for source_id in 1..=source_counter {
+            if let Some(source) = storage.get::<_, DataSource>(&DataKey::DataSource(source_id)) {
+                if &source.address == address {
+                    return Some(source);
+                }
+            }
+        }
+
+        None
+    }
+
     /// Initialize oracle contract
     pub fn initialize(env: Env, admin: Address) {
         let storage = env.storage().instance();
@@ -62,6 +108,7 @@ impl Oracle {
         };
 
         storage.set(&DataKey::DataSource(counter), &source);
+        storage.set(&DataKey::SourceByAddress(address.clone()), &counter);
         storage.set(&DataKey::SourceCounter, &counter);
         storage.set(&DataKey::SourceWhitelist(address), &true);
 
@@ -92,8 +139,29 @@ impl Oracle {
             return Err("Source not whitelisted");
         }
 
+        // Verify the associated DataSource entity exists and is active (#1080)
+        let data_source =
+            Self::find_source_by_address(&env, &source).ok_or("Source not found")?;
+        if !data_source.active {
+            return Err("Source is deactivated");
+        }
+
         if price <= 0 {
             return Err("Price must be positive");
+        }
+
+        // Check price deviation against previous price
+        if let Some(prev_price_data) = storage.get::<_, PriceData>(&DataKey::Price(symbol.clone())) {
+            let prev_price = prev_price_data.price;
+            if prev_price > 0 {
+                // Calculate absolute percentage deviation in basis points
+                let price_diff = (price - prev_price).abs();
+                let deviation_bps = (price_diff * 10000) / prev_price;
+
+                if deviation_bps > MAX_PRICE_DEVIATION_BPS {
+                    return Err("Price deviation exceeds maximum threshold of 15%");
+                }
+            }
         }
 
         let timestamp = env.ledger().timestamp();
@@ -107,6 +175,25 @@ impl Oracle {
         };
 
         storage.set(&DataKey::Price(symbol.clone()), &price_data);
+        storage.set(&DataKey::PriceSubmitter(symbol.clone()), &source);
+
+        // Track symbols submitted by this source so cached prices can be purged on deactivation
+        let mut symbols: Vec<String> = storage
+            .get(&DataKey::SourceSymbols(source.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut already_tracked = false;
+        for i in 0..symbols.len() {
+            if let Some(existing) = symbols.get(i) {
+                if existing == symbol {
+                    already_tracked = true;
+                    break;
+                }
+            }
+        }
+        if !already_tracked {
+            symbols.push_back(symbol.clone());
+            storage.set(&DataKey::SourceSymbols(source), &symbols);
+        }
 
         // Store in history
         storage.set(
@@ -120,24 +207,20 @@ impl Oracle {
         Ok(())
     }
 
-    /// Get latest price for a symbol
+    /// Get latest price for a symbol.
+    /// Reverts if the observation is older than [`MAX_STALENESS_SECONDS`].
     pub fn get_price(env: Env, symbol: String) -> Result<i128, &'static str> {
-        env.storage()
-            .instance()
-            .get::<_, PriceData>(&DataKey::Price(symbol))
-            .map(|data| data.price)
-            .ok_or("Price not found")
+        let data = Self::load_fresh_price(&env, symbol)?;
+        Ok(data.price)
     }
 
-    /// Get price data with source info
+    /// Get price data with source info.
+    /// Reverts if the observation is older than [`MAX_STALENESS_SECONDS`].
     pub fn get_price_data(env: Env, symbol: String) -> Result<PriceData, &'static str> {
-        env.storage()
-            .instance()
-            .get(&DataKey::Price(symbol))
-            .ok_or("Price not found")
+        Self::load_fresh_price(&env, symbol)
     }
 
-    /// Aggregate prices from multiple sources (average)
+    /// Aggregate prices from multiple sources using median
     pub fn aggregate_price(env: Env, symbol: String, num_sources: u64) -> Result<i128, &'static str> {
         if num_sources == 0 {
             return Err("num_sources must be positive");
@@ -145,13 +228,95 @@ impl Oracle {
 
         let storage = env.storage().instance();
 
-        // For MVP, return the latest price
-        // In production, this would aggregate from multiple sources
-        let price_data: PriceData = storage
-            .get(&DataKey::Price(symbol))
-            .ok_or("Price not found")?;
+        // Get current fresh price and verify we have enough data
+        let current_price = Self::load_fresh_price(&env, symbol.clone())?;
 
-        Ok(price_data.price)
+        // Count active sources
+        let source_counter: u64 = storage.get(&DataKey::SourceCounter).unwrap_or(0);
+        let mut active_count = 0u64;
+
+        for source_id in 1..=source_counter {
+            if let Some(source) = storage.get::<_, DataSource>(&DataKey::DataSource(source_id)) {
+                if source.active {
+                    active_count += 1;
+                }
+            }
+        }
+
+        // If num_sources is 1 or we have fewer active sources, return current price
+        if num_sources == 1 || active_count < 2 {
+            return Ok(current_price.price);
+        }
+
+        // For median calculation, we use the current price as one data point
+        // and simulate getting prices from multiple sources
+        // In production, each source would have its own price entry
+        let mut prices: Vec<i128> = Vec::new(&env);
+        
+        // Add current price as the base
+        prices.push_back(current_price.price);
+
+        // For now, we use the price history to gather additional price points
+        // This is a simplified implementation - production would track per-source prices
+        let current_time = env.ledger().timestamp();
+        
+        // Try to get historical prices from the last hour (3600 seconds)
+        let lookback = 3600u64;
+        let start_time = current_time.saturating_sub(lookback);
+        
+        // Collect up to num_sources price points from history
+        let mut found = 1u64;
+        let mut t = start_time;
+        
+        while found < num_sources && t < current_time {
+            if let Some(price) = storage.get::<_, i128>(&DataKey::PriceHistory(symbol.clone(), t)) {
+                if price != current_price.price {
+                    prices.push_back(price);
+                    found += 1;
+                    if found >= num_sources {
+                        break;
+                    }
+                }
+            }
+            t += 1; // Check each second
+        }
+
+        if prices.len() < 2 {
+            // Not enough historical data, return current price with warning
+            return Ok(current_price.price);
+        }
+
+        // Sort prices to find median
+        let len = prices.len();
+        
+        // Simple selection sort for small arrays
+        for i in 0..len {
+            let mut min_idx = i;
+            for j in (i + 1)..len {
+                if prices.get(j).unwrap_or(i128::MAX) < prices.get(min_idx).unwrap_or(i128::MAX) {
+                    min_idx = j;
+                }
+            }
+            if min_idx != i {
+                let temp = prices.get(i).unwrap_or(0);
+                let min_val = prices.get(min_idx).unwrap_or(0);
+                // Manual swap since we can't do tuple assignment easily
+                prices.set(i, min_val);
+                prices.set(min_idx, temp);
+            }
+        }
+
+        // Return median
+        let mid = prices.len() / 2;
+        if prices.len() % 2 == 0 {
+            // Even: average of two middle values
+            let v1 = prices.get(mid - 1).unwrap_or(0);
+            let v2 = prices.get(mid).unwrap_or(0);
+            Ok((v1 + v2) / 2)
+        } else {
+            // Odd: middle value
+            Ok(prices.get(mid).unwrap_or(0))
+        }
     }
 
     /// Get data source details
@@ -177,7 +342,27 @@ impl Oracle {
         storage.set(&DataKey::DataSource(source_id), &source);
 
         // Remove from whitelist
-        storage.set(&DataKey::SourceWhitelist(source.address), &false);
+        storage.set(&DataKey::SourceWhitelist(source.address.clone()), &false);
+
+        // Purge cached prices submitted by this deactivated source (#1080)
+        if let Some(symbols) = storage.get::<_, Vec<String>>(&DataKey::SourceSymbols(source.address.clone())) {
+            for i in 0..symbols.len() {
+                if let Some(sym) = symbols.get(i) {
+                    let should_purge = match storage.get::<_, Address>(&DataKey::PriceSubmitter(sym.clone())) {
+                        Some(submitter) => submitter == source.address,
+                        None => storage
+                            .get::<_, PriceData>(&DataKey::Price(sym.clone()))
+                            .map(|pd| pd.source == source.name)
+                            .unwrap_or(false),
+                    };
+                    if should_purge {
+                        storage.remove(&DataKey::Price(sym.clone()));
+                        storage.remove(&DataKey::PriceSubmitter(sym));
+                    }
+                }
+            }
+            storage.remove(&DataKey::SourceSymbols(source.address));
+        }
 
         env.events()
             .publish((symbol_short!("deact"), source_id), 0);
@@ -209,7 +394,7 @@ impl Oracle {
         Ok(())
     }
 
-    /// Validate price data freshness
+    /// Validate price data freshness against a caller-supplied max age.
     pub fn validate_price_freshness(
         env: Env,
         symbol: String,
@@ -221,7 +406,9 @@ impl Oracle {
             .get(&DataKey::Price(symbol))
             .ok_or("Price not found")?;
 
-        let age = env.ledger().timestamp() - price_data.timestamp;
+        // Use saturating subtraction to prevent underflow if clock drifts backward
+        let current_time = env.ledger().timestamp();
+        let age = current_time.saturating_sub(price_data.timestamp);
         Ok(age <= max_age_seconds)
     }
 }

@@ -1,0 +1,47 @@
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-chip);
+}
+
+.theme-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard),
+              color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.theme-toggle-btn:hover {
+  color: var(--text-body);
+}
+
+.theme-toggle-btn.active {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.theme-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The labels are supporting detail; drop them on narrow headers. */
+@media (max-width: 640px) {
+  .theme-toggle-label {
+    display: none;
+  }
+}

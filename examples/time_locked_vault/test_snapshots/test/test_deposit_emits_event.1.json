@@ -8,6 +8,7 @@
     [],
     [],
     [],
+    [],
     [
       [
         "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJXFF",
@@ -72,6 +73,7 @@
         }
       ]
     ],
+    [],
     [],
     [
       [
@@ -187,7 +189,7 @@
     ]
   ],
   "ledger": {
-    "protocol_version": 25,
+    "protocol_version": 26,
     "sequence_number": 0,
     "timestamp": 1000000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",

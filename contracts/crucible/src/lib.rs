@@ -1,18 +1,43 @@
 pub use soroban_sdk;
 pub mod account;
+pub mod assertions;
+pub mod auth_tree;
+pub mod call_graph;
+pub mod checkpoint;
 pub mod cost;
 pub mod env;
 #[cfg(test)]
+mod assertions_tests;
+#[cfg(test)]
+mod checkpoint_tests;
+#[cfg(test)]
+mod env_crypto_tests;
+#[cfg(test)]
 mod env_event_filter_tests;
+#[cfg(test)]
+mod env_error_demangle_tests;
 mod event_topic_match;
 pub mod fixture;
+pub mod fixture_graph;
+
+/// Alias under which `#[fixture(requires = [..])]` expansions reach the
+/// dependency-graph traits.
+///
+/// The attribute macro cannot know what a crate calls its `crucible` import, so
+/// it emits paths rooted at `crucible_fixture_graph`. Bringing that name into
+/// scope is what `use crucible::prelude::*;` does for you.
+pub use crate::fixture_graph as crucible_fixture_graph;
 pub mod macros;
 pub mod prelude;
-
 pub mod sim;
 #[path = "time_helpers.rs"]
 pub mod time;
+pub use self::time as time_helpers;
 pub mod token;
+pub mod profiler;
+pub mod quickcheck;
+pub mod storage_size;
+pub mod zk;
 
 /// The `#[fixture]` attribute macro for defining reusable test setup structs.
 ///
@@ -22,3 +47,11 @@ pub mod token;
 /// See the [`crucible_macros`] crate documentation for full details and examples.
 #[cfg(feature = "derive")]
 pub use crucible_macros::fixture;
+
+/// The `#[quickcheck]` attribute macro for property-based fuzz tests.
+///
+/// Re-exported from [`crucible_macros`] when the `derive` feature is enabled
+/// (it is enabled by default). See [`crate::quickcheck`] for the runtime it
+/// expands to, and the macro's own documentation for its arguments.
+#[cfg(feature = "derive")]
+pub use crucible_macros::quickcheck;

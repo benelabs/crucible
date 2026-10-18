@@ -1,5 +1,5 @@
-error: duplicate dependency `TokenFixture` in fixture `DexFixture`; each dependency must appear only once (note: paths are compared by their final segment, so `TokenFixture` and `crate::fixtures::TokenFixture` are considered identical)
-  --> tests/ui/fail-fixture-duplicate-dep.rs:10:38
+error: duplicate fixture dependency: `TokenFixture` is required more than once
+  --> tests/ui/fail-fixture-duplicate-dep.rs:17:37
    |
-10 | #[fixture(requires = [TokenFixture, fixtures::TokenFixture])]
-   |                                      ^^^^^^^^^^^^^^^^^^^^^
+17 | #[fixture(requires = [TokenFixture, fixtures::TokenFixture])]
+   |                                     ^^^^^^^^^^^^^^^^^^^^^

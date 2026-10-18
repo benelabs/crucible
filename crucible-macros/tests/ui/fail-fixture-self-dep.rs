@@ -1,8 +1,8 @@
-// A fixture that lists itself as a dependency must fail.
-// This validates Issue #1068: self-cycle detection.
-use crucible_macros::fixture;
+// A fixture that lists itself as a dependency via path alias must fail.
+// This validates Issue #1068: self-cycle detection with path normalization.
+use crucible::prelude::*;
 
-#[fixture(requires = [MyFixture])]
+#[fixture(requires = [self::MyFixture])]
 pub struct MyFixture {
     pub value: i32,
 }

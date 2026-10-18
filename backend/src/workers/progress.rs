@@ -1,4 +1,4 @@
-use redis::Client;
+use redis::{AsyncCommands, Client};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::time::{Duration, Instant};
@@ -41,7 +41,7 @@ impl JobProgressTracker {
         info!("Updating job progress...");
 
         // Get Redis connection
-        let mut redis_conn = self.redis_client.get_async_connection().await?;
+        let mut redis_conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         // Get list of running jobs from Redis (assuming they're stored with "job:" prefix)
         let job_keys: Vec<String> = redis_conn.keys("job:*:progress").await?;
@@ -63,16 +63,21 @@ impl JobProgressTracker {
                                     as u8;
                         }
 
-                        // Store updated progress
-                        redis_conn
-                            .set_ex::<_, _, ()>(
-                                &key,
-                                serde_json::to_string(&progress)?,
-                                3600_u64, // 1 hour TTL
-                            )
-                            .await?;
-
-                        debug!("Updated progress for job: {}", progress.job_id);
+                        // Evict completed jobs (100% progress) from active tracking to prevent memory accumulation
+                        if progress.progress_percentage >= 100 {
+                            redis_conn.del::<_, ()>(&key).await?;
+                            debug!("Evicted completed job progress entry: {}", progress.job_id);
+                        } else {
+                            // Store updated progress with TTL expiration
+                            redis_conn
+                                .set_ex::<_, _, ()>(
+                                    &key,
+                                    serde_json::to_string(&progress)?,
+                                    3600_u64, // 1 hour TTL
+                                )
+                                .await?;
+                            debug!("Updated progress for job: {}", progress.job_id);
+                        }
                     }
                     Err(e) => {
                         error!("Failed to parse progress data for {}: {}", key, e);
@@ -90,7 +95,7 @@ impl JobProgressTracker {
         &self,
         job_id: &str,
     ) -> Result<Option<JobProgress>, Box<dyn std::error::Error>> {
-        let mut redis_conn = self.redis_client.get_async_connection().await?;
+        let mut redis_conn = self.redis_client.get_multiplexed_async_connection().await?;
         let key = format!("job:{}:progress", job_id);
 
         let progress_data: Option<String> = redis_conn.get(&key).await?;
@@ -111,7 +116,7 @@ impl JobProgressTracker {
         completed_steps: u64,
         total_steps: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut redis_conn = self.redis_client.get_async_connection().await?;
+        let mut redis_conn = self.redis_client.get_multiplexed_async_connection().await?;
         let key = format!("job:{}:progress", job_id);
 
         let progress = JobProgress {

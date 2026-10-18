@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "crucible-example-time-locked-vault"
 version.workspace = true
 edition.workspace = true

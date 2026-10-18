@@ -1,0 +1,15 @@
+error[E0275]: overflow evaluating the requirement `BFixture: AcyclicFixture`
+ --> tests/ui/fail-fixture-cycle.rs:5:1
+  |
+5 | #[fixture(requires = [BFixture])]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `fixture` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0275]: overflow evaluating the requirement `AFixture: AcyclicFixture`
+  --> tests/ui/fail-fixture-cycle.rs:16:1
+   |
+16 | #[fixture(requires = [AFixture])]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `fixture` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,0 +1,63 @@
+{
+  "app": {
+    "title": "Crucible",
+    "subtitle": "Kit de Ferramentas para Desenvolvedores de Contratos Inteligentes Soroban",
+    "nav": {
+      "dashboard": "Painel",
+      "simulator": "Simulador de Transações",
+      "abiExplorer": "Explorador de ABI",
+      "events": "Ouvinte de Eventos",
+      "gas": "Estimador de Gas",
+      "onboarding": "Tutorial do Desenvolvedor"
+    },
+    "language": "Idioma",
+    "footer": "Construído para desenvolvedores Stellar e Soroban"
+  },
+  "dashboard": {
+    "title": "Painel de Desenvolvedores Multi-Cadeia",
+    "networkStatus": "Status da Rede",
+    "activeContracts": "Contratos Ativos",
+    "totalTransactions": "Total de Transações",
+    "avgGasFee": "Taxa Média de Gas",
+    "recentActivity": "Atividade Recente"
+  },
+  "simulator": {
+    "title": "Simulador de Transações",
+    "contractId": "ID do Contrato",
+    "functionName": "Nome da Função",
+    "simulate": "Simular Transação",
+    "result": "Resultado da Simulação",
+    "success": "Simulação Bem-sucedida",
+    "failed": "Simulação Falhou"
+  },
+  "abi": {
+    "title": "Explorador de ABI de Contratos",
+    "search": "Pesquisar funções...",
+    "functions": "Funções",
+    "types": "Tipos de Dados"
+  },
+  "events": {
+    "title": "Painel de Ouvinte de Eventos",
+    "liveFeed": "Feed de Eventos ao Vivo",
+    "filterTopics": "Filtrar por Tópicos",
+    "clearFeed": "Limpar Feed"
+  },
+  "gas": {
+    "title": "Estimador de Custo de Gas",
+    "estimateBtn": "Estimar Gas",
+    "instructions": "Contagem de Instruções",
+    "memory": "Bytes de Memória"
+  },
+  "onboarding": {
+    "title": "Tutorial de Integração do Desenvolvedor",
+    "welcome": "Bem-vindo ao Crucible",
+    "getStarted": "Começar",
+    "nextStep": "Próximo Passo",
+    "prevStep": "Passo Anterior"
+  },
+  "wallet": {
+    "connect": "Conectar Carteira",
+    "disconnect": "Desconectar",
+    "connected": "Conectado"
+  }
+}

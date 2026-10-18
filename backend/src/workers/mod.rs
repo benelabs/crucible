@@ -8,11 +8,13 @@ pub mod dlq;
 pub mod error;
 pub mod executor;
 pub mod health;
+pub mod ingestion;
 pub mod job_history;
 pub mod priority;
 pub mod progress;
 pub mod retry;
 pub mod scheduler;
+pub mod webhook;
 
 pub use cache_warm::CacheWarmWorker;
 pub use dlq::{DeadLetterJob, DeadLetterQueue};
@@ -20,6 +22,7 @@ pub use executor::TaskExecutor;
 pub use health::WorkerHealthMonitor;
 pub use progress::JobProgressTracker;
 pub use scheduler::{Scheduler, SchedulerHandle, JobContext, JobHandler, JobDefinition};
+pub use webhook::WebhookDispatcherWorker;
 
 use std::sync::Arc;
 use std::time::Duration;

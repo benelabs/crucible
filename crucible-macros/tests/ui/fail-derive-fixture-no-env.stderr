@@ -1,5 +1,13 @@
 error: #[derive(Fixture)] requires an `env: MockEnv` field
- --> tests/ui/fail-derive-fixture-no-env.rs:6:7
+ --> tests/ui/fail-derive-fixture-no-env.rs:5:8
   |
-6 | struct BadFixture {
-  |       ^^^^^^^^^^^
+5 | struct BadFixture {
+  |        ^^^^^^^^^^
+
+warning: unused import: `crucible::prelude::*`
+ --> tests/ui/fail-derive-fixture-no-env.rs:2:5
+  |
+2 | use crucible::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

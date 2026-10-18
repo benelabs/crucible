@@ -158,9 +158,14 @@ async fn run_job_loop(
 
         debug!("Next execution scheduled in {:?}", duration_until_next);
 
-        // Sleep until the next tick, or break if cancelled
+        // Wait until the next tick using an interval with MissedTickBehavior::Skip
+        // to prevent rapid burst executions if Tokio runtime is starved
+        let mut interval_ticker = tokio::time::interval(duration_until_next.max(Duration::from_millis(1)));
+        interval_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval_ticker.tick().await; // consume initial tick
+
         tokio::select! {
-            _ = tokio::time::sleep(duration_until_next) => {}
+            _ = interval_ticker.tick() => {}
             _ = cancel_token.cancelled() => {
                 info!("Job loop cancelled, shutting down");
                 break;
@@ -176,7 +181,7 @@ async fn run_job_loop(
         let lock_key = format!("{}:lock", job.name);
         let lock_ttl_ms = (job.timeout_secs + 5) * 1000;
 
-        let mut conn = match redis.get_async_connection().await {
+        let mut conn = match redis.get_multiplexed_async_connection().await {
             Ok(conn) => conn,
             Err(e) => {
                 error!("Failed to connect to Redis for lock acquisition: {}", e);
@@ -194,8 +199,6 @@ async fn run_job_loop(
             .await
         {
             Ok(v) => v,
-            Ok(Some(v)) if v == "OK" => true,
-            Ok(_) => false,
             Err(e) => {
                 error!("Failed to acquire distributed lock: {}", e);
                 continue;

@@ -1,5 +1,5 @@
 // Generic struct — the macro must preserve the generic parameters on the impl block.
-use crucible_macros::fixture;
+use crucible::prelude::*;
 
 #[fixture]
 pub struct WrapperFixture<T: Default + std::fmt::Debug + Clone> {

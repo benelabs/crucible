@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Cpu, Play, HelpCircle, Code2, FileText, CheckCircle2 } from 'lucide-react';
 import './ContractAbiExplorer.css';
-import { ContractExecutionStateMachine, ExecutionState } from '../machines/contractExecutionMachine';
+import { ContractExecutionStateMachine } from '../machines/contractExecutionMachine';
+import type { ExecutionState } from '../machines/contractExecutionMachine';
 
 interface FunctionArg {
   name: string;

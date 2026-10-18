@@ -1,9 +1,8 @@
-error[E0599]: no function or associated item named `setup` found for struct `MyFixture` in the current scope
+error[E0433]: cannot find module or crate `crucible_fixture_graph` in this scope
  --> tests/ui/fail-missing-setup.rs:6:1
   |
 6 | #[fixture]
-  | ^^^^^^^^^^ function or associated item not found in `MyFixture`
-7 | pub struct MyFixture {
-  | -------------------- function or associated item `setup` not found for this struct
+  | ^^^^^^^^^^ use of unresolved module or unlinked crate `crucible_fixture_graph`
   |
+  = help: if you wanted to use a crate named `crucible_fixture_graph`, use `cargo add crucible_fixture_graph` to add it to your `Cargo.toml`
   = note: this error originates in the attribute macro `fixture` (in Nightly builds, run with -Z macro-backtrace for more info)

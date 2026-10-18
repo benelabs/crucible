@@ -12,16 +12,18 @@ members = [
     "examples/staking",
     "examples/time_locked_vault",
     "examples/emergency_stop",
+    "examples/emergency-circuit-breaker",
     "examples/gasless",
     "examples/cross-contract",
     "examples/lending",
     "examples/prediction-market",
     "examples/escrow-multi-arbiter",
+    "examples/flash-mint",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.0"
+version = "1.34.2"
 edition = "2021"
 rust-version = "1.91.0"
 license = "MIT"
@@ -37,5 +39,5 @@ codegen-units = 1
 strip = true
 
 [workspace.dependencies]
-soroban-sdk = { version = "26", features = ["testutils"] }
-crucible-macros = { path = "crucible-macros", version = "0.1.0" }
+soroban-sdk = { version = "28", features = ["testutils"] }
+crucible-macros = { path = "crucible-macros", version = "1.16.0" }

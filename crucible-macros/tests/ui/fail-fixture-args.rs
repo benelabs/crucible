@@ -1,4 +1,4 @@
-// Passing unknown arguments to #[fixture] must produce a clear compile error.
+// Passing arguments to #[fixture] must produce a clear compile error.
 use crucible_macros::fixture;
 
 #[fixture(debug)]

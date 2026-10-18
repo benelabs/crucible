@@ -13,41 +13,60 @@ describe('App Component', () => {
     global.fetch = originalFetch;
     vi.clearAllMocks();
   });
-  it('renders correctly and defaults to tutorial tab', () => {
+  it('renders correctly and defaults to tutorial tab', async () => {
     render(<App />);
     expect(screen.getByText('Crucible Developer Portal')).toBeInTheDocument();
-    
+
     // Check that Tutorial is the active tab by default
     expect(screen.getByTestId('tab-tutorial')).toHaveClass('active');
-    expect(screen.getByTestId('onboarding-tutorial')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('onboarding-tutorial')).toBeInTheDocument();
+    });
   });
 
-  it('switches to Gas Estimator tab', () => {
+  it('switches to Gas Estimator tab', async () => {
     render(<App />);
     const gasTabBtn = screen.getByTestId('tab-metrics');
     fireEvent.click(gasTabBtn);
-    
+
     expect(gasTabBtn).toHaveClass('active');
-    // Gas estimator component should be in document
-    expect(screen.getByText('Gas Cost Estimator')).toBeInTheDocument();
+    // Gas estimator component is lazy-loaded
+    await waitFor(() => {
+      expect(screen.getByText('Gas Cost Estimator')).toBeInTheDocument();
+    });
   });
 
-  it('switches to MultiChain Dashboard tab', () => {
+  it('switches to MultiChain Dashboard tab', async () => {
     render(<App />);
     const multiChainBtn = screen.getByTestId('tab-multichain');
     fireEvent.click(multiChainBtn);
-    
+
     expect(multiChainBtn).toHaveClass('active');
-    expect(screen.getByText('Multi-Chain Support')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Multi-Chain Support')).toBeInTheDocument();
+    });
   });
 
-  it('switches to ABI Explorer tab', () => {
+  it('switches to ABI Explorer tab', async () => {
     render(<App />);
     const abiBtn = screen.getByTestId('tab-abi');
     fireEvent.click(abiBtn);
-    
+
     expect(abiBtn).toHaveClass('active');
-    expect(screen.getByText('Contract ABI Explorer')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Contract ABI Explorer')).toBeInTheDocument();
+    });
+  });
+
+  it('switches to Challenges tab', async () => {
+    render(<App />);
+    const challengesBtn = screen.getByTestId('tab-challenges');
+    fireEvent.click(challengesBtn);
+
+    expect(challengesBtn).toHaveClass('active');
+    await waitFor(() => {
+      expect(screen.getByTestId('challenge-engine')).toBeInTheDocument();
+    });
   });
 
   it('switches to Compiler Service tab', () => {
@@ -128,5 +147,39 @@ describe('App Component', () => {
     await waitFor(() => {
       expect(screen.queryByText(/Load cargo descriptor file/)).not.toBeInTheDocument();
     });
+  });
+
+  it('opens the Dependency Graph tab and renders the visualizer', () => {
+    render(<App />);
+    const graphBtn = screen.getByTestId('tab-graph');
+    fireEvent.click(graphBtn);
+    expect(graphBtn).toHaveClass('active');
+    expect(screen.getByText('Contract Dependency Tree Visualizer')).toBeInTheDocument();
+  });
+
+  it('triggers compile via the Cmd/Ctrl+Enter shortcut', async () => {
+    (global.fetch as any).mockResolvedValueOnce({
+      json: async () => ({ status: 'success', data: { status: 'success', wasmSizeBytes: 10, compileTimeMs: 1, wasmHash: 'x', logs: 'ok' } }),
+    });
+    render(<App />);
+    fireEvent.click(screen.getByTestId('tab-compiler'));
+    fireEvent.keyDown(document, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect(screen.getByText('Size: 10 B')).toBeInTheDocument();
+    });
+  });
+
+  it('saves a draft via the Cmd/Ctrl+S shortcut', () => {
+    render(<App />);
+    fireEvent.keyDown(document, { key: 's', metaKey: true });
+    expect(localStorage.getItem('crucible:compile-draft')).not.toBeNull();
+    expect(localStorage.getItem('crucible:draft-saved-at')).not.toBeNull();
+  });
+
+  it('opens the command palette via the Cmd/Ctrl+K shortcut', () => {
+    render(<App />);
+    expect(screen.queryByTestId('command-palette-modal')).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+    expect(screen.getByTestId('command-palette-modal')).toBeInTheDocument();
   });
 });

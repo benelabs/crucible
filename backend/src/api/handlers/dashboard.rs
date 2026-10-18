@@ -315,6 +315,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{body::Body, http::Request, routing::get, Router};
     use sqlx::postgres::PgPoolOptions;
     use tower::ServiceExt;
 

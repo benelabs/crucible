@@ -231,6 +231,25 @@ fn test_double_resolve_reverts() {
 }
 
 #[test]
+fn test_zero_winning_liquidity_refunds_all_positions() {
+    let ctx = Ctx::setup();
+    ctx.initialize();
+    ctx.env.mock_all_auths();
+    ctx.client().buy(&ctx.alice, &Outcome::Yes, &ALICE_STAKE);
+    ctx.client().buy(&ctx.bob, &Outcome::Yes, &BOB_STAKE);
+
+    ctx.env.advance_time(Duration::seconds(CLOSE_DELAY));
+    ctx.client().resolve(&ctx.admin, &Outcome::No);
+
+    assert_eq!(ctx.client().get_state().status, MarketStatus::Refund);
+    assert_eq!(ctx.client().claim(&ctx.alice), ALICE_STAKE);
+    assert_eq!(ctx.client().claim(&ctx.bob), BOB_STAKE);
+    assert_eq!(ctx.token.balance(&ctx.id), 0);
+    assert_eq!(ctx.client().position(&ctx.alice, &Outcome::Yes), 0);
+    assert_eq!(ctx.client().position(&ctx.bob, &Outcome::Yes), 0);
+}
+
+#[test]
 fn test_claim_before_resolution_reverts() {
     let ctx = Ctx::setup();
     ctx.fund_market();

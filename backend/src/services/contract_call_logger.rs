@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use crate::services::tracing::TracingService;
 use tracing::{info, instrument};
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
@@ -28,6 +29,13 @@ impl ContractCallLogger {
 
     #[instrument(skip(self))]
     pub async fn log_call(&self, log: ContractCallLog) -> Result<(), AppError> {
+        let db_span = TracingService::db_query_span(
+            "INSERT INTO contract_call_logs",
+            "postgres",
+            "INSERT",
+        );
+        let _db_enter = db_span.enter();
+
         sqlx::query(
             "INSERT INTO contract_call_logs (contract_id, function_name, arguments, caller, status, gas_used, timestamp) \
              VALUES ($1, $2, $3, $4, $5, $6, $7)"

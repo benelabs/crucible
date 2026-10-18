@@ -1,3 +1,45 @@
+use chrono::Utc;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
+
+static SECRET_KEY_REGEX: OnceLock<Regex> = OnceLock::new();
+
+/// Structured log entry conforming to Elastic Common Schema (ECS) with PII sanitization.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StructuredLog {
+    pub timestamp: String,
+    pub level: String,
+    pub trace_id: String,
+    pub message: String,
+    pub context: serde_json::Value,
+}
+
+/// Scrubs 56-character Stellar secret keys (`S...`) from log messages to prevent secret key leakage.
+pub fn sanitize_log_message(msg: &str) -> String {
+    let re = SECRET_KEY_REGEX.get_or_init(|| Regex::new(r"S[A-Z2-7]{55}").unwrap());
+    re.replace_all(msg, "[REDACTED_SECRET_KEY]").to_string()
+}
+
+/// Formats a log message into structured JSON conforming to ECS with PII sanitization.
+pub fn format_structured_log(
+    level: &str,
+    trace_id: &str,
+    message: &str,
+    context: serde_json::Value,
+) -> String {
+    let sanitized_msg = sanitize_log_message(message);
+    let log_entry = StructuredLog {
+        timestamp: Utc::now().to_rfc3339(),
+        level: level.to_string(),
+        trace_id: trace_id.to_string(),
+        message: sanitized_msg,
+        context,
+    };
+    serde_json::to_string(&log_entry).unwrap_or_else(|_| message.to_string())
+}
+
+/// Middleware to log HTTP requests and responses with PII sanitization and structured JSON output.
 use crate::api::handlers::profiling::AppState;
 use crate::services::http_metrics::http_metrics;
 use crate::services::tracing::TracingService;
@@ -56,6 +98,7 @@ pub async fn logging_middleware(
 
     let path = sanitize_for_log(uri.path());
     let span = TracingService::http_request_span(method.as_str(), &path, None);
+    TracingService::extract_and_attach_trace_context(request.headers(), &span);
 
     let value = span.clone();
     async move {
@@ -70,6 +113,7 @@ pub async fn logging_middleware(
         value.record("http.status_code", status.as_u16());
         if status.is_server_error() {
             TracingService::record_error(&value, status.as_str(), "http_server_error");
+            crate::services::sys_metrics::record_error_rate("http_gateway", status.as_str());
         }
 
         // Log the response
@@ -80,19 +124,20 @@ pub async fn logging_middleware(
             "Finished processing request"
         );
 
-        // Optionally persist log to LogAggregator
-        let log_message = format!(
+        // Format structured log message with secret key sanitization
+        let raw_log = format!(
             "{} {} finished with {} in {:?}",
             sanitize_for_log(method.as_str()),
             path,
             status,
             latency
         );
+        let sanitized_message = sanitize_log_message(&raw_log);
 
         // We don't want to block the response on logging persistence
         let aggregator = state.log_aggregator.clone();
         tokio::spawn(async move {
-            if let Err(e) = aggregator.log("INFO", &log_message, "api_gateway").await {
+            if let Err(e) = aggregator.log("INFO", &sanitized_message, "api_gateway").await {
                 tracing::error!(error = %e, "Failed to send log to aggregator");
             }
         });
@@ -212,5 +257,23 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_stellar_secret_key_sanitization() {
+        let raw_log = "Submitting tx with secret key SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBB";
+        let sanitized = sanitize_log_message(raw_log);
+        assert!(!sanitized.contains("SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBB"));
+        assert!(sanitized.contains("[REDACTED_SECRET_KEY]"));
+    }
+
+    #[test]
+    fn test_format_structured_log_json() {
+        let json_str = format_structured_log("INFO", "trace-123", "User login success", serde_json::json!({"user_id": 42}));
+        let parsed: StructuredLog = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed.level, "INFO");
+        assert_eq!(parsed.trace_id, "trace-123");
+        assert_eq!(parsed.message, "User login success");
+        assert_eq!(parsed.context["user_id"], 42);
     }
 }

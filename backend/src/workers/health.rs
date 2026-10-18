@@ -1,4 +1,4 @@
-use redis::Client;
+use redis::{AsyncCommands, Client};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::time::{Duration, Instant};
@@ -48,7 +48,7 @@ impl WorkerHealthMonitor {
         info!("Checking worker health...");
 
         // Get Redis connection
-        let mut redis_conn = self.redis_client.get_async_connection().await?;
+        let mut redis_conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         // Get list of worker health keys
         let health_keys: Vec<String> = redis_conn.keys("worker:*:health").await?;
@@ -97,7 +97,7 @@ impl WorkerHealthMonitor {
         &self,
         worker_id: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut redis_conn = self.redis_client.get_async_connection().await?;
+        let mut redis_conn = self.redis_client.get_multiplexed_async_connection().await?;
         let key = format!("worker:{}:health", worker_id);
 
         let health = WorkerHealth {
@@ -124,7 +124,7 @@ impl WorkerHealthMonitor {
         &self,
         worker_id: &str,
     ) -> Result<Option<WorkerHealth>, Box<dyn std::error::Error>> {
-        let mut redis_conn = self.redis_client.get_async_connection().await?;
+        let mut redis_conn = self.redis_client.get_multiplexed_async_connection().await?;
         let key = format!("worker:{}:health", worker_id);
 
         let health_data: Option<String> = redis_conn.get(&key).await?;

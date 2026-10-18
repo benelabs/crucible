@@ -1,0 +1,5 @@
+error: `requires` expects a list of fixture types, as in `requires = [TokenFixture, OracleFixture]`
+ --> tests/ui/fail-fixture-requires-not-a-list.rs:4:22
+  |
+4 | #[fixture(requires = TokenFixture)]
+  |                      ^^^^^^^^^^^^

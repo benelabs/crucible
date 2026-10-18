@@ -27,6 +27,7 @@ It is a purpose-built Rust testing library for Soroban — analogous to what jes
   - [Token Contracts](#token-contracts)
   - [Transaction Simulation](#transaction-simulation)
   - [Event Assertions](#event-assertions)
+  - [Testing Cross-Contract Calls](#testing-cross-contract-calls)
   - [Gas & Fee Estimation](#gas--fee-estimation)
   - [Custom Fixtures](#custom-fixtures)
 - [API Reference](#api-reference)
@@ -34,6 +35,9 @@ It is a purpose-built Rust testing library for Soroban — analogous to what jes
   - [AccountBuilder](#accountbuilder)
   - [SimulatedTx](#simulatedtx)
   - [Assertion Macros](#assertion-macros)
+  - [Fluent Revert Assertions](#fluent-revert-assertions)
+  - [Ledger Checkpoints & Rollback](#ledger-checkpoints--rollback)
+  - [Property-Based Fuzzing](#property-based-fuzzing)
   - [Gas Helpers](#gas-helpers)
 - [Examples](#examples)
   - [Testing a Token Contract](#testing-a-token-contract)
@@ -67,10 +71,13 @@ crucible wraps the official `soroban-sdk` test utilities and builds a fluent, er
 
 - **`MockEnvBuilder`** — fluent builder for the Soroban `Env` with sensible defaults, configurable ledger state, and one-liner seeded accounts.
 - **Pre-funded accounts** — generate named accounts with arbitrary XLM and custom token balances ready to go.
-- **Standard mock tokens** — instant `MockToken` for XLM, USDC, or any arbitrary asset; full admin controls included.
+- **Standard mock tokens** — instant `MockToken` for XLM, USDC, EURC, or custom assets; full admin controls included.
 - **Transaction simulation helpers** — wrap contract invocations with fee estimation, auth inspection, and rollback-safe dry-runs.
 - **`assert_emitted!` macro** — pattern-match contract events with a concise, readable syntax.
 - **`assert_not_emitted!` macro** — verify silence; confirm events that must _not_ fire.
+- **`env.expect_revert()`** — fluent, storable revert assertions that match a specific contract error and run post-revert checks.
+- **Checkpoints & rollback** — snapshot ledger state and restore it instantly, so speculative execution trees never need a fresh environment.
+- **`#[crucible::quickcheck]`** — property-based fuzzing with automatic shrinking to a minimal reproducing input and a seed to replay it.
 - **Gas & instruction counting** — measure the compute cost of any invocation directly in tests.
 - **Ledger time control** — jump forward in time, set arbitrary sequence numbers, or simulate a full epoch change with one call.
 - **Fixtures** — re-usable test setup structs with derive support for common patterns.
@@ -242,6 +249,8 @@ The `AccountHandle` type gives you:
 | `.token_balance(&token)` | `i128` | Balance in a given `MockToken` |
 | `.sign(payload)` | `Vec<u8>` | Sign an arbitrary payload with the account keypair |
 
+`account.token_balance(&token)` and `token.balance(&account.address())` are two equivalent ways to query the same live balance — both read the same underlying token contract storage on the shared `MockEnv`, so either reflects amounts minted at any point, including after the account was created. Use whichever reads better at the call site: the account-first form when you already have an `AccountHandle`, the token-first form when you only have an `Address`.
+
 Authorization in tests is driven through `MockEnv`:
 
 - `env.mock_all_auths()` — globally bypasses authorization checks for all subsequent calls.
@@ -348,11 +357,11 @@ let env = MockEnv::builder()
     .with_account("alice", Stroops::xlm(1_000))
     .build();
 
-// Create a mock XLM SAC token
-let xlm = MockToken::xlm(&env);
-
-// Create a custom 6-decimal asset
-let usdc = MockToken::new(&env, "USDC", 6);
+// Create mock tokens using convenience constructors or custom settings
+let xlm  = MockToken::xlm(&env);
+let usdc = MockToken::usdc(&env);
+let eurc = MockToken::eurc(&env);
+let custom = MockToken::new(&env, "CUSTOM", 8);
 
 // Mint tokens to an account
 xlm.mint(&env.account("alice").address(), 50_000_000); // 5 XLM in stroops
@@ -482,6 +491,88 @@ assert_eq!(first.amount, 500_i128);
 
 ---
 
+### Testing Cross-Contract Calls
+
+Contracts rarely work in isolation — a router calls a counter, an aggregator calls a router, a pool calls a token. crucible registers every contract in the same `MockEnv`, so cross-contract calls execute exactly as they would on-chain, and every frame of the call is inspectable from the test.
+
+The `examples/cross-contract` crate is a complete, compiling reference for everything in this section: `Counter` ← `Router` ← `Aggregator`, a two-level call chain with token transfers and events at every level.
+
+#### Registering Dependent Contracts
+
+Register each contract with `.with_contract::<C>()` before `.build()`. Order does not matter — `MockEnv` assigns each contract its own address up front, so contracts can reference each other's addresses at `initialize` time regardless of registration order:
+
+```rust
+let env = MockEnv::builder()
+    .with_contract::<Counter>()
+    .with_contract::<Router>()
+    .with_contract::<Aggregator>()
+    .with_account("alice", Stroops::xlm(100))
+    .build();
+```
+
+#### Routing Contract IDs
+
+Look up each registered contract's address with `env.contract_id::<C>()`, then wire dependent contracts together through their own `initialize` calls — the same way a deployer would on a live network:
+
+```rust
+let counter_id = env.contract_id::<Counter>();
+let router_id  = env.contract_id::<Router>();
+let agg_id     = env.contract_id::<Aggregator>();
+
+env.mock_all_auths();
+RouterClient::new(env.inner(), &router_id).initialize(&counter_id, &token.address());
+AggregatorClient::new(env.inner(), &agg_id).initialize(&router_id);
+```
+
+From here, calling `AggregatorClient::new(env.inner(), &agg_id).aggregate_ping()` drives the full chain — `Aggregator` → `Router` → `Counter` — inside a single test call.
+
+#### Event Assertions in Nested Calls
+
+`assert_emitted!` takes the emitting contract's address as its second argument, so you can assert on events published deep inside the call tree, not just the outermost call. Given `Aggregator::aggregate_ping()` calls `Router::ping_counter()` which calls `Counter::increment()`, each contract's own event is asserted against its own id:
+
+```rust
+agg_client.aggregate_ping();
+
+// The outer contract's event...
+assert_emitted!(env, agg_id, (symbol_short!("aggping"),), 1_u32);
+// ...and the inner contract's event from the same call, asserted independently.
+assert_emitted!(env, counter_id, (symbol_short!("incr"),), 1_u32);
+```
+
+#### Authorization Chains
+
+`env.mock_all_auths()` bypasses `require_auth()` everywhere for the rest of the test — including inside inner contracts reached via cross-contract calls, since the bypass lives on the shared `soroban_sdk::Env` every registered contract runs on. This is why a single `env.mock_all_auths()` before `aggregator.aggregate_transfer(&alice, &bob, &amount)` is enough to satisfy the `from.require_auth()` calls in both `Aggregator::aggregate_transfer` and `Router::route_transfer`.
+
+To test authorization failures in a call chain, use `env.mock_auths(&[..])` with an explicit tree instead — it authorizes only the specific invocation described, so a mismatched or missing entry anywhere in the chain still fails with the real auth error. See [Fluent Revert Assertions](#fluent-revert-assertions) for asserting that failure cleanly. Prefer [`with_mock_all_auths`](#pre-funded-accounts) or `mock_all_auths_scoped()` to contain the bypass to part of a test rather than leaving it enabled for everything that follows.
+
+#### Debugging Tips: Reading Nested Call Traces
+
+When a multi-level call does something unexpected, wrap it in `env.trace()` to capture the full invocation tree instead of guessing from the final state:
+
+```rust
+let (out_amount, trace) = env.trace(|| {
+    agg_client.aggregate_transfer(&alice, &bob, &500_i128)
+});
+
+trace.assert_called("transfer");           // panics with the tree printed if `transfer` never ran
+assert_eq!(trace.max_depth(), 2);          // Aggregator(0) -> Router(1) -> Token(2)
+println!("{}", trace.to_tree_string());    // human-readable call tree for CI logs
+```
+
+If the call panics partway through the chain, `env.try_trace()` captures the frames recorded up to the failure instead of unwinding past them:
+
+```rust
+let (result, trace) = env.try_trace(|| {
+    agg_client.aggregate_transfer(&alice, &bob, &too_much)
+});
+
+assert!(result.is_err());
+let failed = trace.panicked_frames();
+assert_eq!(failed[0].function, "transfer"); // exactly which frame in the chain broke
+```
+
+---
+
 ### Gas & Fee Estimation
 
 crucible exposes the Soroban host instruction meter directly so you can write regression tests against compute cost:
@@ -548,7 +639,7 @@ impl AmmFixture {
             .build();
 
         let xlm  = MockToken::xlm(&env);
-        let usdc = MockToken::new(&env, "USDC", 6);
+        let usdc = MockToken::usdc(&env);
         let alice = env.account("alice");
         let bob   = env.account("bob");
 
@@ -602,6 +693,7 @@ MockEnv::builder()
 
     // Token setup
     .with_token(symbol: &str, decimals: u32)   -> Self
+    .with_tokens(tokens: impl IntoIterator<Item = (&str, u32)>) -> Self
 
     // Diagnostics
     .track_costs()                             -> Self
@@ -663,6 +755,149 @@ assert_reverts!(client.call());
 // Assert approximate equality (useful for fee/reward calculations with rounding)
 assert_approx_eq!(actual, expected, tolerance);
 ```
+
+---
+
+### Fluent Revert Assertions
+
+`assert_reverts!` is a statement and cannot be stored or chained.
+`env.expect_revert(..)` is the same assertion as a *value*, which composes with
+fixture-based suites.
+
+```rust
+// Assert a specific #[contracterror] variant.
+env.expect_revert(|| client.transfer(&alice.address(), &bob.address(), &200_i128))
+    .with_error(ContractError::Unauthorized)
+    .verify();
+
+// Assert any revert.
+env.expect_revert(|| client.claim()).with_any_error().verify();
+
+// Match a raw error code, when the error type is not in scope.
+env.expect_revert(|| client.claim()).with_error_code(3).verify();
+
+// Match the panic message instead.
+env.expect_revert(|| helper()).with_message_containing("time lock").verify();
+
+// Check state after confirming the revert rolled everything back.
+env.expect_revert(|| client.withdraw(&alice.address(), &999_i128))
+    .with_any_error()
+    .and_assert(|| {
+        assert_eq!(token.balance(&alice.address()), 500_i128);
+    });
+
+// The assertion is an ordinary value, so it can be inspected first.
+let assertion = env.expect_revert(|| client.admin_only());
+assert_eq!(assertion.error_code(), Some(1));
+assertion.with_error(ContractError::Unauthorized).verify();
+```
+
+The closure runs immediately, so by the time `and_assert` executes the revert has
+already happened — which is what makes checking untouched state meaningful.
+
+`RevertAssertion` is `#[must_use]` and panics if dropped without
+`.verify()` or `.and_assert(..)`, so a forgotten check fails the test rather
+than passing silently. The `assert_reverts!` macro is unchanged.
+
+---
+
+### Ledger Checkpoints & Rollback
+
+`env.checkpoint()` captures instance, persistent and temporary contract data;
+`env.rollback_to(id)` restores it. Contract, account and token registrations are
+deliberately *not* part of the snapshot, so clients taken before a checkpoint
+stay valid afterwards.
+
+```rust
+let before = env.checkpoint();
+
+// Speculatively execute a liquidation path.
+vault.liquidate(&borrower.address());
+assert_eq!(vault.collateral(&borrower.address()), 0);
+
+// Put everything back and try a different path.
+env.rollback_to(before);
+assert_eq!(vault.collateral(&borrower.address()), 1_000);
+```
+
+Entries written since the checkpoint are reverted and entries *created* since it
+are removed. The same checkpoint can be rolled back to repeatedly, which is what
+makes branching from one point practical.
+
+```rust
+env.checkpoint()            -> CheckpointId
+env.rollback_to(id)                          // restore; keeps `id` valid
+env.release_checkpoint(id)                   // drop the snapshot, keep the work
+env.checkpoint_depth()      -> usize
+env.checkpoint_stats(id)    -> CheckpointStats   // counts by durability
+env.speculate(|| ...)       -> T             // run and always roll back
+```
+
+Checkpoints nest. Rolling back to an outer checkpoint invalidates the inner
+ones rather than silently accepting a stale id, and ids are rejected outright by
+any other environment — including a `fork()`.
+
+---
+
+### Property-Based Fuzzing
+
+`#[crucible::quickcheck]` turns a function into a property test: its parameters
+are generated, and a failing case is **shrunk** to a minimal reproduction before
+being reported.
+
+```rust
+use crucible::prelude::*;
+
+#[crucible::quickcheck]
+fn crediting_never_decreases_the_balance(balance: SorobanAmount, amount: SorobanAmount) {
+    let env = MockEnv::builder().without_snapshots().with_contract::<Ledger>().build();
+    let client = LedgerClient::new(env.inner(), &env.contract_id::<Ledger>());
+
+    let balance = balance.get() % 1_000_000_000;
+    let amount = amount.get() % 1_000_000_000;
+    assert!(client.credit(&balance, &amount) >= balance);
+}
+
+#[crucible::quickcheck(cases = 32, seed = 42)]
+fn addition_is_commutative(a: i64, b: i64) {
+    assert_eq!(a.wrapping_add(b), b.wrapping_add(a));
+}
+```
+
+A failure reports the minimal input and the seed that produced it:
+
+```text
+credit_overflow_is_rejected failed on case 1 of 200.
+
+Minimal failing input : (100,)
+Panic                 : value must stay under 100
+Shrink steps          : 29
+Seed                  : 7
+
+Re-run this exact case with CRUCIBLE_QUICKCHECK_SEED=7.
+```
+
+Generators are biased toward the values that actually find bugs — `0`, `1`, and
+the type bounds — rather than spreading uniformly over a range no contract will
+see. Soroban-shaped newtypes narrow this further:
+
+| Type | Range |
+| --- | --- |
+| `SorobanAmount` | `0 ..= i128::MAX` — token amounts |
+| `SorobanI128` | full `i128`, including negatives |
+| `SorobanU32` | ledger sequence numbers |
+| `SorobanTimestamp` | ledger timestamps |
+
+`Arbitrary` is also implemented for the integer primitives, `bool`, `char`,
+`String`, `Option<T>`, `Vec<T>` and tuples up to eight elements.
+
+**Arguments:** `cases`, `shrink`, `seed`, `size`. Unset arguments fall back to
+`CRUCIBLE_QUICKCHECK_CASES`, `CRUCIBLE_QUICKCHECK_SHRINK` and
+`CRUCIBLE_QUICKCHECK_SEED`, then to the defaults (256 cases, 1024 shrink steps).
+
+Because a property builds one environment per case, use
+`MockEnv::builder().without_snapshots()` to stop the Soroban host writing a
+snapshot JSON file per generated input.
 
 ---
 
@@ -927,7 +1162,7 @@ fn test_aggregator_calls_multiple_pools() {
         .build();
 
     let xlm    = MockToken::xlm(&env);
-    let usdc   = MockToken::new(&env, "USDC", 6);
+    let usdc   = MockToken::usdc(&env);
     let trader = env.account("trader");
 
     // Seed both pools

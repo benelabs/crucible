@@ -1,5 +1,6 @@
-error: fixture `MyFixture` cannot list itself as a dependency
- --> tests/ui/fail-fixture-self-dep.rs:5:24
+error: circular fixture dependency: `MyFixture` requires itself
+       note: a fixture cannot appear in its own `requires` list
+ --> tests/ui/fail-fixture-self-dep.rs:5:23
   |
-5 | #[fixture(requires = [MyFixture])]
-  |                        ^^^^^^^^^
+5 | #[fixture(requires = [self::MyFixture])]
+  |                       ^^^^^^^^^^^^^^^

@@ -4,12 +4,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
+use base64::Engine as _;
+use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+use rsa::traits::PublicKeyParts;
+use rsa::{RsaPrivateKey, RsaPublicKey};
 use utoipa::ToSchema;
 
 /// JSON Web Key (JWK) representation for public key distribution via JWKS.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct JwkKey {
     pub kty: String,
+    #[serde(rename = "use")]
     pub use_: String,
     pub alg: String,
     pub kid: String,
@@ -24,14 +29,29 @@ pub struct JwksResponse {
 }
 
 /// Key metadata for an asymmetric key pair used in JWT signing and verification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct JwtKeyPair {
     pub kid: String,
     pub public_key_pem: String,
+    #[serde(skip)]
     pub private_key_pem: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub is_active: bool,
+}
+
+impl std::fmt::Debug for JwtKeyPair {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("JwtKeyPair")
+            .field("kid", &self.kid)
+            .field("public_key_pem", &self.public_key_pem)
+            .field("private_key_pem", &"[REDACTED]")
+            .field("created_at", &self.created_at)
+            .field("expires_at", &self.expires_at)
+            .field("is_active", &self.is_active)
+            .finish()
+    }
 }
 
 /// Key Manager handling automated key rotation, JWKS generation, and active signing key retrieval.
@@ -61,13 +81,24 @@ impl JwtKeyManager {
         }
     }
 
-    /// Generates a mock asymmetric key pair structure with key ID `kid`.
+    /// Generates a 2048-bit RSA key pair with key ID `kid`.
     pub fn generate_key_pair(kid: &str) -> JwtKeyPair {
         let now = Utc::now();
+        let private_key = RsaPrivateKey::new(&mut rand::rngs::OsRng, 2048)
+            .expect("failed to generate JWT signing key");
+        let public_key = RsaPublicKey::from(&private_key);
+        let private_key_pem = private_key
+            .to_pkcs8_pem(LineEnding::LF)
+            .expect("failed to encode JWT private key")
+            .to_string();
+        let public_key_pem = public_key
+            .to_public_key_pem(LineEnding::LF)
+            .expect("failed to encode JWT public key");
+
         JwtKeyPair {
             kid: kid.to_string(),
-            public_key_pem: format!("-----BEGIN PUBLIC KEY-----\nMockPublicKeyData_{kid}\n-----END PUBLIC KEY-----"),
-            private_key_pem: format!("-----BEGIN RSA PRIVATE KEY-----\nMockPrivateKeyData_{kid}\n-----END RSA PRIVATE KEY-----"),
+            public_key_pem,
+            private_key_pem,
             created_at: now,
             expires_at: now + chrono::Duration::days(30),
             is_active: true,
@@ -112,13 +143,20 @@ impl JwtKeyManager {
         let keys = self.keys.read().unwrap();
         let jwk_keys = keys
             .values()
-            .map(|kp| JwkKey {
-                kty: "RSA".to_string(),
-                use_: "sig".to_string(),
-                alg: "RS256".to_string(),
-                kid: kp.kid.clone(),
-                n: base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, kp.public_key_pem.as_bytes()),
-                e: "AQAB".to_string(),
+            .map(|kp| {
+                let public_key = RsaPublicKey::from_public_key_pem(&kp.public_key_pem)
+                    .expect("stored JWT public key must be valid PEM");
+
+                JwkKey {
+                    kty: "RSA".to_string(),
+                    use_: "sig".to_string(),
+                    alg: "RS256".to_string(),
+                    kid: kp.kid.clone(),
+                    n: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                        .encode(public_key.n().to_bytes_be()),
+                    e: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                        .encode(public_key.e().to_bytes_be()),
+                }
             })
             .collect();
 

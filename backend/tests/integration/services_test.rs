@@ -22,7 +22,7 @@ async fn metrics_exporter_defaults_to_zero() {
 #[tokio::test]
 async fn metrics_exporter_update_reflects_in_get() {
     let exporter = MetricsExporter::new();
-    exporter.update_metrics(42.5, 2048, 120).await;
+    exporter.update_metrics(42.5, 2048, 120, 1024, 512).await;
     let m = exporter.get_metrics().await;
     assert_eq!(m.cpu_usage, 42.5);
     assert_eq!(m.memory_usage, 2048);

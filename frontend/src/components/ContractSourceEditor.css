@@ -1,0 +1,118 @@
+.source-editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  color: var(--text-body);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.source-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.source-editor-icon-wrapper {
+  background: var(--accent-soft);
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.source-editor-icon {
+  color: var(--accent-contrast);
+}
+
+.source-editor-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.source-editor-header p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.source-editor-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.source-editor-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-chip);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.source-editor-badge--error {
+  color: var(--status-danger);
+}
+
+.source-editor-badge--warning {
+  color: var(--status-warning);
+}
+
+.source-editor-surface {
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-overlay);
+  overflow: hidden;
+}
+
+.source-editor-diagnostics {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.source-editor-diagnostic {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-raised);
+  font-size: 0.8rem;
+}
+
+.source-editor-diagnostic--error {
+  border-left-color: var(--status-danger);
+}
+
+.source-editor-diagnostic--warning {
+  border-left-color: var(--status-warning);
+}
+
+.source-editor-diagnostic--info,
+.source-editor-diagnostic--hint {
+  border-left-color: var(--status-info);
+}
+
+.source-editor-diagnostic-location {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--text-faint);
+  white-space: nowrap;
+}

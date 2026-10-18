@@ -106,6 +106,14 @@ pub enum AppError {
     /// 502 — Stellar network communication failure.
     #[error("Stellar operation failed: {0}")]
     StellarError(String),
+
+    /// 500 — CSV serialization error.
+    #[error("CSV error: {0}")]
+    Csv(#[from] csv::Error),
+
+    /// 500 — I/O error.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 // Convenience constructors used by services.
@@ -126,6 +134,12 @@ impl AppError {
     /// Wrap a serialization error.
     pub fn serialization(e: serde_json::Error) -> Self {
         AppError::Serialization(e)
+    }
+}
+
+impl From<axum::extract::rejection::JsonRejection> for AppError {
+    fn from(rejection: axum::extract::rejection::JsonRejection) -> Self {
+        AppError::BadRequest(format!("Malformed JSON request payload: {}", rejection))
     }
 }
 
@@ -248,7 +262,28 @@ impl IntoResponse for AppError {
                     "Failed to communicate with Stellar network".to_string(),
                 )
             }
+            AppError::ServiceUnavailable { retry_after } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "service_unavailable",
+                format!("Service temporarily unavailable. Retry after {retry_after} seconds."),
+            ),
             AppError::LengthRequired(msg) => (StatusCode::LENGTH_REQUIRED, "length_required", msg.clone()),
+            AppError::Csv(e) => {
+                error!("CSV error: {e:?}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "csv_error",
+                    "A CSV serialization error occurred".to_string(),
+                )
+            }
+            AppError::Io(e) => {
+                error!("IO error: {e:?}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "io_error",
+                    "An I/O error occurred".to_string(),
+                )
+            }
         };
 
         (

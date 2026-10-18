@@ -1,0 +1,140 @@
+# Semgrep custom rules: un-sanitized Soroban input deserialization.
+#
+# Contract entry points receive host-supplied XDR / Val payloads. Unwrapping
+# from_xdr / try_from_val on that input (or transmuting raw bytes) can panic
+# the WASM guest or accept malformed state. Prefer TryFrom with explicit error
+# paths and length checks before touching storage.
+
+rules:
+  - id: soroban-unsanitized-xdr-unwrap
+    message: >
+      Un-sanitized Soroban XDR deserialization. `from_xdr(...).unwrap()` on
+      host-supplied bytes panics the contract on malformed input. Use `try_from`
+      / `TryFromVal` and return a contract error after validating length and schema.
+    severity: ERROR
+    languages: [rust]
+    metadata:
+      category: security
+      cwe:
+        - "CWE-502"
+        - "CWE-20"
+      technology:
+        - rust
+        - soroban
+      references:
+        - https://developers.stellar.org/docs/learn/fundamentals/stellar-data-structures/xdr
+    pattern-either:
+      - pattern: $T::from_xdr($ENV, $BYTES).unwrap()
+      - pattern: $T::from_xdr($ENV, $BYTES).expect($MSG)
+      - pattern: $X.from_xdr($BYTES).unwrap()
+      - pattern: $X.from_xdr($BYTES).expect($MSG)
+      - pattern: soroban_sdk::xdr::$T::from_xdr($ENV, $BYTES).unwrap()
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*test*.rs"
+        - "**/macros.rs"
+        - "examples-copy/**"
+
+  - id: soroban-try-from-val-unwrap
+    message: >
+      Un-sanitized Soroban `TryFromVal` on potentially untrusted input. Avoid
+      `try_from_val(...).unwrap()` in contract entry points; map conversion
+      failures to a typed contract error.
+    severity: ERROR
+    languages: [rust]
+    metadata:
+      category: security
+      cwe:
+        - "CWE-502"
+        - "CWE-20"
+      technology:
+        - rust
+        - soroban
+    pattern-either:
+      - pattern: $T::try_from_val($ENV, $VAL).unwrap()
+      - pattern: $T::try_from_val($ENV, $VAL).expect($MSG)
+      - pattern: TryFromVal::try_from_val($ENV, $VAL).unwrap()
+      - pattern: ScVal::try_from_val($ENV, $VAL).unwrap()
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*test*.rs"
+        - "**/macros.rs"
+        - "examples-copy/**"
+
+  - id: soroban-from-xdr-no-length-guard
+    message: >
+      Soroban XDR decode without a preceding length bound. Cap input size
+      before deserialization to avoid guest panic / resource exhaustion.
+    severity: WARNING
+    languages: [rust]
+    metadata:
+      category: security
+      cwe:
+        - "CWE-400"
+      technology:
+        - rust
+        - soroban
+    patterns:
+      - pattern-either:
+          - pattern: $T::from_xdr($ENV, $BYTES)
+          - pattern: $X.from_xdr($ENV, $BYTES)
+      - pattern-not-inside: |
+          if $BYTES.len() > $MAX { ... }
+      - pattern-not-inside: |
+          if $BYTES.len() >= $MAX { ... }
+      - pattern-not-inside: |
+          if $BYTES.len() < $MAX { ... }
+    paths:
+      include:
+        - "contracts/**/*.rs"
+        - "examples/**/*.rs"
+      exclude:
+        - "**/tests/**"
+        - "**/*test*.rs"
+        - "**/macros.rs"
+
+  - id: soroban-raw-bytes-from-slice-unbounded
+    message: >
+      `Bytes::from_slice` copies unbounded caller-supplied memory into the
+      Soroban host heap. Validate `len()` against a fixed maximum before
+      constructing `Bytes` from entry-point arguments.
+    severity: WARNING
+    languages: [rust]
+    metadata:
+      category: security
+      cwe:
+        - "CWE-400"
+      technology:
+        - rust
+        - soroban
+    patterns:
+      - pattern: Bytes::from_slice($ENV, $SLICE)
+      - pattern-not-inside: |
+          if $SLICE.len() > $MAX { ... }
+      - pattern-not-inside: |
+          if $SLICE.len() < $MAX { ... }
+    paths:
+      include:
+        - "contracts/**/*.rs"
+        - "examples/**/*.rs"
+      exclude:
+        - "**/tests/**"
+        - "**/*test*.rs"
+
+  - id: rust-transmute-untrusted
+    message: >
+      `std::mem::transmute` on untrusted bytes bypasses type safety and is a
+      common deserialization gadget. Prefer `TryFrom` / bytemuck-checked paths.
+    severity: ERROR
+    languages: [rust]
+    metadata:
+      category: security
+      cwe:
+        - "CWE-704"
+    pattern: std::mem::transmute($X)
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/*test*.rs"

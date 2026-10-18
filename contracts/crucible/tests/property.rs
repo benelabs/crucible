@@ -63,9 +63,12 @@ fn test_property_duplicate_account_names() {
 #[test]
 fn test_property_empty_symbol_string() {
     let env = MockEnv::builder().build();
-    let result = std::panic::catch_unwind(|| {
+    // `MockEnv` holds `Rc<RefCell<..>>` registries and so is never
+    // `UnwindSafe`; a panicking constructor leaves no observable broken
+    // invariant behind, which is exactly what `AssertUnwindSafe` asserts.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = MockToken::new(&env, "", 6);
-    });
+    }));
     assert!(result.is_err(), "Empty symbol string must fail with a clear message");
 }
 

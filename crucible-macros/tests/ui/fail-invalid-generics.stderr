@@ -1,14 +1,8 @@
-error[E0308]: mismatched types
+error[E0433]: cannot find module or crate `crucible_fixture_graph` in this scope
  --> tests/ui/fail-invalid-generics.rs:4:1
   |
 4 | #[fixture]
-  | ^^^^^^^^^^
-  | |
-  | expected `GenericFixture<T>`, found `GenericFixture<u32>`
-  | expected due to the type of this binding
-5 | pub struct GenericFixture<T> {
-  |                           - expected this type parameter
+  | ^^^^^^^^^^ use of unresolved module or unlinked crate `crucible_fixture_graph`
   |
-  = note: expected struct `GenericFixture<T>`
-             found struct `GenericFixture<u32>`
+  = help: if you wanted to use a crate named `crucible_fixture_graph`, use `cargo add crucible_fixture_graph` to add it to your `Cargo.toml`
   = note: this error originates in the attribute macro `fixture` (in Nightly builds, run with -Z macro-backtrace for more info)

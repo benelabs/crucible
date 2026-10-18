@@ -5,19 +5,56 @@
 
 pub use crate::account::AccountBuilder;
 pub use crate::account::AccountHandle;
+pub use crate::assertions::RevertAssertion;
+pub use crate::auth_tree::{
+    AuthMismatch, AuthTreeReport, ExpectedAuth, ExpectedInvocation, verify_auth_tree,
+};
+pub use crate::call_graph::{CallFrame, CallTrace};
+pub use crate::checkpoint::{CheckpointId, CheckpointStats};
 pub use crate::cost::CostReport;
 pub use crate::env::CapturedEvent;
 pub use crate::env::Duration;
+pub use crate::env::EntryTtlSettings;
+pub use crate::env::DEFAULT_SECONDS_PER_LEDGER;
 pub use crate::env::EventMatches;
 pub use crate::env::FailedCallResult;
 pub use crate::env::MockAuthGuard;
 pub use crate::env::MockEnv;
 pub use crate::env::MockEnvBuilder;
+pub use crate::env::ProtocolVersion;
 pub use crate::env::Stroops;
+pub use crate::sim::BudgetProfile;
+pub use crate::sim::ContractError;
+pub use crate::sim::IngressLock;
+pub use crate::sim::IngressLockValidator;
 pub use crate::sim::PreparedTx;
+pub use crate::sim::ReentrancyProbe;
+pub use crate::sim::ReentrancyProbeResult;
 pub use crate::sim::SimulatedTx;
-pub use crate::time::{add_months, add_years};
+pub use crate::sim::{RentConfig, StorageDurability, StorageFootprint};
+pub use crate::time::{LedgerEpoch, add_months, add_years, advance_epoch};
+pub use crate::env::CryptoCurve;
+pub use crate::env::MockCryptoRegistry;
+pub use crate::env::MockKeyPair;
 pub use crate::token::MockToken;
+pub use crate::profiler::{
+    export_flamegraph_svg, export_speedscope, Frame, GasProfiler, GasProfilerResult, Profile,
+    Sample,
+};
+pub use crate::zk::{
+    G1, G2, Groth16Proof, Groth16VerifyingKey, Gt, PairingCurve, PlonkProof,
+};
+
+pub use crate::quickcheck::{
+    Arbitrary, Config as QuickcheckConfig, SorobanAmount, SorobanI128, SorobanTimestamp,
+    SorobanU32,
+};
+
+pub use crate::fixture_graph::{AcyclicFixture, FixtureDeps};
+
+/// Re-exported so `#[fixture(requires = [..])]` expansions resolve their
+/// generated trait paths wherever the prelude is imported.
+pub use crate::fixture_graph as crucible_fixture_graph;
 
 #[cfg(feature = "derive")]
 pub use crucible_macros::fixture;

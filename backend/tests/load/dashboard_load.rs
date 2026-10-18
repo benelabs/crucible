@@ -140,7 +140,7 @@ async fn test_dashboard_metrics_fields() {
         redis: redis::Client::open("redis://127.0.0.1:1/").unwrap(),
     });
     // Seed some metrics so the values are non-zero.
-    state.metrics_exporter.update_metrics(42.0, 2048, 120).await;
+    state.metrics_exporter.update_metrics(42.0, 2048, 120, 1024, 512).await;
 
     let app = Router::new()
         .route("/api/dashboard", get(get_dashboard))
@@ -414,7 +414,7 @@ async fn test_dashboard_load_response_shape_under_load() {
 #[tokio::test]
 async fn test_dashboard_shared_state_consistency() {
     let metrics_exporter = Arc::new(MetricsExporter::new());
-    metrics_exporter.update_metrics(77.0, 4096, 500).await;
+    metrics_exporter.update_metrics(77.0, 4096, 500, 2048, 1024).await;
 
     let state = Arc::new(DashboardState {
         metrics_exporter,

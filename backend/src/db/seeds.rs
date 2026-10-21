@@ -128,7 +128,7 @@ pub async fn seed_users(pool: &PgPool) -> Result<usize, SeedError> {
             r#"
             INSERT INTO users (id, username, email, created_at)
             VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT DO NOTHING
             "#,
         )
         .bind(user.id)
@@ -177,7 +177,7 @@ pub async fn seed_feature_flags(pool: &PgPool) -> Result<usize, SeedError> {
             r#"
             INSERT INTO feature_flags (key, enabled, description, updated_at)
             VALUES ($1, $2, $3, $4)
-            ON CONFLICT (key) DO NOTHING
+            ON CONFLICT DO NOTHING
             "#,
         )
         .bind(&flag.key)

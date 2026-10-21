@@ -5,7 +5,7 @@
 
 pub use crate::account::AccountBuilder;
 pub use crate::account::AccountHandle;
-pub use crate::assertions::RevertAssertion;
+pub use crate::assertions::{assert_balance_decreased, assert_balance_increased, RevertAssertion};
 pub use crate::auth_tree::{
     AuthMismatch, AuthTreeReport, ExpectedAuth, ExpectedInvocation, verify_auth_tree,
 };

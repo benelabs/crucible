@@ -30,6 +30,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace --exclude backend
 
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo clippy --workspace --exclude backend -- -D warnings
+
   test-snapshots:
     name: cargo test (snapshots)
     runs-on: ubuntu-latest

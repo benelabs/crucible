@@ -4,6 +4,7 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::assertions::{assert_balance_decreased, assert_balance_increased};
     use crate::env::MockEnv;
     use soroban_sdk::{contract, contracterror, contractimpl, Env};
 
@@ -225,5 +226,27 @@ mod tests {
     fn assert_not_emitted_succeeds_when_env_has_zero_events() {
         let env = vault_env();
         crate::assert_not_emitted!(env);
+    }
+
+    #[test]
+    fn assert_balance_increased_accepts_a_larger_balance() {
+        assert_balance_increased(100, 150);
+    }
+
+    #[test]
+    #[should_panic(expected = "expected balance to increase")]
+    fn assert_balance_increased_rejects_an_unchanged_balance() {
+        assert_balance_increased(100, 100);
+    }
+
+    #[test]
+    fn assert_balance_decreased_accepts_a_smaller_balance() {
+        assert_balance_decreased(150, 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "expected balance to decrease")]
+    fn assert_balance_decreased_rejects_an_unchanged_balance() {
+        assert_balance_decreased(100, 100);
     }
 }

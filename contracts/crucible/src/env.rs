@@ -3252,6 +3252,14 @@ mod protocol_version_tests {
     }
 
     #[test]
+    fn test_with_custom_protocol_version_sets_ledger() {
+        let env = MockEnv::builder()
+            .with_protocol_version(42)
+            .build();
+        assert_eq!(env.protocol_version(), 42);
+    }
+
+    #[test]
     fn test_protocol_version_enum_values() {
         assert_eq!(ProtocolVersion::V20.value(), 20);
         assert_eq!(ProtocolVersion::V21.value(), 21);

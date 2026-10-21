@@ -21,6 +21,28 @@
 //! **Host-only:** [`RevertAssertion`] depends on [`std::panic::catch_unwind`]
 //! and is intended exclusively for `#[cfg(test)]` use on the host.
 
+/// Asserts that a balance increased from `before` to `after`.
+#[track_caller]
+pub fn assert_balance_increased(before: i128, after: i128) {
+    assert!(
+        after > before,
+        "expected balance to increase, but it changed from {} to {}",
+        before,
+        after
+    );
+}
+
+/// Asserts that a balance decreased from `before` to `after`.
+#[track_caller]
+pub fn assert_balance_decreased(before: i128, after: i128) {
+    assert!(
+        after < before,
+        "expected balance to decrease, but it changed from {} to {}",
+        before,
+        after
+    );
+}
+
 /// The expectation a [`RevertAssertion`] checks about *why* a call reverted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ErrorExpectation {

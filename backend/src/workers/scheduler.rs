@@ -15,7 +15,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::workers::error::{JobError, SchedulerError};
-use crate::workers::job_history::{record_failure, record_start, record_success, record_timeout};
+use crate::workers::job_history::{
+    get_recent_runs, record_failure, record_start, record_success, record_timeout,
+};
 
 /// Context passed to a job handler during execution.
 #[derive(Clone)]
@@ -137,6 +139,9 @@ async fn run_job_loop(
     let schedule =
         Schedule::from_str(&job.cron_expr).expect("cron expression must be pre-validated");
 
+    // Check last_run_at in DB upon assuming leadership to detect and catch up missed executions
+    check_and_trigger_failover_catchup(&job, &schedule, &pool, &redis).await;
+
     loop {
         // Calculate the next execution time
         let now = Utc::now();
@@ -160,7 +165,8 @@ async fn run_job_loop(
 
         // Wait until the next tick using an interval with MissedTickBehavior::Skip
         // to prevent rapid burst executions if Tokio runtime is starved
-        let mut interval_ticker = tokio::time::interval(duration_until_next.max(Duration::from_millis(1)));
+        let mut interval_ticker =
+            tokio::time::interval(duration_until_next.max(Duration::from_millis(1)));
         interval_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval_ticker.tick().await; // consume initial tick
 
@@ -172,60 +178,106 @@ async fn run_job_loop(
             }
         }
 
-        // We've woken up for the tick. Try to acquire the distributed lock.
-        // Lock TTL is timeout_secs + 5.
-        // WHY: If the lock TTL exactly matched the job timeout, they could expire at the same millisecond.
-        // If the lock expires automatically while the job is timing out, another instance could
-        // acquire the lock and start the job before the current instance finishes logging the timeout
-        // to PostgreSQL, potentially causing overlapping state or duplicate runs.
-        let lock_key = format!("{}:lock", job.name);
-        let lock_ttl_ms = (job.timeout_secs + 5) * 1000;
-
-        let mut conn = match redis.get_multiplexed_async_connection().await {
-            Ok(conn) => conn,
-            Err(e) => {
-                error!("Failed to connect to Redis for lock acquisition: {}", e);
-                continue; // Try again next tick
-            }
-        };
-
-        let acquired: Option<String> = match redis::cmd("SET")
-            .arg(&lock_key)
-            .arg("1")
-            .arg("NX")
-            .arg("PX")
-            .arg(lock_ttl_ms)
-            .query_async::<Option<String>>(&mut conn)
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Failed to acquire distributed lock: {}", e);
-                continue;
-            }
-        };
-
-        if acquired.as_deref() != Some("OK") {
-            debug!("Another instance is running this tick, skipping");
-            continue;
-        }
-
-        let ctx = JobContext {
-            job_name: job.name.clone(),
-            scheduled_at: next_tick,
-            pool: pool.clone(),
-            redis: redis.clone(),
-        };
-
-        // Execute the job
-        execute_job_with_retries(&job, ctx).await;
-
-        // Release the lock manually (optional, since it has a TTL, but good practice if it finishes early)
-        let _: redis::RedisResult<()> = redis::cmd("DEL")
-            .arg(&lock_key)
-            .query_async(&mut conn)
-            .await;
+        try_run_job_tick(&job, next_tick, &pool, &redis).await;
     }
+}
+
+/// Inspects DB upon leader startup to detect and catch up missed executions within tolerance window.
+async fn check_and_trigger_failover_catchup(
+    job: &JobDefinition,
+    schedule: &Schedule,
+    pool: &PgPool,
+    redis: &redis::Client,
+) {
+    let failover_tolerance = chrono::Duration::hours(1);
+    let now = Utc::now();
+
+    match get_recent_runs(pool, &job.name, 1).await {
+        Ok(recent_runs) => {
+            if let Some(last_run) = recent_runs.first() {
+                let last_run_at = last_run.started_at;
+                let missed_ticks: Vec<_> = schedule
+                    .after(&last_run_at)
+                    .take_while(|t| *t < now)
+                    .collect();
+
+                if let Some(&latest_missed) = missed_ticks.last() {
+                    if now - latest_missed <= failover_tolerance {
+                        info!(
+                            job_name = %job.name,
+                            missed_at = %latest_missed,
+                            last_run_at = %last_run_at,
+                            "Triggering missed catch-up execution after leader failover"
+                        );
+                        try_run_job_tick(job, latest_missed, pool, redis).await;
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            warn!(
+                job_name = %job.name,
+                "Failed to inspect last_run_at during failover initialization: {}",
+                e
+            );
+        }
+    }
+}
+
+/// Attempts to acquire distributed lock and run job for given scheduled timestamp.
+async fn try_run_job_tick(
+    job: &JobDefinition,
+    scheduled_at: chrono::DateTime<Utc>,
+    pool: &PgPool,
+    redis: &redis::Client,
+) {
+    let lock_key = format!("{}:lock", job.name);
+    let lock_ttl_ms = (job.timeout_secs + 5) * 1000;
+
+    let mut conn = match redis.get_multiplexed_async_connection().await {
+        Ok(conn) => conn,
+        Err(e) => {
+            error!("Failed to connect to Redis for lock acquisition: {}", e);
+            return;
+        }
+    };
+
+    let acquired: Option<String> = match redis::cmd("SET")
+        .arg(&lock_key)
+        .arg("1")
+        .arg("NX")
+        .arg("PX")
+        .arg(lock_ttl_ms)
+        .query_async::<Option<String>>(&mut conn)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Failed to acquire distributed lock: {}", e);
+            return;
+        }
+    };
+
+    if acquired.as_deref() != Some("OK") {
+        debug!("Another instance is running this tick, skipping");
+        return;
+    }
+
+    let ctx = JobContext {
+        job_name: job.name.clone(),
+        scheduled_at,
+        pool: pool.clone(),
+        redis: redis.clone(),
+    };
+
+    // Execute the job
+    execute_job_with_retries(job, ctx).await;
+
+    // Release the lock manually (optional, since it has a TTL, but good practice if it finishes early)
+    let _: redis::RedisResult<()> = redis::cmd("DEL")
+        .arg(&lock_key)
+        .query_async(&mut conn)
+        .await;
 }
 
 async fn execute_job_with_retries(job: &JobDefinition, ctx: JobContext) {

@@ -46,6 +46,7 @@ struct CircuitBreakerInner {
     consecutive_failures: u32,
     consecutive_successes: u32,
     config: CircuitBreakerConfig,
+    probe_in_flight: bool,
 }
 
 impl CircuitBreakerInner {
@@ -55,6 +56,7 @@ impl CircuitBreakerInner {
             consecutive_failures: 0,
             consecutive_successes: 0,
             config,
+            probe_in_flight: false,
         }
     }
 
@@ -65,19 +67,28 @@ impl CircuitBreakerInner {
                 if opened_at.elapsed() >= self.config.recovery_timeout {
                     self.state = CircuitState::HalfOpen;
                     self.consecutive_successes = 0;
+                    self.probe_in_flight = true;
                     info!("Circuit breaker transitioning to HalfOpen");
                     true
                 } else {
                     false
                 }
             }
-            CircuitState::HalfOpen => true,
+            CircuitState::HalfOpen => {
+                if !self.probe_in_flight {
+                    self.probe_in_flight = true;
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 
     fn record_success(&mut self) {
         match self.state {
             CircuitState::HalfOpen => {
+                self.probe_in_flight = false;
                 self.consecutive_successes += 1;
                 if self.consecutive_successes >= self.config.success_threshold {
                     self.state = CircuitState::Closed;
@@ -100,6 +111,7 @@ impl CircuitBreakerInner {
                     self.state = CircuitState::Open {
                         opened_at: Instant::now(),
                     };
+                    self.probe_in_flight = false;
                     warn!(
                         failures = self.consecutive_failures,
                         "Circuit breaker opened after threshold exceeded"
@@ -110,6 +122,7 @@ impl CircuitBreakerInner {
                 self.state = CircuitState::Open {
                     opened_at: Instant::now(),
                 };
+                self.probe_in_flight = false;
                 warn!("Circuit breaker re-opened after probe failure");
             }
             _ => {}
@@ -224,4 +237,34 @@ mod tests {
         }
         assert_eq!(cb.state_label().await, "open");
     }
+
+    #[tokio::test]
+    async fn test_half_open_limits_concurrent_probes() {
+        let cb = CircuitBreaker::new("test", fast_config());
+        for _ in 0..3 {
+            let _ = cb.call(|| async { Err::<(), _>("fail") }).await;
+        }
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let cb_clone = cb.clone();
+        let handle = tokio::spawn(async move {
+            cb_clone
+                .call(|| async move {
+                    let _ = rx.await;
+                    Ok::<_, String>("probe done")
+                })
+                .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let concurrent_res = cb.call(|| async { Ok::<_, String>("concurrent") }).await;
+        assert!(matches!(concurrent_res, Err(CircuitBreakerError::Open(_))));
+
+        let _ = tx.send(());
+        let probe_res = handle.await.unwrap();
+        assert!(probe_res.is_ok());
+    }
 }
+

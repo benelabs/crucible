@@ -363,12 +363,26 @@ async fn check_database(pool: &PgPool) -> CheckResult {
 
 async fn check_cache(conn: &ConnectionManager) -> CheckResult {
     let mut conn = conn.clone();
-    match redis::cmd("PING").query_async::<String>(&mut conn).await {
-        Ok(_) => {
-            debug!("Redis health check passed");
+    match crate::db::redis::check_redis_health(&mut conn).await {
+        Ok(status) if status.is_healthy => {
+            debug!(role = %status.role, "Redis health check passed");
             CheckResult {
                 status: "up",
                 message: None,
+            }
+        }
+        Ok(status) => {
+            let reason = if status.is_loading {
+                "node is loading data"
+            } else if status.is_read_only {
+                "node is in read-only mode"
+            } else {
+                "node is degraded"
+            };
+            warn!(role = %status.role, is_loading = status.is_loading, is_read_only = status.is_read_only, "Redis health check failed: {reason}");
+            CheckResult {
+                status: "down",
+                message: Some(reason.into()),
             }
         }
         Err(e) => {

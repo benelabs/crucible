@@ -67,6 +67,16 @@ pub struct SeedFlag {
     pub description: String,
 }
 
+/// A minimal contract record used for seeding.
+#[derive(Debug, Clone)]
+pub struct SeedContract {
+    pub id: Uuid,
+    pub name: String,
+    pub address: String,
+    pub network: String,
+    pub description: String,
+}
+
 fn default_users() -> Vec<SeedUser> {
     vec![
         SeedUser {
@@ -93,6 +103,32 @@ fn default_flags() -> Vec<SeedFlag> {
             key: "beta_api".to_string(),
             enabled: true,
             description: "Expose beta API endpoints".to_string(),
+        },
+    ]
+}
+
+fn default_contracts() -> Vec<SeedContract> {
+    vec![
+        SeedContract {
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap(),
+            name: "Counter".to_string(),
+            address: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC".to_string(),
+            network: "testnet".to_string(),
+            description: "Simple counter contract for testing basic operations.".to_string(),
+        },
+        SeedContract {
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000011").unwrap(),
+            name: "Token".to_string(),
+            address: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM".to_string(),
+            network: "testnet".to_string(),
+            description: "Standard token contract implementing SEP-41 interface.".to_string(),
+        },
+        SeedContract {
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000012").unwrap(),
+            name: "Escrow".to_string(),
+            address: "CBIJHCAIAP5BO4V4L5LRIA3XDCGAVSGAYLNAHVRMHMXBGIGMXSQKIBXKE".to_string(),
+            network: "testnet".to_string(),
+            description: "Multi-party escrow contract with arbiter-based dispute resolution.".to_string(),
         },
     ]
 }
@@ -128,7 +164,7 @@ pub async fn seed_users(pool: &PgPool) -> Result<usize, SeedError> {
             r#"
             INSERT INTO users (id, username, email, created_at)
             VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (username) DO NOTHING
             "#,
         )
         .bind(user.id)
@@ -200,6 +236,59 @@ pub async fn seed_feature_flags(pool: &PgPool) -> Result<usize, SeedError> {
     Ok(inserted)
 }
 
+/// Ensure the `contracts` table exists and insert seed contracts (on-conflict name do nothing).
+///
+/// # Errors
+/// Returns [`SeedError::Database`] if the query fails.
+pub async fn seed_contracts(pool: &PgPool) -> Result<usize, SeedError> {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS contracts (
+            id          UUID PRIMARY KEY,
+            name        TEXT NOT NULL UNIQUE,
+            address     TEXT NOT NULL UNIQUE,
+            network     TEXT NOT NULL DEFAULT 'testnet',
+            description TEXT,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    let contracts = default_contracts();
+    let mut inserted = 0usize;
+
+    for contract in &contracts {
+        let rows = sqlx::query(
+            r#"
+            INSERT INTO contracts (id, name, address, network, description, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (name) DO NOTHING
+            "#,
+        )
+        .bind(contract.id)
+        .bind(&contract.name)
+        .bind(&contract.address)
+        .bind(&contract.network)
+        .bind(&contract.description)
+        .bind(Utc::now())
+        .execute(pool)
+        .await?
+        .rows_affected();
+
+        if rows > 0 {
+            inserted += 1;
+            info!(name = %contract.name, "Seeded contract");
+        } else {
+            warn!(name = %contract.name, "Contract already exists – skipping");
+        }
+    }
+
+    info!(count = inserted, "seed_contracts complete");
+    Ok(inserted)
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
@@ -226,6 +315,13 @@ pub async fn run_all(pool: &PgPool) -> Result<(), SeedError> {
     if let Err(e) = seed_feature_flags(pool).await {
         errors.push(SeedError::StepFailed {
             step: "seed_feature_flags".to_string(),
+            reason: e.to_string(),
+        });
+    }
+
+    if let Err(e) = seed_contracts(pool).await {
+        errors.push(SeedError::StepFailed {
+            step: "seed_contracts".to_string(),
             reason: e.to_string(),
         });
     }
@@ -305,5 +401,25 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), flags.len());
+    }
+
+    #[test]
+    fn test_default_contracts_are_valid() {
+        let contracts = default_contracts();
+        assert!(!contracts.is_empty());
+        for c in &contracts {
+            assert!(!c.name.is_empty());
+            assert!(!c.address.is_empty());
+            assert!(!c.network.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_no_duplicate_contract_names() {
+        let contracts = default_contracts();
+        let mut names: Vec<&str> = contracts.iter().map(|c| c.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), contracts.len());
     }
 }

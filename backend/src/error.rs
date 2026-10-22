@@ -79,6 +79,10 @@ pub enum AppError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
+    /// 500 — An internal database error message occurred.
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+
     /// 500 — A database migration failed.
     #[error("Migration error: {0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
@@ -204,6 +208,14 @@ impl IntoResponse for AppError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "database_error",
                     "An internal database error occurred".to_string(),
+                )
+            }
+            AppError::DatabaseError(msg) => {
+                error!("Database error: {msg}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database_error",
+                    msg.clone(),
                 )
             }
             AppError::Migration(e) => {

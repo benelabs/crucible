@@ -85,7 +85,7 @@ impl DeadLetterQueue {
 
         let hash_key = format!("{}:map", self.queue_key);
         let job_data: Vec<Option<String>> = conn
-            .hmget(&hash_key, &job_ids)
+            .hget(&hash_key, &job_ids)
             .await
             .map_err(AppError::Redis)?;
 

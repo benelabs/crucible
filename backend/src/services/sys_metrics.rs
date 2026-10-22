@@ -599,11 +599,28 @@ pub fn get_linux_memory_stats() -> (u64, u64) {
 }
 
 // ---------------------------------------------------------------------------
-// MetricsExporter
+// MetricsExporter & Singleton Hardware Probe
 // ---------------------------------------------------------------------------
+
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use tokio::sync::Mutex as TokioMutex;
+
+static SYSTEM_PROBE: OnceLock<Arc<TokioMutex<System>>> = OnceLock::new();
+
+/// Returns the singleton `sysinfo::System` instance used for hardware probing.
+pub fn system_probe() -> &'static Arc<TokioMutex<System>> {
+    SYSTEM_PROBE.get_or_init(|| {
+        Arc::new(TokioMutex::new(System::new_with_specifics(
+            RefreshKind::new()
+                .with_cpu(CpuRefreshKind::everything())
+                .with_memory(MemoryRefreshKind::everything()),
+        )))
+    })
+}
 
 pub struct MetricsExporter {
     current_metrics: Arc<RwLock<SystemMetrics>>,
+    system_probe: Arc<TokioMutex<System>>,
 }
 
 impl Default for MetricsExporter {
@@ -619,6 +636,7 @@ impl MetricsExporter {
                 timestamp: Utc::now(),
                 ..Default::default()
             })),
+            system_probe: system_probe().clone(),
         }
     }
 
@@ -642,6 +660,8 @@ impl MetricsExporter {
         self.current_metrics.read().await.clone()
     }
 
+    /// Background task that refreshes hardware metrics every 5 seconds on the singleton System instance
+    /// rather than on every HTTP scrape.
     pub async fn run_collector(exporter: Arc<Self>) {
         info!("Starting system metrics collector worker");
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
@@ -650,9 +670,19 @@ impl MetricsExporter {
         loop {
             interval.tick().await;
             let uptime = (Utc::now() - start_time).num_seconds() as u64;
+
+            // Refresh hardware probes on the singleton System instance in the background
+            let (cpu_usage, memory_usage) = {
+                let mut sys = exporter.system_probe.lock().await;
+                sys.refresh_all();
+                let cpu = sys.global_cpu_info().cpu_usage() as f64;
+                let mem = sys.used_memory();
+                (cpu, mem)
+            };
+
             let (rss, heap) = get_linux_memory_stats();
             exporter
-                .update_metrics(12.5, 1024 * 1024 * 512, uptime, rss, heap)
+                .update_metrics(cpu_usage, memory_usage, uptime, rss, heap)
                 .await;
         }
     }
@@ -777,5 +807,23 @@ mod tests {
         assert_eq!(metrics.uptime, 60);
         assert_eq!(metrics.process_resident_memory_bytes, 2048);
         assert_eq!(metrics.heap_allocated_bytes, 1024);
+    }
+
+    #[tokio::test]
+    async fn test_system_probe_singleton_and_metrics_refresh() {
+        let probe1 = system_probe();
+        let probe2 = system_probe();
+        assert!(Arc::ptr_eq(probe1, probe2), "system_probe must return singleton Arc");
+
+        let exporter = Arc::new(MetricsExporter::new());
+        assert!(Arc::ptr_eq(&exporter.system_probe, probe1));
+
+        // Verify probe lock and refresh without re-instantiating System
+        {
+            let mut sys = exporter.system_probe.lock().await;
+            sys.refresh_all();
+            let mem = sys.total_memory();
+            assert!(mem > 0);
+        }
     }
 }

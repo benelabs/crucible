@@ -677,6 +677,85 @@ impl VaultClient {
         Ok(resp.auth.map(|a| a.lease_duration).unwrap_or(3600))
     }
 
+    /// Spawn a background task that keeps the client token alive.
+    ///
+    /// Without this the token simply expires: every later request answers 403
+    /// while the process keeps running with a dead client.
+    ///
+    /// The task renews at half the token's TTL, so one lost renewal still
+    /// leaves time to recover. A failed renewal is retried with exponential
+    /// backoff up to [`VaultConfig::max_renewal_attempts`] times. When those
+    /// attempts are spent the task re-authenticates, because a token Vault
+    /// refuses to renew (revoked, or past its max TTL) cannot be renewed at
+    /// all. The task never panics, so an unreachable Vault does not take the
+    /// process down.
+    pub async fn start_token_renewal(self: Arc<Self>) {
+        let client = self.clone();
+        tokio::spawn(async move {
+            let mut wait = Duration::from_secs(1800);
+            loop {
+                sleep(wait).await;
+
+                match client.renew_token_with_retry().await {
+                    Ok(ttl) => {
+                        // Renew again at half the granted TTL, never sooner
+                        // than a minute, so a short TTL cannot spin.
+                        wait = Duration::from_secs(ttl / 2).max(Duration::from_secs(60));
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "VaultClient: token renewal exhausted, re-authenticating"
+                        );
+                        match client.authenticate().await {
+                            Ok(()) => {
+                                info!("VaultClient: re-authenticated after renewal failure");
+                                wait = Duration::from_secs(1800);
+                            }
+                            Err(re) => {
+                                error!(
+                                    error = %re,
+                                    "VaultClient: re-authentication failed, retrying in 60s"
+                                );
+                                wait = Duration::from_secs(60);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// Renew the token, retrying with exponential backoff.
+    ///
+    /// Returns the granted TTL on success, or
+    /// [`VaultError::RenewalExhausted`] once
+    /// [`VaultConfig::max_renewal_attempts`] attempts have failed.
+    pub async fn renew_token_with_retry(&self) -> Result<u64, VaultError> {
+        let attempts = self.config.max_renewal_attempts.max(1);
+        let mut delay = Duration::from_secs(1);
+
+        for attempt in 1..=attempts {
+            match self.renew_token().await {
+                Ok(ttl) => return Ok(ttl),
+                Err(e) => {
+                    warn!(
+                        attempt,
+                        attempts,
+                        error = %e,
+                        "VaultClient: token renewal attempt failed"
+                    );
+                    if attempt < attempts {
+                        sleep(delay).await;
+                        delay = (delay * 2).min(Duration::from_secs(30));
+                    }
+                }
+            }
+        }
+
+        Err(VaultError::RenewalExhausted { attempts })
+    }
+
     // ── HTTP helpers ──────────────────────────────────────────────────────────
 
     fn base_headers(&self, token: &str) -> HeaderMap {
@@ -797,6 +876,7 @@ pub async fn init_vault() -> Result<Arc<VaultClient>, VaultError> {
     let config = VaultConfig::from_env()?;
     let client = Arc::new(VaultClient::new(config).await?);
     client.clone().start_lease_renewal().await;
+    client.clone().start_token_renewal().await;
     Ok(client)
 }
 
@@ -869,5 +949,60 @@ mod tests {
             headers["x-vault-token"].to_str().unwrap(),
             "test-token"
         );
+    }
+
+    /// A client whose token renewal always fails, to exercise the retry loop
+    /// without a Vault server.
+    fn unreachable_client(max_attempts: u32) -> VaultClient {
+        // Port 1 on loopback refuses immediately, so every attempt errors fast.
+        let config = VaultConfig {
+            address: "http://127.0.0.1:1".into(),
+            auth: VaultAuthMethod::Token("test".into()),
+            namespace: None,
+            renewal_margin: Duration::from_secs(60),
+            max_renewal_attempts: max_attempts,
+            tls_verify: false,
+        };
+        let http = HttpClient::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(Duration::from_millis(250))
+            .build()
+            .unwrap();
+        VaultClient {
+            config: Arc::new(config),
+            http: Arc::new(http),
+            token: Arc::new(RwLock::new("test-token".into())),
+            leases: Arc::new(RwLock::new(vec![])),
+        }
+    }
+
+    /// The retry loop must stop after max_renewal_attempts and report the
+    /// exhausted count, instead of spinning or returning the transport error.
+    #[tokio::test]
+    async fn renew_token_with_retry_exhausts_after_configured_attempts() {
+        let client = unreachable_client(3);
+        let err = client
+            .renew_token_with_retry()
+            .await
+            .expect_err("unreachable Vault must not report a successful renewal");
+        match err {
+            VaultError::RenewalExhausted { attempts } => assert_eq!(attempts, 3),
+            other => panic!("expected RenewalExhausted, got {other:?}"),
+        }
+    }
+
+    /// max_renewal_attempts of 0 must still make one attempt, not skip the
+    /// loop and report exhaustion without trying.
+    #[tokio::test]
+    async fn renew_token_with_retry_treats_zero_attempts_as_one() {
+        let client = unreachable_client(0);
+        let err = client
+            .renew_token_with_retry()
+            .await
+            .expect_err("unreachable Vault must not report a successful renewal");
+        match err {
+            VaultError::RenewalExhausted { attempts } => assert_eq!(attempts, 1),
+            other => panic!("expected RenewalExhausted, got {other:?}"),
+        }
     }
 }

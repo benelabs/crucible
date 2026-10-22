@@ -1,5 +1,5 @@
+use async_trait::async_trait;
 use axum::{
-    async_trait,
     extract::{rejection::JsonRejection, FromRequest, Request},
     Json,
 };
@@ -10,7 +10,6 @@ use crate::error::AppError;
 /// A wrapper for Axum's Json extractor that adds automatic validation.
 pub struct ValidatedJson<T>(pub T);
 
-#[async_trait]
 impl<S, T> FromRequest<S> for ValidatedJson<T>
 where
     S: Send + Sync,

@@ -8,6 +8,9 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 
+/// Default task execution timeout (5 minutes)
+pub const DEFAULT_JOB_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// A concurrent task executor that limits the number of concurrently executing tasks.
 ///
 /// This executor uses a semaphore to limit concurrency and tracks metrics for
@@ -40,16 +43,20 @@ pub struct TaskExecutor {
     semaphore: Arc<Semaphore>,
     /// Maximum concurrency limit
     max_concurrency: usize,
-    /// Atomic counter for currently running tasks
+    /// Atomic counter for tasks currently executing (holding permits)
     running_count: Arc<AtomicU64>,
+    /// Atomic counter for tasks waiting for permits
+    queued_count: Arc<AtomicU64>,
     /// Atomic counter for successfully completed tasks
     completed_count: Arc<AtomicU64>,
     /// Atomic counter for failed tasks
     failed_count: Arc<AtomicU64>,
+    /// Configurable per-task timeout deadline
+    job_timeout: Duration,
 }
 
 impl TaskExecutor {
-    /// Create a new TaskExecutor with the specified concurrency limit.
+    /// Create a new TaskExecutor with the specified concurrency limit and default 5-minute timeout.
     ///
     /// # Arguments
     ///
@@ -59,22 +66,45 @@ impl TaskExecutor {
     ///
     /// A new TaskExecutor instance
     pub fn new(max_concurrency: usize) -> Self {
+        Self::new_with_timeout(max_concurrency, DEFAULT_JOB_TIMEOUT)
+    }
+
+    /// Create a new TaskExecutor with a specified concurrency limit and custom per-task timeout.
+    pub fn new_with_timeout(max_concurrency: usize, job_timeout: Duration) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(max_concurrency)),
             max_concurrency,
             running_count: Arc::new(AtomicU64::new(0)),
+            queued_count: Arc::new(AtomicU64::new(0)),
             completed_count: Arc::new(AtomicU64::new(0)),
             failed_count: Arc::new(AtomicU64::new(0)),
+            job_timeout,
         }
     }
 
-    /// Get the current number of running tasks.
+    /// Set a custom task timeout on this executor
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.job_timeout = timeout;
+        self
+    }
+
+    /// Get configured job timeout
+    pub fn job_timeout(&self) -> Duration {
+        self.job_timeout
+    }
+
+    /// Get the current number of running tasks (holding concurrency permits).
     ///
     /// # Returns
     ///
     /// Current running task count
     pub fn running_count(&self) -> u64 {
         self.running_count.load(Ordering::Relaxed)
+    }
+
+    /// Get the current number of queued tasks (waiting for concurrency permits).
+    pub fn queued_count(&self) -> u64 {
+        self.queued_count.load(Ordering::Relaxed)
     }
 
     /// Get the number of successfully completed tasks.
@@ -115,23 +145,39 @@ impl TaskExecutor {
             Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'static>,
         >,
     ) -> JoinHandle<Result<(), AppError>> {
-        // Clone the semaphore and counters for the task closure
+        // Clone the semaphore, counters, and timeout for the task closure
         let semaphore = self.semaphore.clone();
         let running_count = self.running_count.clone();
+        let queued_count = self.queued_count.clone();
         let completed_count = self.completed_count.clone();
         let failed_count = self.failed_count.clone();
+        let job_timeout = self.job_timeout;
 
-        // Increment running count before attempting to acquire permit
-        running_count.fetch_add(1, Ordering::Relaxed);
+        // Increment queued count before attempting to acquire permit
+        queued_count.fetch_add(1, Ordering::Relaxed);
 
         // Spawn the task with tracing instrumentation
         tokio::spawn(
             async move {
                 // Acquire semaphore permit (waits if necessary)
                 let permit = semaphore.acquire_owned().await;
+                queued_count.fetch_sub(1, Ordering::Relaxed);
+                running_count.fetch_add(1, Ordering::Relaxed);
 
-                // Execute the task
-                let result = task.await;
+                // Execute the task with per-job timeout enforcement
+                let result = match tokio::time::timeout(job_timeout, task).await {
+                    Ok(res) => res,
+                    Err(_) => {
+                        tracing::error!(
+                            timeout_secs = job_timeout.as_secs(),
+                            "Task timed out after exceeding execution deadline"
+                        );
+                        Err(AppError::InternalError(format!(
+                            "Task execution timed out after {:?}",
+                            job_timeout
+                        )))
+                    }
+                };
 
                 // Release the permit implicitly when it goes out of scope
                 drop(permit);
@@ -176,13 +222,16 @@ impl TaskExecutor {
             "Waiting for executor tasks to complete"
         );
 
-        // Wait until no tasks are running
-        while self.running_count.load(Ordering::Relaxed) > 0 {
+        // Wait until no tasks are running or queued
+        while self.running_count.load(Ordering::Relaxed) > 0
+            || self.queued_count.load(Ordering::Relaxed) > 0
+        {
             tracing::debug!(
                 running = self.running_count(),
+                queued = self.queued_count(),
                 "Still waiting for tasks to complete"
             );
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
         tracing::info!("All executor tasks have completed");
@@ -293,5 +342,37 @@ mod tests {
         assert_eq!(executor.running_count(), 0);
         assert_eq!(executor.completed_count(), 3);
         assert_eq!(executor.failed_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_executor_task_timeout() {
+        // Create an executor with a very short timeout (50ms)
+        let executor = TaskExecutor::new_with_timeout(2, Duration::from_millis(50));
+
+        // Start a task that hangs longer than the timeout (300ms)
+        let handle = executor.execute(Box::pin(async move {
+            sleep(Duration::from_millis(300)).await;
+            Ok(())
+        }));
+
+        let result = handle.await.unwrap();
+        assert!(result.is_err(), "Task should fail due to timeout");
+        assert_eq!(executor.failed_count(), 1);
+        assert_eq!(executor.running_count(), 0);
+
+        // Verify slot was released: we can execute a new task successfully
+        let fast_handle = executor.execute(Box::pin(async move { Ok(()) }));
+        let fast_result = fast_handle.await.unwrap();
+        assert!(fast_result.is_ok());
+        assert_eq!(executor.completed_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_executor_timeout_configuration() {
+        let executor = TaskExecutor::new(4);
+        assert_eq!(executor.job_timeout(), DEFAULT_JOB_TIMEOUT);
+
+        let customized = executor.with_timeout(Duration::from_secs(45));
+        assert_eq!(customized.job_timeout(), Duration::from_secs(45));
     }
 }

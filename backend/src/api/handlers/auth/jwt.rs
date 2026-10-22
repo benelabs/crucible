@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
 use base64::Engine as _;
-use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+use rsa::pkcs8::{DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding};
 use rsa::traits::PublicKeyParts;
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use utoipa::ToSchema;
@@ -29,7 +29,7 @@ pub struct JwksResponse {
 }
 
 /// Key metadata for an asymmetric key pair used in JWT signing and verification.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ToSchema)]
 pub struct JwtKeyPair {
     pub kid: String,
     pub public_key_pem: String,

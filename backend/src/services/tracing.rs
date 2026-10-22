@@ -18,9 +18,23 @@ use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler, SdkTracerProvider, SpanLimits};
 use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource;
-use std::time::Duration;
-use tracing::{info_span, warn};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use serde_json::{json, Map, Value};
+use std::{
+    fmt,
+    fs::{self, OpenOptions},
+    io::{self, Write},
+    path::PathBuf,
+    sync::Mutex,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tracing::{field::{Field, Visit}, info_span, span::{Attributes, Record}, warn, Id, Subscriber};
+use tracing_subscriber::{
+    layer::{Context, Layer},
+    registry::LookupSpan,
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+    EnvFilter,
+};
 
 /// Central tracing service for initialization and span creation
 pub struct TracingService;
@@ -34,6 +48,232 @@ impl Drop for TracingGuard {
     fn drop(&mut self) {
         if let Err(error) = self.tracer_provider.shutdown() {
             eprintln!("failed to shut down OpenTelemetry tracer provider: {error:?}");
+        }
+    }
+}
+
+
+/// Durable local copy of completed tracing spans.
+///
+/// OTLP's batch processor is still used for normal remote export. This layer
+/// independently appends completed spans to JSON Lines on disk, so telemetry
+/// remains available locally if the collector is unavailable or the in-memory
+/// exporter queue overflows. The spool is bounded and rotates to one archive.
+///
+/// Configure with:
+/// - `CRUCIBLE_OTEL_SPOOL_PATH` (default: `./data/otel-spool/spans.jsonl`)
+/// - `CRUCIBLE_OTEL_SPOOL_MAX_BYTES` (default: 67,108,864 bytes / 64 MiB)
+///
+/// The JSONL spool is a durable local fallback; it is not automatically replayed
+/// to the OTLP collector. An external recovery job can ship the retained records.
+#[derive(Debug)]
+struct DiskSpoolLayer {
+    path: PathBuf,
+    max_bytes: u64,
+    write_lock: Mutex<()>,
+}
+
+#[derive(Default, Debug)]
+struct SpanFields(Map<String, Value>);
+
+impl DiskSpoolLayer {
+    fn from_env() -> anyhow::Result<Self> {
+        let path = std::env::var_os("CRUCIBLE_OTEL_SPOOL_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("./data/otel-spool/spans.jsonl"));
+
+        let max_bytes = std::env::var("CRUCIBLE_OTEL_SPOOL_MAX_BYTES")
+            .ok()
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .map_err(|error| anyhow::anyhow!("Invalid CRUCIBLE_OTEL_SPOOL_MAX_BYTES: {error}"))?
+            .unwrap_or(64 * 1024 * 1024);
+
+        if max_bytes == 0 {
+            anyhow::bail!("CRUCIBLE_OTEL_SPOOL_MAX_BYTES must be greater than zero");
+        }
+
+        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            fs::create_dir_all(parent).map_err(|error| {
+                anyhow::anyhow!("Failed to create OTLP spool directory {}: {error}", parent.display())
+            })?;
+        }
+
+        // Ensure the configured path is writable before enabling the layer.
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options.open(&path).map_err(|error| {
+            anyhow::anyhow!("Failed to open OTLP spool file {}: {error}", path.display())
+        })?;
+
+        Ok(Self {
+            path,
+            max_bytes,
+            write_lock: Mutex::new(()),
+        })
+    }
+
+    fn append_record(&self, record: &Value) -> io::Result<()> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        if self.max_bytes == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "spool size limit must be greater than zero",
+            ));
+        }
+
+        let mut line = serde_json::to_vec(record).map_err(io::Error::other)?;
+        line.push(b'\n');
+
+        let current_len = fs::metadata(&self.path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+
+        // Rotate before writing to keep disk usage bounded to approximately
+        // two spool files. Oversized single records are skipped rather than
+        // violating the configured disk limit.
+        if line.len() as u64 > self.max_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "serialized span exceeds the configured spool size limit",
+            ));
+        }
+
+        if current_len.saturating_add(line.len() as u64) > self.max_bytes {
+            let archive = self.path.with_extension("jsonl.1");
+            if archive.exists() {
+                fs::remove_file(&archive)?;
+            }
+            if self.path.exists() {
+                fs::rename(&self.path, &archive)?;
+            }
+        }
+
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&self.path)?;
+        file.write_all(&line)?;
+        file.flush()?;
+        // Persist the record before returning so a process/host crash is less
+        // likely to lose spans that were already acknowledged by the spool.
+        file.sync_data()?;
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct FieldVisitor {
+    fields: Map<String, Value>,
+}
+
+impl Visit for FieldVisitor {
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.fields.insert(field.name().to_owned(), Value::Bool(value));
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.fields.insert(field.name().to_owned(), json!(value));
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.fields.insert(field.name().to_owned(), json!(value));
+    }
+
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        let json_value = serde_json::Number::from_f64(value)
+            .map(Value::Number)
+            .unwrap_or(Value::Null);
+        self.fields.insert(field.name().to_owned(), json_value);
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.fields
+            .insert(field.name().to_owned(), Value::String(value.to_owned()));
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        self.fields.insert(
+            field.name().to_owned(),
+            Value::String(format!("{value:?}")),
+        );
+    }
+}
+
+impl<S> Layer<S> for DiskSpoolLayer
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    fn on_new_span(&self, attributes: &Attributes<'_>, id: &Id, context: Context<'_, S>) {
+        let Some(span) = context.span(id) else {
+            return;
+        };
+
+        let mut visitor = FieldVisitor::default();
+        attributes.record(&mut visitor);
+        span.extensions_mut().insert(SpanFields(visitor.fields));
+    }
+
+    fn on_record(&self, id: &Id, values: &Record<'_>, context: Context<'_, S>) {
+        let Some(span) = context.span(id) else {
+            return;
+        };
+
+        let mut extensions = span.extensions_mut();
+        let fields = extensions.get_mut::<SpanFields>();
+        let mut visitor = FieldVisitor::default();
+        values.record(&mut visitor);
+
+        if let Some(fields) = fields {
+            fields.0.extend(visitor.fields);
+        } else {
+            extensions.insert(SpanFields(visitor.fields));
+        }
+    }
+
+    fn on_close(&self, id: Id, context: Context<'_, S>) {
+        let Some(span) = context.span(&id) else {
+            return;
+        };
+        let metadata = span.metadata();
+        let fields = span
+            .extensions()
+            .get::<SpanFields>()
+            .map(|fields| Value::Object(fields.0.clone()))
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let timestamp_unix_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let record = json!({
+            "record_type": "completed_span",
+            "timestamp_unix_ms": timestamp_unix_ms,
+            "name": metadata.name(),
+            "target": metadata.target(),
+            "level": metadata.level().to_string(),
+            "module_path": metadata.module_path(),
+            "file": metadata.file(),
+            "line": metadata.line(),
+            "fields": fields,
+        });
+
+        if let Err(error) = self.append_record(&record) {
+            // Avoid tracing from inside the tracing layer to prevent recursion.
+            eprintln!("failed to spool completed tracing span: {error}");
         }
     }
 }
@@ -172,10 +412,16 @@ impl TracingService {
             EnvFilter::new(log_filter.unwrap_or("info,crucible=debug,tower_http=info"))
         });
 
+        // Persist completed spans locally as a fallback when the remote OTLP
+        // collector is unavailable. Startup fails if durable spooling cannot be
+        // initialized, rather than silently running without the configured fallback.
+        let disk_spool_layer = DiskSpoolLayer::from_env()?;
+
         if json_logs {
             tracing_subscriber::registry()
                 .with(filter)
                 .with(telemetry_layer)
+                .with(disk_spool_layer)
                 .with(
                     tracing_subscriber::fmt::layer()
                         .json()
@@ -189,6 +435,7 @@ impl TracingService {
             tracing_subscriber::registry()
                 .with(filter)
                 .with(telemetry_layer)
+                .with(disk_spool_layer)
                 .with(
                     tracing_subscriber::fmt::layer()
                         .pretty()
@@ -336,6 +583,51 @@ impl TracingService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_disk_spool_persists_json_lines_and_rotates() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("crucible-otel-spool-{unique}"));
+        std::fs::create_dir_all(&directory).expect("temporary directory should be created");
+        let path = directory.join("spans.jsonl");
+        let spool = DiskSpoolLayer {
+            path: path.clone(),
+            max_bytes: 80,
+            write_lock: Mutex::new(()),
+        };
+
+        spool.append_record(&json!({"span": "first"})).expect("first span should spool");
+        spool.append_record(&json!({"span": "second"})).expect("second span should spool");
+        spool.append_record(&json!({"span": "third", "payload": "large enough to rotate"}))
+            .expect("third span should spool after rotation");
+
+        let current = std::fs::read_to_string(&path).expect("current spool should be readable");
+        let archive = std::fs::read_to_string(directory.join("spans.jsonl.1"))
+            .expect("rotated spool should be readable");
+        assert!(!current.trim().is_empty());
+        assert!(!archive.trim().is_empty());
+        assert!(current.lines().all(|line| serde_json::from_str::<Value>(line).is_ok()));
+        assert!(archive.lines().all(|line| serde_json::from_str::<Value>(line).is_ok()));
+
+        std::fs::remove_dir_all(directory).expect("temporary spool directory should be removed");
+    }
+
+    #[test]
+    fn test_disk_spool_rejects_zero_size_limit() {
+        let spool = DiskSpoolLayer {
+            path: PathBuf::from("unused-spool.jsonl"),
+            max_bytes: 0,
+            write_lock: Mutex::new(()),
+        };
+
+        let error = spool.append_record(&json!({"span": "test"}));
+        assert!(error.is_err());
+    }
 
     #[test]
     fn test_trace_context_extraction_and_injection() {

@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -220,6 +221,7 @@ pub struct LockGuard {
     token: String,
     stop: Arc<AtomicBool>,
     notify: Arc<Notify>,
+    cancellation_token: CancellationToken,
     heartbeat: Option<JoinHandle<()>>,
     released: bool,
 }
@@ -233,12 +235,14 @@ impl LockGuard {
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let notify = Arc::new(Notify::new());
+        let cancellation_token = CancellationToken::new();
         let heartbeat = {
             let nodes = nodes.clone();
             let resource = resource.clone();
             let token = token.clone();
             let stop = stop.clone();
             let notify = notify.clone();
+            let cancel_token = cancellation_token.clone();
             let ttl_ms = config.ttl.as_millis() as u64;
             let interval = config.heartbeat_interval;
 
@@ -258,7 +262,8 @@ impl LockGuard {
                             }
                             let quorum = nodes.len() / 2 + 1;
                             if renewed < quorum {
-                                warn!(%resource, renewed, quorum, "redlock heartbeat lost quorum");
+                                warn!(%resource, renewed, quorum, "redlock heartbeat lost quorum; cancelling running tasks");
+                                cancel_token.cancel();
                                 break;
                             }
                         }
@@ -273,6 +278,7 @@ impl LockGuard {
             token,
             stop,
             notify,
+            cancellation_token,
             heartbeat,
             released: false,
         }
@@ -286,6 +292,11 @@ impl LockGuard {
     /// Unique ownership token.
     pub fn token(&self) -> &str {
         &self.token
+    }
+
+    /// Returns the cancellation token triggered when heartbeat renewal fails or loses quorum.
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.cancellation_token.clone()
     }
 
     /// Explicitly release the lock (also called from [`Drop`]).
@@ -421,6 +432,41 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(30)).await;
         let guard = mgr.acquire("deploy:drop").await.unwrap();
         guard.release().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn heartbeat_loss_cancels_running_task() {
+        let node1 = Arc::new(InMemoryRedisNode::new());
+        let node2 = Arc::new(InMemoryRedisNode::new());
+        let node3 = Arc::new(InMemoryRedisNode::new());
+        let nodes: Vec<Arc<dyn RedisNode>> = vec![node1.clone(), node2.clone(), node3.clone()];
+        let mgr = RedlockManager::new(
+            nodes,
+            RedlockConfig {
+                ttl: Duration::from_millis(300),
+                heartbeat_interval: Duration::from_millis(30),
+                acquire_timeout: Duration::from_millis(100),
+                retry_delay: Duration::from_millis(10),
+            },
+        )
+        .unwrap();
+
+        let guard = mgr.acquire("task:cancellation-test").await.unwrap();
+        let cancel_token = guard.cancellation_token();
+        assert!(!cancel_token.is_cancelled());
+
+        // Simulate nodes losing lock (e.g. key eviction or partition) by clearing the keys
+        let _ = node1.compare_and_del("task:cancellation-test", guard.token()).await;
+        let _ = node2.compare_and_del("task:cancellation-test", guard.token()).await;
+        let _ = node3.compare_and_del("task:cancellation-test", guard.token()).await;
+
+        // Wait for heartbeat interval to trigger renewal failure
+        tokio::time::sleep(Duration::from_millis(70)).await;
+
+        assert!(
+            cancel_token.is_cancelled(),
+            "cancellation token should be cancelled when heartbeat loses quorum"
+        );
     }
 
     #[test]

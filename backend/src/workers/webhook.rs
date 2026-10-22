@@ -155,7 +155,9 @@ impl WebhookDispatcherWorker {
                     .resolve_to_addrs(host, &addresses)
                     .build()?;
 
-                send_webhook_request(&client, &url, &headers, &serialized_body).await
+                send_webhook_request(&client, &url, &headers, &serialized_body)
+                    .await
+                    .map_err(anyhow::Error::from)
             })
             .await
             {

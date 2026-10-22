@@ -18,6 +18,37 @@ pub enum ConfigReloadError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Invalid pool limits: {0}")]
+    InvalidPoolLimits(String),
+}
+
+/// Validate that new pool limits are compatible with PostgreSQL server capacity
+/// and gracefully adjust pool bounds without terminating active connections.
+pub fn validate_and_adjust_pool_limits(
+    requested_max: u32,
+    active_in_flight: u32,
+    server_limit: Option<u32>,
+) -> Result<u32, ConfigReloadError> {
+    if let Some(server_max) = server_limit {
+        if requested_max > server_max {
+            return Err(ConfigReloadError::InvalidPoolLimits(format!(
+                "Requested max_connections ({}) exceeds PostgreSQL server limit ({})",
+                requested_max, server_max
+            )));
+        }
+    }
+
+    if requested_max < active_in_flight {
+        tracing::warn!(
+            requested = requested_max,
+            active = active_in_flight,
+            "Requested max_connections is below active in-flight query count; gracefully adjusting to active count"
+        );
+        Ok(active_in_flight)
+    } else {
+        Ok(requested_max)
+    }
 }
 
 impl IntoResponse for ConfigReloadError {
@@ -67,6 +98,7 @@ pub struct ConfigManager {
     current_config: ArcSwap<BaseAppConfig>,
     contract_registry: ContractRegistry,
     redis_client: Option<RedisClient>,
+    db_pool: Option<sqlx::PgPool>,
     reload_channel: String,
 }
 
@@ -77,12 +109,18 @@ impl ConfigManager {
             current_config: ArcSwap::from(Arc::new(initial_config)),
             contract_registry: ContractRegistry::new(),
             redis_client: None,
+            db_pool: None,
             reload_channel: "config:reload".to_string(),
         }
     }
 
     pub fn with_redis(mut self, redis: RedisClient) -> Self {
         self.redis_client = Some(redis);
+        self
+    }
+
+    pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
+        self.db_pool = Some(pool);
         self
     }
 
@@ -106,7 +144,31 @@ impl ConfigManager {
         info!("Starting configuration reload...");
 
         let env = Environment::from_env();
-        let new_config = BaseAppConfig::load(env)?;
+        let mut new_config = BaseAppConfig::load(env)?;
+
+        // Validate that new connection pool limits are compatible with PostgreSQL server capacity
+        // and do not drop below active in-flight queries.
+        if let Some(pool) = &self.db_pool {
+            let active = (pool.size() as u32).saturating_sub(pool.num_idle() as u32);
+            let server_limit: Option<u32> = match sqlx::query_scalar::<_, String>("SHOW max_connections")
+                .fetch_one(pool)
+                .await
+            {
+                Ok(val) => val.trim().parse::<u32>().ok(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to query PostgreSQL server max_connections; skipping server cap check");
+                    None
+                }
+            };
+
+            let adjusted_max = validate_and_adjust_pool_limits(
+                new_config.database.max_connections,
+                active,
+                server_limit,
+            )?;
+            new_config.database.max_connections = adjusted_max;
+        }
+
         self.current_config.store(Arc::new(new_config));
 
         if let Some(redis) = &self.redis_client {
@@ -123,9 +185,54 @@ impl ConfigManager {
         let mut conn = redis.get_multiplexed_async_connection().await?;
         let raw: Option<String> = conn.get("config:current").await?;
         let json = raw.ok_or_else(|| ConfigReloadError::LoadError(ConfigError::LoadError("config:current missing".to_string())))?;
-        let new_config: BaseAppConfig = serde_json::from_str(&json)?;
+        let mut new_config: BaseAppConfig = serde_json::from_str(&json)?;
+
+        if let Some(pool) = &self.db_pool {
+            let active = (pool.size() as u32).saturating_sub(pool.num_idle() as u32);
+            let server_limit: Option<u32> = match sqlx::query_scalar::<_, String>("SHOW max_connections")
+                .fetch_one(pool)
+                .await
+            {
+                Ok(val) => val.trim().parse::<u32>().ok(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to query PostgreSQL server max_connections; skipping server cap check");
+                    None
+                }
+            };
+
+            let adjusted_max = validate_and_adjust_pool_limits(
+                new_config.database.max_connections,
+                active,
+                server_limit,
+            )?;
+            new_config.database.max_connections = adjusted_max;
+        }
+
         self.current_config.store(Arc::new(new_config));
         Ok(())
+    }
+
+    /// Spawn a background task listening for SIGHUP to trigger configuration reload.
+    #[cfg(unix)]
+    pub fn watch_sighup(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sighup = match signal(SignalKind::hangup()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to install SIGHUP signal handler");
+                    return;
+                }
+            };
+
+            tracing::info!("ConfigManager: listening for SIGHUP reload signals");
+            while sighup.recv().await.is_some() {
+                tracing::info!("ConfigManager: received SIGHUP signal, reloading configuration");
+                if let Err(e) = self.reload().await {
+                    tracing::error!(error = %e, "Config reload via SIGHUP failed");
+                }
+            }
+        })
     }
 
     pub async fn watch_redis(self: Arc<Self>, redis: RedisClient) -> tokio::task::JoinHandle<()> {
@@ -272,6 +379,10 @@ pub enum ReloadError {
     /// The configuration key was not found in Redis.
     #[error("Config key not found in Redis")]
     NotFound,
+
+    /// Invalid database connection pool limits.
+    #[error("Invalid pool limits: {0}")]
+    InvalidPoolLimits(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +476,35 @@ impl ConfigWatcher {
         ConfigHandle {
             inner: Arc::clone(&self.inner),
             changed: self.notify_rx.clone(),
+        }
+    }
+
+    /// Validate that new pool limits are compatible with PostgreSQL server capacity
+    /// and gracefully adjust pool bounds without terminating active connections.
+    pub fn validate_and_adjust_connections(
+        &self,
+        requested_max: u32,
+        active_in_flight: u32,
+        server_limit: Option<u32>,
+    ) -> Result<u32, ReloadError> {
+        if let Some(server_max) = server_limit {
+            if requested_max > server_max {
+                return Err(ReloadError::InvalidPoolLimits(format!(
+                    "Requested max_connections ({}) exceeds PostgreSQL server limit ({})",
+                    requested_max, server_max
+                )));
+            }
+        }
+
+        if requested_max < active_in_flight {
+            tracing::warn!(
+                requested = requested_max,
+                active = active_in_flight,
+                "Requested max_connections is below active in-flight queries; adjusting to active count"
+            );
+            Ok(active_in_flight)
+        } else {
+            Ok(requested_max)
         }
     }
 
@@ -655,5 +795,41 @@ mod tests {
         }
 
         assert_eq!(manager.contract_registry().load().len(), 1);
+    }
+
+    // --- Database connection pool cap validation ---
+
+    #[test]
+    fn test_pool_limits_exceeding_server_cap_returns_error() {
+        let res = validate_and_adjust_pool_limits(150, 10, Some(100));
+        assert!(matches!(res, Err(ConfigReloadError::InvalidPoolLimits(_))));
+    }
+
+    #[test]
+    fn test_pool_limits_below_active_queries_gracefully_adjusts() {
+        // Requested 5 max connections, but 12 are actively in flight.
+        // It must gracefully adjust to 12 rather than terminating active connections.
+        let adjusted = validate_and_adjust_pool_limits(5, 12, Some(100)).unwrap();
+        assert_eq!(adjusted, 12);
+    }
+
+    #[test]
+    fn test_pool_limits_within_bounds_accepted() {
+        let adjusted = validate_and_adjust_pool_limits(50, 10, Some(100)).unwrap();
+        assert_eq!(adjusted, 50);
+    }
+
+    #[test]
+    fn test_config_watcher_pool_limits_validation() {
+        let watcher = default_watcher();
+        assert!(watcher.validate_and_adjust_connections(200, 5, Some(100)).is_err());
+        assert_eq!(
+            watcher.validate_and_adjust_connections(5, 15, Some(100)).unwrap(),
+            15
+        );
+        assert_eq!(
+            watcher.validate_and_adjust_connections(50, 10, Some(100)).unwrap(),
+            50
+        );
     }
 }

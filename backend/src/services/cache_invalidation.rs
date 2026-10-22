@@ -25,7 +25,7 @@ pub enum InvalidationStrategy {
 }
 
 /// Cache invalidation event
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheInvalidationEvent {
     /// Strategy to use for invalidation
     pub strategy: InvalidationStrategy,
@@ -34,7 +34,66 @@ pub struct CacheInvalidationEvent {
     /// Optional namespace or tag information
     pub metadata: Option<HashMap<String, String>>,
     /// Timestamp when event was created
+    #[serde(skip, default = "std::time::Instant::now")]
     pub timestamp: std::time::Instant,
+    /// Cache generation sequence number
+    #[serde(default)]
+    pub sequence: u64,
+}
+
+/// Tracks cache generation sequences in Redis to detect stale local cache entries
+/// even when Pub/Sub broadcast messages are dropped during network partitions.
+#[derive(Debug, Clone)]
+pub struct CacheGenerationTracker {
+    redis_client: Arc<redis::Client>,
+    local_generations: Arc<tokio::sync::RwLock<HashMap<String, u64>>>,
+}
+
+impl CacheGenerationTracker {
+    pub fn new(redis_client: Arc<redis::Client>) -> Self {
+        Self {
+            redis_client,
+            local_generations: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Increment and return the new generation sequence for a cache namespace/key in Redis.
+    pub async fn bump_generation(&self, key: &str) -> Result<u64, anyhow::Error> {
+        let gen_key = format!("cache:generation:{}", key);
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
+        let next_gen: u64 = redis::cmd("INCR").arg(&gen_key).query_async(&mut conn).await?;
+        self.local_generations.write().await.insert(key.to_string(), next_gen);
+        Ok(next_gen)
+    }
+
+    /// Check if the local cache generation matches or exceeds the current generation in Redis.
+    pub async fn is_valid(&self, key: &str, local_gen: u64) -> Result<bool, anyhow::Error> {
+        let gen_key = format!("cache:generation:{}", key);
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
+        let current_gen: Option<u64> = redis::cmd("GET").arg(&gen_key).query_async(&mut conn).await?;
+        match current_gen {
+            Some(gen) => Ok(local_gen >= gen),
+            None => Ok(true),
+        }
+    }
+
+    /// Get current generation for a key in Redis.
+    pub async fn get_generation(&self, key: &str) -> Result<u64, anyhow::Error> {
+        let gen_key = format!("cache:generation:{}", key);
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
+        let gen: Option<u64> = redis::cmd("GET").arg(&gen_key).query_async(&mut conn).await?;
+        Ok(gen.unwrap_or(0))
+    }
+
+    /// Get local generation cached in memory.
+    pub async fn get_local_generation(&self, key: &str) -> Option<u64> {
+        self.local_generations.read().await.get(key).copied()
+    }
+
+    /// Set local generation in memory.
+    pub async fn set_local_generation(&self, key: &str, gen: u64) {
+        self.local_generations.write().await.insert(key.to_string(), gen);
+    }
 }
 
 /// Cache invalidation manager
@@ -46,6 +105,8 @@ pub struct CacheInvalidationManager {
     tx: mpsc::Sender<CacheInvalidationEvent>,
     /// Configuration for invalidation behavior
     config: CacheInvalidationConfig,
+    /// Generation sequence tracker
+    generation_tracker: CacheGenerationTracker,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +121,14 @@ pub struct CacheInvalidationConfig {
     pub retry_attempts: u8,
     /// Delay between retries in milliseconds
     pub retry_delay_ms: u64,
+    /// Whether to use Redis Streams with consumer group acknowledgments for durable invalidation
+    pub use_redis_streams: bool,
+    /// Redis Stream name for invalidation events
+    pub stream_name: String,
+    /// Consumer group name for invalidation processing
+    pub consumer_group: String,
+    /// Stream retention limit (MAXLEN)
+    pub stream_max_len: usize,
 }
 
 impl Default for CacheInvalidationConfig {
@@ -70,6 +139,10 @@ impl Default for CacheInvalidationConfig {
             timeout_ms: 5000,
             retry_attempts: 3,
             retry_delay_ms: 100,
+            use_redis_streams: true,
+            stream_name: "cache:invalidation:stream".to_string(),
+            consumer_group: "cache_invalidation_workers".to_string(),
+            stream_max_len: 10_000,
         }
     }
 }
@@ -77,7 +150,8 @@ impl Default for CacheInvalidationConfig {
 impl CacheInvalidationManager {
     /// Create a new cache invalidation manager
     pub fn new(redis_client: Arc<redis::Client>, config: CacheInvalidationConfig) -> Self {
-        let (tx, mut rx) = mpsc::channel::<CacheInvalidationEvent>(100);
+        let (tx, rx) = mpsc::channel::<CacheInvalidationEvent>(100);
+        let generation_tracker = CacheGenerationTracker::new(redis_client.clone());
         
         // Start background processor if enabled
         if config.background_processing {
@@ -93,7 +167,60 @@ impl CacheInvalidationManager {
             redis_client,
             tx,
             config,
+            generation_tracker,
         }
+    }
+
+    /// Access the generation sequence tracker
+    pub fn generation_tracker(&self) -> &CacheGenerationTracker {
+        &self.generation_tracker
+    }
+
+    /// Configuration for invalidation behavior
+    pub fn config(&self) -> &CacheInvalidationConfig {
+        &self.config
+    }
+
+    /// Publish an invalidation event to Redis Streams with consumer group durability
+    pub async fn publish_stream_invalidation(
+        &self,
+        event: &CacheInvalidationEvent,
+    ) -> Result<String, anyhow::Error> {
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
+        let payload = serde_json::to_string(event)?;
+        let entry_id: String = redis::cmd("XADD")
+            .arg(&self.config.stream_name)
+            .arg("MAXLEN")
+            .arg("~")
+            .arg(self.config.stream_max_len)
+            .arg("*")
+            .arg("event")
+            .arg(payload)
+            .query_async(&mut conn)
+            .await?;
+        Ok(entry_id)
+    }
+
+    /// Acknowledge processing of a stream invalidation event
+    pub async fn acknowledge_stream_event(&self, stream_id: &str) -> Result<(), anyhow::Error> {
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
+        let _: () = redis::cmd("XACK")
+            .arg(&self.config.stream_name)
+            .arg(&self.config.consumer_group)
+            .arg(stream_id)
+            .query_async(&mut conn)
+            .await?;
+        Ok(())
+    }
+
+    /// Bump generation sequence for a cache namespace or key
+    pub async fn bump_generation(&self, key: &str) -> Result<u64, anyhow::Error> {
+        self.generation_tracker.bump_generation(key).await
+    }
+
+    /// Check if local cache generation is valid against Redis
+    pub async fn is_generation_valid(&self, key: &str, local_gen: u64) -> Result<bool, anyhow::Error> {
+        self.generation_tracker.is_valid(key, local_gen).await
     }
 
     /// Enqueue an invalidation event
@@ -481,6 +608,8 @@ mod tests {
         
         assert!(manager.config.background_processing);
         assert_eq!(manager.config.max_concurrent, 10);
+        assert!(manager.config.use_redis_streams);
+        assert_eq!(manager.config.stream_name, "cache:invalidation:stream");
     }
     
     #[tokio::test]
@@ -489,6 +618,38 @@ mod tests {
         assert_eq!(InvalidationStrategy::Pattern as i32, 1);
         assert_eq!(InvalidationStrategy::Namespace as i32, 2);
         assert_eq!(InvalidationStrategy::Tag as i32, 3);
+    }
+
+    #[test]
+    fn test_cache_invalidation_event_serde_roundtrip() {
+        let mut metadata = HashMap::new();
+        metadata.insert("reason".to_string(), "update".to_string());
+
+        let event = CacheInvalidationEvent {
+            strategy: InvalidationStrategy::Key,
+            targets: vec!["users:123".to_string(), "users:456".to_string()],
+            metadata: Some(metadata),
+            timestamp: Instant::now(),
+            sequence: 42,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: CacheInvalidationEvent = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.strategy, InvalidationStrategy::Key);
+        assert_eq!(deserialized.targets, vec!["users:123", "users:456"]);
+        assert_eq!(deserialized.sequence, 42);
+        assert_eq!(deserialized.metadata.unwrap().get("reason").unwrap(), "update");
+    }
+
+    #[tokio::test]
+    async fn test_generation_tracker_local_fallback() {
+        let client = Arc::new(redis::Client::open("redis://127.0.0.1/").unwrap());
+        let tracker = CacheGenerationTracker::new(client);
+
+        assert_eq!(tracker.get_local_generation("test_key").await, None);
+        tracker.set_local_generation("test_key", 5).await;
+        assert_eq!(tracker.get_local_generation("test_key").await, Some(5));
     }
 
     #[tokio::test]

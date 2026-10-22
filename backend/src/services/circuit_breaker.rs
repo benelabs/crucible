@@ -3,6 +3,7 @@
 //! Implements the classic three-state circuit breaker (Closed → Open → Half-Open)
 //! to prevent cascading failures when external services are unavailable.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -22,12 +23,14 @@ pub enum CircuitState {
 /// Configuration for a circuit breaker.
 #[derive(Debug, Clone)]
 pub struct CircuitBreakerConfig {
-    /// Number of consecutive failures before opening the circuit.
+    /// Number of failures within the sliding window before opening the circuit.
     pub failure_threshold: u32,
     /// How long to wait in Open state before transitioning to HalfOpen.
     pub recovery_timeout: Duration,
     /// Number of consecutive successes in HalfOpen before closing.
     pub success_threshold: u32,
+    /// Sliding time window for tracking failures in Closed state.
+    pub failure_window: Duration,
 }
 
 impl Default for CircuitBreakerConfig {
@@ -36,6 +39,7 @@ impl Default for CircuitBreakerConfig {
             failure_threshold: 5,
             recovery_timeout: Duration::from_secs(30),
             success_threshold: 2,
+            failure_window: Duration::from_secs(60),
         }
     }
 }
@@ -43,7 +47,7 @@ impl Default for CircuitBreakerConfig {
 #[derive(Debug)]
 struct CircuitBreakerInner {
     state: CircuitState,
-    consecutive_failures: u32,
+    failure_timestamps: VecDeque<Instant>,
     consecutive_successes: u32,
     config: CircuitBreakerConfig,
 }
@@ -52,9 +56,21 @@ impl CircuitBreakerInner {
     fn new(config: CircuitBreakerConfig) -> Self {
         Self {
             state: CircuitState::Closed,
-            consecutive_failures: 0,
+            failure_timestamps: VecDeque::new(),
             consecutive_successes: 0,
             config,
+        }
+    }
+
+    fn prune_failures(&mut self, now: Instant) {
+        if let Some(cutoff) = now.checked_sub(self.config.failure_window) {
+            while let Some(&timestamp) = self.failure_timestamps.front() {
+                if timestamp < cutoff {
+                    self.failure_timestamps.pop_front();
+                } else {
+                    break;
+                }
+            }
         }
     }
 
@@ -76,39 +92,45 @@ impl CircuitBreakerInner {
     }
 
     fn record_success(&mut self) {
+        let now = Instant::now();
+        self.prune_failures(now);
         match self.state {
             CircuitState::HalfOpen => {
                 self.consecutive_successes += 1;
                 if self.consecutive_successes >= self.config.success_threshold {
                     self.state = CircuitState::Closed;
-                    self.consecutive_failures = 0;
+                    self.failure_timestamps.clear();
                     info!("Circuit breaker closed after successful recovery");
                 }
             }
             CircuitState::Closed => {
-                self.consecutive_failures = 0;
+                // Do not immediately reset failure count to zero on an isolated success.
+                // Failures age out gracefully via the sliding time window.
             }
             _ => {}
         }
     }
 
     fn record_failure(&mut self) {
-        self.consecutive_failures += 1;
+        let now = Instant::now();
+        self.prune_failures(now);
+        self.failure_timestamps.push_back(now);
+
         match self.state {
             CircuitState::Closed => {
-                if self.consecutive_failures >= self.config.failure_threshold {
+                if self.failure_timestamps.len() >= self.config.failure_threshold as usize {
                     self.state = CircuitState::Open {
-                        opened_at: Instant::now(),
+                        opened_at: now,
                     };
                     warn!(
-                        failures = self.consecutive_failures,
-                        "Circuit breaker opened after threshold exceeded"
+                        failures = self.failure_timestamps.len(),
+                        "Circuit breaker opened after threshold exceeded within sliding window"
                     );
                 }
             }
             CircuitState::HalfOpen => {
                 self.state = CircuitState::Open {
-                    opened_at: Instant::now(),
+                    opened_at: now,
                 };
                 warn!("Circuit breaker re-opened after probe failure");
             }
@@ -184,6 +206,7 @@ mod tests {
             failure_threshold: 3,
             recovery_timeout: Duration::from_millis(50),
             success_threshold: 1,
+            failure_window: Duration::from_millis(200),
         }
     }
 
@@ -202,6 +225,45 @@ mod tests {
         }
         let result = cb.call(|| async { Ok::<_, String>("ok") }).await;
         assert!(matches!(result, Err(CircuitBreakerError::Open(_))));
+    }
+
+    #[tokio::test]
+    async fn test_flaky_service_with_intermittent_success_trips_breaker() {
+        let cb = CircuitBreaker::new("test", fast_config());
+        // Failure 1
+        let _ = cb.call(|| async { Err::<(), _>("fail1") }).await;
+        // Intermittent success (should NOT immediately reset the failure counter)
+        let _ = cb.call(|| async { Ok::<_, String>("ok1") }).await;
+        // Failure 2
+        let _ = cb.call(|| async { Err::<(), _>("fail2") }).await;
+        // Intermittent success
+        let _ = cb.call(|| async { Ok::<_, String>("ok2") }).await;
+        // Failure 3 (within sliding window, trips breaker)
+        let _ = cb.call(|| async { Err::<(), _>("fail3") }).await;
+
+        let result = cb.call(|| async { Ok::<_, String>("ok3") }).await;
+        assert!(matches!(result, Err(CircuitBreakerError::Open(_))));
+    }
+
+    #[tokio::test]
+    async fn test_failures_expire_outside_sliding_window() {
+        let mut config = fast_config();
+        config.failure_window = Duration::from_millis(40);
+        let cb = CircuitBreaker::new("test", config);
+
+        // 2 failures
+        let _ = cb.call(|| async { Err::<(), _>("fail") }).await;
+        let _ = cb.call(|| async { Err::<(), _>("fail") }).await;
+
+        // Sleep to let failures expire outside sliding window
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        // 1 more failure (total within window is now only 1)
+        let _ = cb.call(|| async { Err::<(), _>("fail") }).await;
+
+        // Breaker should still be closed and allow request
+        let result = cb.call(|| async { Ok::<_, String>("ok") }).await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

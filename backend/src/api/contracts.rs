@@ -1,5 +1,5 @@
+use async_trait::async_trait;
 use axum::{
-    async_trait,
     extract::{FromRequest, Json, Request},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -200,7 +200,6 @@ pub trait Validate {
 /// Axum extractor that performs validation after JSON deserialization.
 pub struct ValidatedJson<T>(pub T);
 
-#[async_trait]
 impl<S, T> FromRequest<S> for ValidatedJson<T>
 where
     T: serde::de::DeserializeOwned + Validate,

@@ -53,6 +53,24 @@ use axum::{
 use std::{sync::Arc, time::Instant};
 use tracing::Instrument;
 
+/// Returns true for the Unicode format characters that render as nothing but can
+/// reorder or mask the text around them.
+///
+/// Covered: the bidirectional marks and overrides (U+200E, U+200F, U+061C,
+/// U+202A–U+202E, U+2066–U+2069) and the zero-width characters
+/// (U+200B–U+200D, U+2060, U+FEFF). None of them is ASCII control, so the
+/// ASCII branch below never sees them.
+fn is_invisible_format_char(c: char) -> bool {
+    matches!(c,
+        '\u{061C}'                  // ARABIC LETTER MARK
+        | '\u{200B}'..='\u{200F}'    // ZWSP, ZWNJ, ZWJ, LRM, RLM
+        | '\u{202A}'..='\u{202E}'    // LRE, RLE, PDF, LRO, RLO
+        | '\u{2060}'                  // WORD JOINER
+        | '\u{2066}'..='\u{2069}'    // LRI, RLI, FSI, PDI
+        | '\u{FEFF}'                  // ZERO WIDTH NO-BREAK SPACE
+    )
+}
+
 /// Sanitize a string for safe log output by stripping newlines and control characters.
 ///
 /// Replaces:
@@ -60,13 +78,17 @@ use tracing::Instrument;
 /// - `\r` (carriage return) → space
 /// - `\t` (tab) → space
 /// - All other ASCII control characters (0x00–0x1F, 0x7F) → empty string
+/// - Unicode bidi overrides and zero-width characters → empty string
 ///
 /// This prevents log injection attacks where user-controlled input
-/// contains fake log entries via embedded newlines.
+/// contains fake log entries via embedded newlines, and log spoofing where an
+/// invisible character makes the stored text read differently than it renders.
+/// Ordinary non-ASCII text (accented letters, emoji) is preserved.
 pub fn sanitize_for_log(input: &str) -> String {
     input.chars().filter_map(|c| match c {
         '\n' | '\r' | '\t' => Some(' '),
         c if c.is_ascii_control() => None,
+        c if is_invisible_format_char(c) => None,
         c => Some(c),
     }).collect()
 }
@@ -210,6 +232,44 @@ mod tests {
         assert!(!result.contains('\r'));
         assert!(result.contains("HTTP/1.1"));
         assert!(result.contains("X-User"));
+    }
+
+    #[test]
+    fn test_sanitize_for_log_strips_bidi_override() {
+        // U+202E RIGHT-TO-LEFT OVERRIDE makes the stored text render reversed,
+        // so an operator reading the log sees a different path than the bytes.
+        let input = "GET /admin/\u{202E}gpj.exe";
+        let result = sanitize_for_log(input);
+        assert!(!result.contains('\u{202E}'));
+        assert_eq!(result, "GET /admin/gpj.exe");
+    }
+
+    #[test]
+    fn test_sanitize_for_log_strips_bidi_marks() {
+        for c in ['\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202C}', '\u{2066}', '\u{2069}'] {
+            let input = format!("GET /a{}b", c);
+            let result = sanitize_for_log(&input);
+            assert!(!result.contains(c), "bidi mark {:?} survived", c);
+            assert_eq!(result, "GET /ab");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_for_log_strips_zero_width() {
+        for c in ['\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{FEFF}'] {
+            let input = format!("GET /ad{}min", c);
+            let result = sanitize_for_log(&input);
+            assert!(!result.contains(c), "zero-width {:?} survived", c);
+            assert_eq!(result, "GET /admin");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_for_log_keeps_non_ascii_letters_and_emoji() {
+        // The fix must not turn into a blanket ASCII filter.
+        for input in ["GET /café", "GET /日本語", "GET /🚀/ok", "GET /naïve-résumé"] {
+            assert_eq!(sanitize_for_log(input), input);
+        }
     }
     use crate::config::{reload::ConfigManager, AppConfig};
     use crate::services::{

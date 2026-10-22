@@ -42,6 +42,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use chrono::{DateTime, Utc};
+use rand::Rng;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -145,33 +146,58 @@ pub struct DlqReplayRequest {
     pub job_ids: Vec<String>,
 }
 
+/// A replayed job together with the jittered time at which it should be retried.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScheduledReplay {
+    pub job_id: String,
+    pub retry_at: DateTime<Utc>,
+}
+
 /// Response payload for the DLQ replay request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DlqReplayResponse {
     pub replayed: Vec<String>,
     pub failed: Vec<String>,
+    /// Per-job retry times, randomly spread so bulk replays do not hit
+    /// downstream services in a synchronized burst.
+    #[serde(default)]
+    pub scheduled: Vec<ScheduledReplay>,
 }
+
+/// Jitter window added per replayed job in a bulk replay.
+const DEFAULT_REPLAY_SPREAD_PER_JOB: Duration = Duration::from_millis(250);
+
+/// Upper bound on the jitter window for a single bulk replay.
+const DEFAULT_REPLAY_MAX_SPREAD: Duration = Duration::from_secs(300);
 
 /// Redis-backed dead-letter queue coordinator for transient job replay.
 #[derive(Debug, Clone)]
 pub struct DlqCoordinator {
     redis: Arc<redis::Client>,
     queue_key: String,
+    replay_spread_per_job: Duration,
+    replay_max_spread: Duration,
 }
 
 impl DlqCoordinator {
     pub fn new(redis: Arc<redis::Client>) -> Self {
-        Self {
-            redis,
-            queue_key: "dlq:jobs".to_string(),
-        }
+        Self::with_queue_key(redis, "dlq:jobs")
     }
 
     pub fn with_queue_key(redis: Arc<redis::Client>, queue_key: impl Into<String>) -> Self {
         Self {
             redis,
             queue_key: queue_key.into(),
+            replay_spread_per_job: DEFAULT_REPLAY_SPREAD_PER_JOB,
+            replay_max_spread: DEFAULT_REPLAY_MAX_SPREAD,
         }
+    }
+
+    /// Override the jitter window used to spread bulk replays.
+    pub fn with_replay_spread(mut self, per_job: Duration, max: Duration) -> Self {
+        self.replay_spread_per_job = per_job;
+        self.replay_max_spread = max;
+        self
     }
 
     pub async fn enqueue(
@@ -246,8 +272,46 @@ impl DlqCoordinator {
             replayed.push(job_id);
         }
 
-        Ok(DlqReplayResponse { replayed, failed })
+        let now = Utc::now();
+        let scheduled = replay_delays(
+            replayed.len(),
+            self.replay_spread_per_job,
+            self.replay_max_spread,
+        )
+        .into_iter()
+        .zip(replayed.iter())
+        .map(|(delay, job_id)| ScheduledReplay {
+            job_id: job_id.clone(),
+            retry_at: now + chrono::Duration::from_std(delay).unwrap_or_default(),
+        })
+        .collect();
+
+        Ok(DlqReplayResponse {
+            replayed,
+            failed,
+            scheduled,
+        })
     }
+}
+
+/// Compute an independent random delay for each of `count` replayed jobs.
+///
+/// The jitter window grows with the batch size (`per_job * count`, capped at
+/// `max`) so large replays are spread out while a single replay stays prompt.
+fn replay_delays(count: usize, per_job: Duration, max: Duration) -> Vec<Duration> {
+    let window_ms = per_job
+        .saturating_mul(count.min(u32::MAX as usize) as u32)
+        .min(max)
+        .as_millis() as u64;
+
+    if window_ms == 0 {
+        return vec![Duration::ZERO; count];
+    }
+
+    let mut rng = rand::thread_rng();
+    (0..count)
+        .map(|_| Duration::from_millis(rng.gen_range(0..window_ms)))
+        .collect()
 }
 
 /// Handler for replaying dead-letter jobs from the DLQ.
@@ -615,6 +679,24 @@ mod tests {
         RetryPolicy::new(max)
             .with_base_delay(Duration::from_millis(1))
             .with_max_delay(Duration::from_millis(10))
+    }
+
+    // ---- replay_delays -----------------------------------------------------
+
+    #[test]
+    fn replay_delays_are_bounded_and_spread() {
+        let delays = replay_delays(200, Duration::from_millis(250), Duration::from_secs(10));
+        assert_eq!(delays.len(), 200);
+        assert!(delays.iter().all(|d| *d < Duration::from_secs(10)));
+
+        let distinct: std::collections::HashSet<_> = delays.iter().collect();
+        assert!(distinct.len() > 1, "bulk replay delays must not be identical");
+    }
+
+    #[test]
+    fn replay_delays_zero_window() {
+        let delays = replay_delays(3, Duration::ZERO, Duration::from_secs(10));
+        assert_eq!(delays, vec![Duration::ZERO; 3]);
     }
 
     // ---- compute_delay -----------------------------------------------------

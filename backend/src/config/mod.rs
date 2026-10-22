@@ -171,6 +171,13 @@ impl AppConfig {
             errors.push("Redis pool_size must be greater than 0.".to_string());
         }
 
+        if self.cors.allow_credentials && self.cors.allows_any_origin() {
+            errors.push(
+                "CORS allow_credentials cannot be combined with wildcard origin '*' in any environment.                  List explicit origins or disable allow_credentials."
+                    .to_string(),
+            );
+        }
+
         if env == Environment::Production || env == Environment::Staging {
             if self.cors.allowed_origins.is_empty() {
                 errors.push(

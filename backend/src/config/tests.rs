@@ -279,3 +279,33 @@ fn test_production_rejects_empty_cors_origins() {
         },
     );
 }
+
+#[test]
+fn test_development_rejects_wildcard_cors_with_credentials() {
+    temp_env::with_vars(
+        [
+            (
+                "APP_DATABASE__URL",
+                Some("postgres://user:pass@localhost/db"),
+            ),
+            ("APP_REDIS__URL", Some("redis://localhost:6379")),
+            ("APP_CORS__ALLOWED_ORIGINS__0", Some("*")),
+            ("APP_CORS__ALLOW_CREDENTIALS", Some("true")),
+        ],
+        || {
+            let err = AppConfig::load(Environment::Development)
+                .expect_err("Should fail with wildcard CORS + credentials in development");
+
+            match err {
+                crate::config::ConfigError::ValidationError(errors) => {
+                    assert!(
+                        errors.iter().any(|e| e.contains("allow_credentials")),
+                        "Expected CORS credentials error, got: {:?}",
+                        errors
+                    );
+                }
+                _ => panic!("Expected ValidationError, got {:?}", err),
+            }
+        },
+    );
+}

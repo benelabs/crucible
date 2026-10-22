@@ -14,7 +14,7 @@ use axum::{
 use redis::Client as RedisClient;
 use sqlx::PgPool;
 use tower_http::{
-    cors::{AllowOrigin, Any, CorsLayer},
+    cors::{AllowHeaders, AllowMethods, AllowOrigin, Any, CorsLayer},
     trace::TraceLayer,
 };
 use utoipa::OpenApi;
@@ -284,7 +284,9 @@ async fn security_headers_middleware(
 }
 
 fn build_cors_layer(config: &AppConfig) -> CorsLayer {
-    if config.cors.allowed_origins.contains(&"*".to_string()) {
+    if config.cors.allows_any_origin() {
+        // Credentials are never enabled for a wildcard origin; config validation
+        // rejects that combination, and this branch never sets them.
         CorsLayer::new()
             .allow_origin(Any)
             .allow_methods(Any)
@@ -299,10 +301,16 @@ fn build_cors_layer(config: &AppConfig) -> CorsLayer {
                     .unwrap_or_else(|_| panic!("Invalid CORS origin: {}", o))
             })
             .collect();
-        CorsLayer::new()
-            .allow_origin(AllowOrigin::list(origins))
-            .allow_methods(Any)
-            .allow_headers(Any)
+        let layer = CorsLayer::new().allow_origin(AllowOrigin::list(origins));
+        if config.cors.allow_credentials {
+            // Wildcard methods/headers are invalid with credentials, so mirror the request.
+            layer
+                .allow_credentials(true)
+                .allow_methods(AllowMethods::mirror_request())
+                .allow_headers(AllowHeaders::mirror_request())
+        } else {
+            layer.allow_methods(Any).allow_headers(Any)
+        }
     }
 }
 

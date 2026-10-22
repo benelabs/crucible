@@ -175,18 +175,48 @@ pub async fn get_recent_runs(
     Ok(runs)
 }
 
+/// Maximum number of rows removed per `DELETE` statement during cleanup.
+const CLEANUP_BATCH_SIZE: i64 = 1_000;
+
+/// Pause between cleanup batches so concurrent inserts and updates are not starved.
+const CLEANUP_BATCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// Cleans up job run records older than the specified retention period.
 /// Returns the number of deleted records.
+///
+/// Rows are deleted in bounded batches of [`CLEANUP_BATCH_SIZE`] so each
+/// statement holds row locks briefly instead of locking the whole backlog in a
+/// single long-running transaction. `SKIP LOCKED` ensures rows touched by an
+/// in-flight job update are left for the next run rather than blocking it.
 pub async fn cleanup_old_runs(pool: &PgPool, retain_days: i64) -> Result<u64, JobError> {
-    let result = sqlx::query(
-        r#"
-        DELETE FROM job_runs
-        WHERE started_at < NOW() - INTERVAL '1 day' * $1
-        "#,
-    )
-    .bind(retain_days as f64)
-    .execute(pool)
-    .await?;
+    let mut total_deleted = 0u64;
 
-    Ok(result.rows_affected())
+    loop {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM job_runs
+            WHERE id IN (
+                SELECT id FROM job_runs
+                WHERE started_at < NOW() - INTERVAL '1 day' * $1
+                LIMIT $2
+                FOR UPDATE SKIP LOCKED
+            )
+            "#,
+        )
+        .bind(retain_days as f64)
+        .bind(CLEANUP_BATCH_SIZE)
+        .execute(pool)
+        .await?;
+
+        let deleted = result.rows_affected();
+        total_deleted += deleted;
+
+        if deleted < CLEANUP_BATCH_SIZE as u64 {
+            break;
+        }
+
+        tokio::time::sleep(CLEANUP_BATCH_PAUSE).await;
+    }
+
+    Ok(total_deleted)
 }

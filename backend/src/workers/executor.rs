@@ -1,4 +1,8 @@
 use crate::error::AppError;
+use futures_util::FutureExt;
+use std::any::Any;
+use std::backtrace::Backtrace;
+use std::panic::AssertUnwindSafe;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -130,8 +134,21 @@ impl TaskExecutor {
                 // Acquire semaphore permit (waits if necessary)
                 let permit = semaphore.acquire_owned().await;
 
-                // Execute the task
-                let result = task.await;
+                // Execute the task, converting a panic into a failure so the
+                // counters stay accurate and the panic payload is not lost.
+                let result = match AssertUnwindSafe(task).catch_unwind().await {
+                    Ok(result) => result,
+                    Err(payload) => {
+                        let message = panic_message(payload.as_ref());
+                        let backtrace = Backtrace::force_capture();
+                        tracing::error!(
+                            panic.message = %message,
+                            panic.backtrace = %backtrace,
+                            "Task panicked"
+                        );
+                        Err(AppError::InternalError(format!("task panicked: {message}")))
+                    }
+                };
 
                 // Release the permit implicitly when it goes out of scope
                 drop(permit);
@@ -186,6 +203,17 @@ impl TaskExecutor {
         }
 
         tracing::info!("All executor tasks have completed");
+    }
+}
+
+/// Extract a human-readable message from a panic payload.
+fn panic_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
     }
 }
 
@@ -256,6 +284,25 @@ mod tests {
         // Check counts
         assert_eq!(executor.running_count(), 0);
         assert_eq!(executor.completed_count(), 1);
+        assert_eq!(executor.failed_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_executor_task_panic_is_captured() {
+        let executor = TaskExecutor::new(1);
+
+        let handle = executor.execute(Box::pin(async move {
+            panic!("boom");
+        }));
+
+        let result = handle.await.expect("panic should not escape as JoinError");
+        match result {
+            Err(AppError::InternalError(msg)) => assert!(msg.contains("boom")),
+            other => panic!("unexpected result: {other:?}"),
+        }
+
+        assert_eq!(executor.running_count(), 0);
+        assert_eq!(executor.completed_count(), 0);
         assert_eq!(executor.failed_count(), 1);
     }
 

@@ -3,7 +3,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 
-const REQUIRED_CHECKS: [&str; 3] = ["storage_layout", "public_interface", "authorization"];
+const REQUIRED_CHECKS: [&str; 4] = [
+    "storage_layout",
+    "public_interface",
+    "authorization",
+    "host_function_compatibility",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +23,10 @@ pub struct ContractUpgradeRequest {
     #[serde(default)]
     pub migration_required: bool,
     pub state_migration_hash: Option<String>,
+    #[serde(default)]
+    pub target_protocol: Option<u32>,
+    #[serde(default)]
+    pub target_wasm_bytes: Option<Vec<u8>>,
     #[serde(default)]
     pub compatibility_checks: Vec<CompatibilityCheck>,
 }
@@ -121,6 +130,8 @@ pub enum ContractUpgradeError {
     IdenticalWasmHash,
     MissingMigrationHash,
     InvalidStrategy(String),
+    InvalidWasm(String),
+    DeprecatedHostFunction(String),
 }
 
 impl fmt::Display for ContractUpgradeError {
@@ -136,6 +147,10 @@ impl fmt::Display for ContractUpgradeError {
                 write!(f, "state migration hash is required for this strategy")
             }
             Self::InvalidStrategy(message) => write!(f, "{message}"),
+            Self::InvalidWasm(message) => write!(f, "invalid wasm bytecode: {message}"),
+            Self::DeprecatedHostFunction(message) => {
+                write!(f, "deprecated host function: {message}")
+            }
         }
     }
 }
@@ -189,6 +204,246 @@ impl Version {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmImport {
+    pub module: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeprecatedHostFunction {
+    pub module: &'static str,
+    pub name: &'static str,
+    pub deprecated_in_protocol: u32,
+    pub removed_in_protocol: u32,
+}
+
+pub const DEPRECATED_HOST_FUNCTIONS: &[DeprecatedHostFunction] = &[
+    DeprecatedHostFunction {
+        module: "v",
+        name: "obj_to_u64",
+        deprecated_in_protocol: 20,
+        removed_in_protocol: 21,
+    },
+    DeprecatedHostFunction {
+        module: "v",
+        name: "u64_to_obj",
+        deprecated_in_protocol: 20,
+        removed_in_protocol: 21,
+    },
+    DeprecatedHostFunction {
+        module: "v",
+        name: "obj_to_i64",
+        deprecated_in_protocol: 20,
+        removed_in_protocol: 21,
+    },
+    DeprecatedHostFunction {
+        module: "v",
+        name: "i64_to_obj",
+        deprecated_in_protocol: 20,
+        removed_in_protocol: 21,
+    },
+    DeprecatedHostFunction {
+        module: "x",
+        name: "serialize_to_linear_memory",
+        deprecated_in_protocol: 20,
+        removed_in_protocol: 21,
+    },
+    DeprecatedHostFunction {
+        module: "x",
+        name: "deserialize_from_linear_memory",
+        deprecated_in_protocol: 20,
+        removed_in_protocol: 21,
+    },
+    DeprecatedHostFunction {
+        module: "b",
+        name: "vec_unpack_to_linear_memory",
+        deprecated_in_protocol: 21,
+        removed_in_protocol: 22,
+    },
+    DeprecatedHostFunction {
+        module: "m",
+        name: "map_unpack_to_linear_memory",
+        deprecated_in_protocol: 21,
+        removed_in_protocol: 22,
+    },
+    DeprecatedHostFunction {
+        module: "c",
+        name: "compute_hash_sha256_legacy",
+        deprecated_in_protocol: 21,
+        removed_in_protocol: 22,
+    },
+];
+
+fn read_u32_leb128(bytes: &[u8], offset: &mut usize) -> Result<u32, ContractUpgradeError> {
+    let mut result: u32 = 0;
+    let mut shift = 0;
+    loop {
+        if *offset >= bytes.len() {
+            return Err(ContractUpgradeError::InvalidWasm(
+                "unexpected end of leb128".to_string(),
+            ));
+        }
+        let byte = bytes[*offset];
+        *offset += 1;
+        result |= ((byte & 0x7F) as u32) << shift;
+        if (byte & 0x80) == 0 {
+            break;
+        }
+        shift += 7;
+        if shift > 35 {
+            return Err(ContractUpgradeError::InvalidWasm(
+                "leb128 integer overflow".to_string(),
+            ));
+        }
+    }
+    Ok(result)
+}
+
+fn read_string<'a>(bytes: &'a [u8], offset: &mut usize) -> Result<&'a str, ContractUpgradeError> {
+    let len = read_u32_leb128(bytes, offset)? as usize;
+    if *offset + len > bytes.len() {
+        return Err(ContractUpgradeError::InvalidWasm(
+            "unexpected end of string in wasm section".to_string(),
+        ));
+    }
+    let s = std::str::from_utf8(&bytes[*offset..*offset + len])
+        .map_err(|e| ContractUpgradeError::InvalidWasm(format!("invalid utf-8 string: {e}")))?;
+    *offset += len;
+    Ok(s)
+}
+
+/// Parses WASM bytecode and extracts module and field names from the import section (section 2).
+pub fn extract_wasm_imports(wasm_bytes: &[u8]) -> Result<Vec<WasmImport>, ContractUpgradeError> {
+    if wasm_bytes.len() < 8 {
+        return Err(ContractUpgradeError::InvalidWasm(
+            "wasm binary too short for header".to_string(),
+        ));
+    }
+    if &wasm_bytes[0..4] != b"\0asm" || wasm_bytes[4..8] != [1, 0, 0, 0] {
+        return Err(ContractUpgradeError::InvalidWasm(
+            "invalid wasm header magic or version".to_string(),
+        ));
+    }
+
+    let mut offset = 8;
+    let mut imports = Vec::new();
+
+    while offset < wasm_bytes.len() {
+        let section_id = wasm_bytes[offset];
+        offset += 1;
+        let section_len = read_u32_leb128(wasm_bytes, &mut offset)? as usize;
+        let section_end = offset + section_len;
+        if section_end > wasm_bytes.len() {
+            return Err(ContractUpgradeError::InvalidWasm(
+                "malformed wasm section length".to_string(),
+            ));
+        }
+
+        if section_id == 2 {
+            let mut sec_offset = offset;
+            let import_count = read_u32_leb128(wasm_bytes, &mut sec_offset)?;
+            for _ in 0..import_count {
+                let module = read_string(wasm_bytes, &mut sec_offset)?;
+                let name = read_string(wasm_bytes, &mut sec_offset)?;
+                if sec_offset >= section_end {
+                    return Err(ContractUpgradeError::InvalidWasm(
+                        "unexpected end of import descriptor".to_string(),
+                    ));
+                }
+                let kind = wasm_bytes[sec_offset];
+                sec_offset += 1;
+                match kind {
+                    0x00 => {
+                        let _ = read_u32_leb128(wasm_bytes, &mut sec_offset)?;
+                    }
+                    0x01 => {
+                        sec_offset += 1;
+                        let flags = read_u32_leb128(wasm_bytes, &mut sec_offset)?;
+                        let _ = read_u32_leb128(wasm_bytes, &mut sec_offset)?;
+                        if (flags & 1) != 0 {
+                            let _ = read_u32_leb128(wasm_bytes, &mut sec_offset)?;
+                        }
+                    }
+                    0x02 => {
+                        let flags = read_u32_leb128(wasm_bytes, &mut sec_offset)?;
+                        let _ = read_u32_leb128(wasm_bytes, &mut sec_offset)?;
+                        if (flags & 1) != 0 {
+                            let _ = read_u32_leb128(wasm_bytes, &mut sec_offset)?;
+                        }
+                    }
+                    0x03 => {
+                        sec_offset += 2;
+                    }
+                    _ => {}
+                }
+                imports.push(WasmImport {
+                    module: module.to_string(),
+                    name: name.to_string(),
+                });
+            }
+            break;
+        } else if section_id > 2 {
+            break;
+        }
+
+        offset = section_end;
+    }
+
+    Ok(imports)
+}
+
+/// Verifies contract upgrade WASM bytecode compatibility by checking bytecode structure and
+/// cross-referencing imported host functions against the Stellar Core protocol deprecation table.
+pub fn verify_upgrade_compatibility(
+    wasm_bytes: &[u8],
+    target_protocol: u32,
+) -> Result<CompatibilityCheck, ContractUpgradeError> {
+    let imports = extract_wasm_imports(wasm_bytes)?;
+    let mut violations = Vec::new();
+
+    for import in &imports {
+        if let Some(dep) = DEPRECATED_HOST_FUNCTIONS
+            .iter()
+            .find(|d| d.module == import.module && d.name == import.name)
+        {
+            if target_protocol >= dep.removed_in_protocol {
+                violations.push(format!(
+                    "{}::{} was removed in protocol {}",
+                    dep.module, dep.name, dep.removed_in_protocol
+                ));
+            } else if target_protocol >= dep.deprecated_in_protocol {
+                violations.push(format!(
+                    "{}::{} is deprecated as of protocol {}",
+                    dep.module, dep.name, dep.deprecated_in_protocol
+                ));
+            }
+        }
+    }
+
+    if violations.is_empty() {
+        Ok(CompatibilityCheck {
+            name: "host_function_compatibility".to_string(),
+            passed: true,
+            notes: Some(format!(
+                "all {} host function import(s) compatible with protocol {}",
+                imports.len(),
+                target_protocol
+            )),
+        })
+    } else {
+        Ok(CompatibilityCheck {
+            name: "host_function_compatibility".to_string(),
+            passed: false,
+            notes: Some(format!(
+                "incompatible host function imports for protocol {}: {}",
+                target_protocol,
+                violations.join("; ")
+            )),
+        })
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct ContractUpgradeManager;
 
@@ -197,12 +452,36 @@ impl ContractUpgradeManager {
         Self
     }
 
+    /// Verifies upgrade compatibility of contract WASM bytecode against the active Stellar Core protocol.
+    pub fn verify_upgrade_compatibility(
+        &self,
+        wasm_bytes: &[u8],
+        target_protocol: u32,
+    ) -> Result<CompatibilityCheck, ContractUpgradeError> {
+        verify_upgrade_compatibility(wasm_bytes, target_protocol)
+    }
+
     pub fn plan_upgrade(
         &self,
-        request: ContractUpgradeRequest,
+        mut request: ContractUpgradeRequest,
     ) -> Result<ContractUpgradePlan, ContractUpgradeError> {
         validate_required_fields(&request)?;
         validate_strategy(&request)?;
+
+        if let (Some(protocol), Some(wasm_bytes)) =
+            (request.target_protocol, request.target_wasm_bytes.as_deref())
+        {
+            let check = self.verify_upgrade_compatibility(wasm_bytes, protocol)?;
+            if let Some(existing) = request
+                .compatibility_checks
+                .iter_mut()
+                .find(|c| c.name == "host_function_compatibility")
+            {
+                *existing = check;
+            } else {
+                request.compatibility_checks.push(check);
+            }
+        }
 
         let current = Version::parse(&request.current_version)?;
         let target = Version::parse(&request.target_version)?;
@@ -475,6 +754,8 @@ mod tests {
             strategy: UpgradeStrategy::InPlace,
             migration_required: false,
             state_migration_hash: None,
+            target_protocol: None,
+            target_wasm_bytes: None,
             compatibility_checks: REQUIRED_CHECKS
                 .iter()
                 .map(|name| passing_check(name))
@@ -615,5 +896,80 @@ mod tests {
         let plan = ContractUpgradeManager::new().plan_upgrade(request).unwrap();
 
         assert_eq!(plan.status, UpgradePlanStatus::Ready);
+    }
+
+    fn make_test_wasm_with_imports(imports: &[(&str, &str)]) -> Vec<u8> {
+        let mut wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+        // Section 1: Type section with 1 type: () -> ()
+        wasm.push(1); // section id 1
+        wasm.push(4); // length 4
+        wasm.push(1); // count 1
+        wasm.push(0x60); // func type
+        wasm.push(0); // 0 params
+        wasm.push(0); // 0 returns
+
+        // Section 2: Import section
+        let mut import_data = Vec::new();
+        import_data.push(imports.len() as u8);
+        for (module, name) in imports {
+            import_data.push(module.len() as u8);
+            import_data.extend_from_slice(module.as_bytes());
+            import_data.push(name.len() as u8);
+            import_data.extend_from_slice(name.as_bytes());
+            import_data.push(0); // func
+            import_data.push(0); // type idx 0
+        }
+
+        wasm.push(2); // section id 2
+        wasm.push(import_data.len() as u8);
+        wasm.extend(import_data);
+
+        wasm
+    }
+
+    #[test]
+    fn wasm_verification_passes_for_supported_host_functions() {
+        let wasm = make_test_wasm_with_imports(&[("v", "vec_new"), ("l", "log_value")]);
+        let check = verify_upgrade_compatibility(&wasm, 21).unwrap();
+
+        assert!(check.passed);
+        assert_eq!(check.name, "host_function_compatibility");
+        assert!(check.notes.unwrap().contains("compatible"));
+    }
+
+    #[test]
+    fn wasm_verification_detects_deprecated_and_removed_host_functions() {
+        let wasm = make_test_wasm_with_imports(&[
+            ("v", "obj_to_u64"),
+            ("x", "serialize_to_linear_memory"),
+            ("v", "vec_new"),
+        ]);
+
+        let check = verify_upgrade_compatibility(&wasm, 21).unwrap();
+        assert!(!check.passed);
+        let notes = check.notes.unwrap();
+        assert!(notes.contains("obj_to_u64"));
+        assert!(notes.contains("serialize_to_linear_memory"));
+    }
+
+    #[test]
+    fn wasm_verification_rejects_corrupted_wasm() {
+        let err = verify_upgrade_compatibility(b"not wasm", 21).unwrap_err();
+        assert!(matches!(err, ContractUpgradeError::InvalidWasm(_)));
+    }
+
+    #[test]
+    fn plan_upgrade_blocks_when_target_wasm_contains_deprecated_host_functions() {
+        let deprecated_wasm = make_test_wasm_with_imports(&[("v", "obj_to_u64")]);
+        let mut request = base_request();
+        request.target_protocol = Some(21);
+        request.target_wasm_bytes = Some(deprecated_wasm);
+
+        let plan = ContractUpgradeManager::new().plan_upgrade(request).unwrap();
+        assert_eq!(plan.status, UpgradePlanStatus::Blocked);
+        assert!(plan
+            .blockers
+            .iter()
+            .any(|b| b.contains("host_function_compatibility")));
     }
 }

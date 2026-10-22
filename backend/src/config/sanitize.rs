@@ -127,6 +127,80 @@ pub fn sanitize(config: &crate::config::AppConfig) -> SanitizedConfig {
     }
 }
 
+/// Sanitizes user-provided input strings by:
+/// 1. Applying Unicode Normalization Form KC (NFKC)
+/// 2. Stripping HTML markup tags
+/// 3. Stripping ASCII control characters
+/// 4. Stripping zero-width codepoints (U+200B..=U+200D, U+2060, U+FEFF)
+/// 5. Stripping bidirectional override and directional formatting codepoints (e.g. U+202E, U+202A..=U+202D, U+2066..=U+2069)
+pub fn sanitize_input(input: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+
+    // 1. Unicode NFKC normalization
+    let normalized: String = input.nfkc().collect();
+
+    // 2. Remove HTML tags
+    let mut stripped_html = String::with_capacity(normalized.len());
+    let mut inside_tag = false;
+    for c in normalized.chars() {
+        if c == '<' {
+            inside_tag = true;
+        } else if c == '>' {
+            inside_tag = false;
+        } else if !inside_tag {
+            stripped_html.push(c);
+        }
+    }
+
+    // 3. Filter out ASCII control characters, zero-width characters, and bidirectional overrides
+    let mut result = String::with_capacity(stripped_html.len());
+    for c in stripped_html.chars() {
+        if is_disallowed_codepoint(c) {
+            continue;
+        }
+        result.push(c);
+    }
+
+    result
+}
+
+/// Checks whether a character is an ASCII control character, zero-width codepoint,
+/// or bidirectional override/control codepoint used in visual spoofing.
+fn is_disallowed_codepoint(c: char) -> bool {
+    let u = c as u32;
+
+    // ASCII control characters (0x00..=0x1F and 0x7F) excluding standard whitespace (\n, \r, \t)
+    if (u <= 0x1F && c != '\n' && c != '\r' && c != '\t') || u == 0x7F {
+        return true;
+    }
+
+    // Zero-width characters
+    if matches!(u, 0x200B | 0x200C | 0x200D | 0x2060 | 0xFEFF) {
+        return true;
+    }
+
+    // Bidirectional control and override characters
+    if matches!(
+        u,
+        0x061C
+            | 0x200E
+            | 0x200F
+            | 0x202A
+            | 0x202B
+            | 0x202C
+            | 0x202D
+            | 0x202E
+            | 0x2066
+            | 0x2067
+            | 0x2068
+            | 0x2069
+    ) {
+        return true;
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +307,37 @@ mod tests {
         // Verify we can parse it back
         let _: serde_json::Value =
             serde_json::from_str(&json_str).expect("Invalid JSON produced");
+    }
+
+    #[test]
+    fn test_sanitize_input_strips_unicode_bidi_override() {
+        // U+202E is Right-to-Left Override, often used in malicious filenames/inputs
+        let malicious = "safe_file\u{202E}exe.txt";
+        let cleaned = sanitize_input(malicious);
+        assert_eq!(cleaned, "safe_fileexe.txt");
+        assert!(!cleaned.contains('\u{202E}'));
+    }
+
+    #[test]
+    fn test_sanitize_input_strips_zero_width_joiners() {
+        // U+200D is Zero Width Joiner, U+200B is Zero Width Space, U+FEFF is Zero Width No-Break Space
+        let input_with_zwj = "admin\u{200D}\u{200B}\u{FEFF}user";
+        let cleaned = sanitize_input(input_with_zwj);
+        assert_eq!(cleaned, "adminuser");
+    }
+
+    #[test]
+    fn test_sanitize_input_applies_nfkc_normalization() {
+        // Fullwidth letters should be normalized to standard ASCII via NFKC
+        let fullwidth = "Ａｄｍｉｎ";
+        let cleaned = sanitize_input(fullwidth);
+        assert_eq!(cleaned, "Admin");
+    }
+
+    #[test]
+    fn test_sanitize_input_strips_html_and_ascii_control() {
+        let input = "<script>alert('xss')</script>Hello\x00\x07World!";
+        let cleaned = sanitize_input(input);
+        assert_eq!(cleaned, "alert('xss')HelloWorld!");
     }
 }

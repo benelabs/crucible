@@ -18,7 +18,7 @@ use backend::{
     app_state::{build_application_states, ApplicationStates, SharedServices},
     config::{
         reload::{handle_get_config, handle_reload, ConfigManager},
-        AppConfig, Environment,
+        AppConfig, Environment, ServerShutdownCoordinator,
     },
     jobs::{monitor_transaction, TransactionMonitorJob},
     router::build_router,
@@ -166,14 +166,34 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::info!("Crucible backend listening on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    let result = tokio::select! {
-        res = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()) => {
-            db_pool.close().await;
-            res
-        },
-        _ = worker.run() => Ok(()),
-    };
+    let shutdown_coordinator = ServerShutdownCoordinator::new(
+        std::time::Duration::from_secs(config.server.shutdown_timeout_secs),
+    );
+    let cancel_token = shutdown_coordinator.cancellation_token();
 
+    let worker_token = cancel_token.clone();
+    let worker_handle = tokio::spawn(async move {
+        tokio::select! {
+            _ = worker_token.cancelled() => {
+                tracing::info!("Worker cancellation signal received, draining active jobs");
+            }
+            () = worker.run() => {
+                tracing::info!("Background worker terminated");
+            }
+        }
+    });
+    shutdown_coordinator.register_worker(worker_handle).await;
+
+    let shutdown_coord = shutdown_coordinator.clone();
+    let result = axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            tracing::info!("Server shutdown signal received. Draining background workers...");
+            let _ = shutdown_coord.drain_workers().await;
+        })
+        .await;
+
+    db_pool.close().await;
     result?;
     Ok(())
 }

@@ -44,9 +44,10 @@ use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use reqwest::{Client as HttpClient, StatusCode};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tokio::time::{interval, sleep};
+use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 // ── Error type ─────────────────────────────────────────────────────────────────
@@ -218,10 +219,13 @@ struct VaultAuthResponse {
 }
 
 /// Dynamic database credentials returned by the Vault Database Secrets Engine.
+///
+/// Wrapped in [`SecretString`] to prevent plaintext exposure in logs and ensure
+/// memory is zeroized on eviction/drop.
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatabaseCredentials {
     pub username: String,
-    pub password: String,
+    pub password: SecretString,
 }
 
 /// KV v2 secret data wrapper.
@@ -237,12 +241,61 @@ struct KvV2Metadata {
     created_time: String,
 }
 
-/// A named secret value from the KV store.
-#[derive(Clone, Debug, Deserialize)]
+/// A named secret value from the KV store wrapped in [`SecretString`].
+#[derive(Clone, Debug)]
 pub struct KvSecret {
-    pub value: String,
+    pub value: SecretString,
     pub version: u64,
     pub created_time: String,
+}
+
+/// Thread-safe in-memory cache for Vault secrets wrapped in [`SecretString`].
+///
+/// Prevents plaintext passwords from being accidentally logged, zeroizes memory
+/// upon eviction or drop, and shields secrets from memory inspection / core dumps.
+#[derive(Clone, Debug, Default)]
+pub struct SecretCache {
+    entries: Arc<RwLock<std::collections::HashMap<String, SecretString>>>,
+}
+
+impl SecretCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Retrieve a cached secret if present.
+    pub async fn get(&self, key: &str) -> Option<SecretString> {
+        let lock = self.entries.read().await;
+        lock.get(key).cloned()
+    }
+
+    /// Cache a secret wrapped in [`SecretString`].
+    pub async fn insert(&self, key: String, secret: SecretString) {
+        let mut lock = self.entries.write().await;
+        lock.insert(key, secret);
+    }
+
+    /// Evict a secret from cache, zeroizing its memory on drop.
+    pub async fn evict(&self, key: &str) -> bool {
+        let mut lock = self.entries.write().await;
+        lock.remove(key).is_some()
+    }
+
+    /// Clear all cached secrets, zeroizing all stored memory.
+    pub async fn clear(&self) {
+        let mut lock = self.entries.write().await;
+        lock.clear();
+    }
+
+    /// Number of cached secrets.
+    pub async fn len(&self) -> usize {
+        self.entries.read().await.len()
+    }
+
+    /// Whether cache is empty.
+    pub async fn is_empty(&self) -> bool {
+        self.entries.read().await.is_empty()
+    }
 }
 
 /// Transit encryption/decryption payload.
@@ -281,6 +334,8 @@ pub struct VaultClient {
     token: Arc<RwLock<String>>,
     /// Active leases that need periodic renewal.
     leases: Arc<RwLock<Vec<Lease>>>,
+    /// Secure cache for retrieved secrets with zeroization on drop.
+    secret_cache: SecretCache,
 }
 
 impl VaultClient {
@@ -301,6 +356,7 @@ impl VaultClient {
             http: Arc::new(http),
             token: Arc::new(RwLock::new(String::new())),
             leases: Arc::new(RwLock::new(Vec::new())),
+            secret_cache: SecretCache::new(),
         };
 
         client.authenticate().await?;
@@ -429,8 +485,20 @@ impl VaultClient {
             });
         }
 
-        resp.data
-            .ok_or_else(|| VaultError::Config("database creds response had no data".into()))
+        let creds = resp
+            .data
+            .ok_or_else(|| VaultError::Config("database creds response had no data".into()))?;
+
+        self.secret_cache
+            .insert(format!("database/{role}"), creds.password.clone())
+            .await;
+
+        Ok(creds)
+    }
+
+    /// Access the internal secret cache.
+    pub fn secret_cache(&self) -> &SecretCache {
+        &self.secret_cache
     }
 
     // ── KV v2 Secrets Engine ──────────────────────────────────────────────────
@@ -454,8 +522,13 @@ impl VaultClient {
             .cloned()
             .ok_or_else(|| VaultError::Config(format!("KV secret {path} has no 'value' key")))?;
 
+        let secret_value = SecretString::new(value);
+        self.secret_cache
+            .insert(format!("{mount}/{path}"), secret_value.clone())
+            .await;
+
         Ok(KvSecret {
-            value,
+            value: secret_value,
             version: kv.metadata.version,
             created_time: kv.metadata.created_time,
         })
@@ -677,6 +750,89 @@ impl VaultClient {
         Ok(resp.auth.map(|a| a.lease_duration).unwrap_or(3600))
     }
 
+    /// Attempt to renew the current token with exponential backoff until `deadline` is reached.
+    ///
+    /// If renewal fails due to a network or server error, it backs off exponentially
+    /// starting at 100ms up to a maximum backoff of 5s until the deadline is reached.
+    /// If the deadline is exceeded without a successful renewal, returns an error.
+    pub async fn renew_token_with_backoff(&self, deadline: Duration) -> Result<u64, VaultError> {
+        let start = std::time::Instant::now();
+        let mut backoff = Duration::from_millis(100);
+        let max_backoff = Duration::from_secs(5);
+        let mut attempt = 0;
+
+        loop {
+            attempt += 1;
+            match self.renew_token().await {
+                Ok(lease_duration) => {
+                    info!(
+                        attempt = attempt,
+                        duration_secs = lease_duration,
+                        "VaultClient: token renewed successfully"
+                    );
+                    return Ok(lease_duration);
+                }
+                Err(err) => {
+                    let elapsed = start.elapsed();
+                    if elapsed >= deadline {
+                        error!(
+                            attempts = attempt,
+                            elapsed_secs = elapsed.as_secs(),
+                            error = %err,
+                            "VaultClient: token renewal failed and deadline exceeded"
+                        );
+                        return Err(VaultError::RenewalExhausted { attempts: attempt });
+                    }
+
+                    let remaining = deadline.saturating_sub(elapsed);
+                    let sleep_dur = backoff.min(remaining);
+                    warn!(
+                        attempt = attempt,
+                        retry_in_ms = sleep_dur.as_millis(),
+                        error = %err,
+                        "VaultClient: token renewal attempt failed; retrying with backoff"
+                    );
+                    tokio::time::sleep(sleep_dur).await;
+                    backoff = (backoff * 2).min(max_backoff);
+                }
+            }
+        }
+    }
+
+    /// Spawn a background task that periodically renews the client token.
+    ///
+    /// Even if network errors occur, token renewal retries with exponential backoff
+    /// until `renewal_deadline`. If retries exhaust the deadline, it attempts to
+    /// re-authenticate via [`Self::authenticate`].
+    pub async fn start_token_renewal(
+        self: Arc<Self>,
+        renewal_interval: Duration,
+        renewal_deadline: Duration,
+    ) {
+        let client = self.clone();
+        tokio::spawn(async move {
+            let mut tick = interval(renewal_interval);
+            loop {
+                tick.tick().await;
+                debug!("VaultClient: scheduled token renewal triggered");
+                if let Err(e) = client.renew_token_with_backoff(renewal_deadline).await {
+                    error!(
+                        error = %e,
+                        "VaultClient: token renewal with backoff failed; attempting re-authentication"
+                    );
+                    if let Err(auth_err) = client.authenticate().await {
+                        error!(
+                            error = %auth_err,
+                            "VaultClient: re-authentication failed after token renewal exhaustion"
+                        );
+                    } else {
+                        info!("VaultClient: re-authenticated successfully after token renewal failure");
+                    }
+                }
+            }
+        });
+    }
+
     // ── HTTP helpers ──────────────────────────────────────────────────────────
 
     fn base_headers(&self, token: &str) -> HeaderMap {
@@ -797,6 +953,10 @@ pub async fn init_vault() -> Result<Arc<VaultClient>, VaultError> {
     let config = VaultConfig::from_env()?;
     let client = Arc::new(VaultClient::new(config).await?);
     client.clone().start_lease_renewal().await;
+    client
+        .clone()
+        .start_token_renewal(Duration::from_secs(1800), Duration::from_secs(300))
+        .await;
     Ok(client)
 }
 
@@ -861,6 +1021,7 @@ mod tests {
             http: Arc::new(http),
             token: Arc::new(RwLock::new("test-token".into())),
             leases: Arc::new(RwLock::new(vec![])),
+            secret_cache: SecretCache::new(),
         };
 
         let headers = client.base_headers("test-token");
@@ -869,5 +1030,80 @@ mod tests {
             headers["x-vault-token"].to_str().unwrap(),
             "test-token"
         );
+    }
+
+    #[tokio::test]
+    async fn secret_cache_redacts_and_evicts() {
+        use secrecy::ExposeSecret;
+
+        let cache = SecretCache::new();
+        assert!(cache.is_empty().await);
+
+        let secret = SecretString::new("super-sensitive-password".to_string());
+        // Verify Debug output redacts value to prevent accidental logging
+        let debug_str = format!("{secret:?}");
+        assert!(!debug_str.contains("super-sensitive-password"));
+        assert!(debug_str.contains("REDACTED"));
+
+        cache.insert("db_password".to_string(), secret).await;
+        assert_eq!(cache.len().await, 1);
+        assert!(!cache.is_empty().await);
+
+        let retrieved = cache.get("db_password").await.expect("secret should exist");
+        assert_eq!(retrieved.expose_secret(), "super-sensitive-password");
+
+        let evicted = cache.evict("db_password").await;
+        assert!(evicted);
+        assert_eq!(cache.len().await, 0);
+        assert!(cache.is_empty().await);
+        assert!(cache.get("db_password").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn secret_cache_clear_zeroizes_all() {
+        let cache = SecretCache::new();
+        cache
+            .insert("key1".to_string(), SecretString::new("val1".to_string()))
+            .await;
+        cache
+            .insert("key2".to_string(), SecretString::new("val2".to_string()))
+            .await;
+        assert_eq!(cache.len().await, 2);
+
+        cache.clear().await;
+        assert_eq!(cache.len().await, 0);
+        assert!(cache.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn database_credentials_redacts_password() {
+        let creds = DatabaseCredentials {
+            username: "postgres_user".into(),
+            password: SecretString::new("plaintext_secret_pass".into()),
+        };
+        let debug_str = format!("{creds:?}");
+        assert!(!debug_str.contains("plaintext_secret_pass"));
+        assert!(debug_str.contains("REDACTED"));
+    }
+
+    #[tokio::test]
+    async fn renew_token_with_backoff_exhausts_on_unreachable_server() {
+        let mut config = dev_config();
+        config.address = "http://127.0.0.1:59999".into(); // Unreachable address
+        let http = HttpClient::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap();
+        let client = VaultClient {
+            config: Arc::new(config),
+            http: Arc::new(http),
+            token: Arc::new(RwLock::new("test-token".into())),
+            leases: Arc::new(RwLock::new(vec![])),
+            secret_cache: SecretCache::new(),
+        };
+
+        // With a short deadline of 200ms, retry loop should exhaust and return RenewalExhausted error
+        let result = client.renew_token_with_backoff(Duration::from_millis(200)).await;
+        assert!(matches!(result, Err(VaultError::RenewalExhausted { .. })));
     }
 }

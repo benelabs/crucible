@@ -20,6 +20,7 @@ pub mod redis;
 pub mod reload;
 pub mod sanitize;
 pub mod server;
+pub mod vault;
 
 #[cfg(test)]
 mod tests;
@@ -29,8 +30,9 @@ pub use database::DatabaseConfig;
 pub use error::ConfigError;
 pub use observability::ObservabilityConfig;
 pub use redis::RedisConfig;
-pub use sanitize::{sanitize, SanitizedConfig};
-pub use server::ServerConfig;
+pub use sanitize::{sanitize, sanitize_input, SanitizedConfig};
+pub use server::{ServerConfig, ServerShutdownCoordinator};
+pub use vault::{init_vault, DatabaseCredentials, KvSecret, SecretCache, VaultClient, VaultConfig, VaultError};
 
 
 
@@ -129,6 +131,7 @@ impl AppConfig {
             // 3. Environment variables (e.g., APP_DATABASE__URL overrides database.url)
             .add_source(
                 ConfigEnvironment::with_prefix("APP")
+                    .prefix_separator("_")
                     .separator("__")
                     .ignore_empty(true),
             );

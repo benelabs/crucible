@@ -187,6 +187,7 @@ fn test_sensitive_fields_redacted_in_debug() {
                 cert_path: "/path/to/cert".into(),
                 key_path: "/path/to/secret.key".into(),
             }),
+            shutdown_timeout_secs: 30,
         },
         database: crate::config::DatabaseConfig {
             url: "postgres://secret:password@host/db".into(),

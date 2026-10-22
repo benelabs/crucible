@@ -127,4 +127,24 @@ criterion = { version = "0.8", features = ["async_tokio"] }
 proptest = "1.5.0"
 
 
+use wasmparser::{Parser, Validator};
 
+/// Validate a complete WebAssembly module before disassembly.
+///
+/// Malformed or truncated modules are rejected before the scanner
+/// performs any custom byte-offset processing.
+fn validate_wasm_module(bytes: &[u8]) -> Result<(), String> {
+    let mut parser = Parser::new(0);
+
+    for payload in parser.parse_all(bytes) {
+        payload.map_err(|error| {
+            format!("Invalid WebAssembly structure: {error}")
+        })?;
+    }
+
+    Validator::new()
+        .validate_all(bytes)
+        .map_err(|error| format!("Invalid WebAssembly module: {error}"))?;
+
+    Ok(())
+}

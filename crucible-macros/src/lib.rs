@@ -145,7 +145,7 @@ pub fn fixture(args: TokenStream, input: TokenStream) -> TokenStream {
     // A fixture that requires itself is a cycle of length one, which is
     // detectable from this item alone.
     for dependency in &requires {
-        if dependency.is_ident(ident) || normalize_path_name(dependency) == ident.to_string() {
+        if dependency.is_ident(ident) || *ident == normalize_path_name(dependency) {
             return Error::new_spanned(
                 dependency,
                 format!(
@@ -213,47 +213,81 @@ fn parse_fixture_args(args: proc_macro2::TokenStream) -> Result<Vec<syn::Path>, 
         return Ok(Vec::new());
     }
 
-    let meta: syn::Meta = syn::parse2(args.clone()).map_err(|err| {
-        let mut note = Error::new_spanned(
+    let meta: syn::Meta = syn::parse2(args.clone()).map_err(|mut err| {
+        err.combine(Error::new_spanned(
             &args,
             "#[fixture] takes no arguments other than `requires = [..]`",
-        );
-        note.combine(err);
-        note
+        ));
+        err
     })?;
 
     let syn::Meta::NameValue(name_value) = meta else {
-        return Err(Error::new_spanned(
+        let mut err = Error::new_spanned(
             &args,
             "#[fixture] takes no arguments other than `requires = [..]`",
+        );
+        err.combine(Error::new_spanned(
+            &args,
+            "note: expected syntax is `#[fixture(requires = [FixtureA, FixtureB])]`",
         ));
+        return Err(err);
     };
 
     if !name_value.path.is_ident("requires") {
-        return Err(Error::new_spanned(
+        let mut err = Error::new_spanned(
             &name_value.path,
-            "#[fixture] takes no arguments other than `requires = [..]`",
+            format!(
+                "#[fixture] takes no arguments other than `requires = [..]`, found `{}`",
+                normalize_path_name(&name_value.path)
+            ),
+        );
+        err.combine(Error::new_spanned(
+            &name_value.path,
+            "note: expected syntax is `#[fixture(requires = [..])]`",
         ));
+        return Err(err);
     }
 
     let syn::Expr::Array(array) = &name_value.value else {
-        return Err(Error::new_spanned(
+        let mut err = Error::new_spanned(
             &name_value.value,
             "`requires` expects a list of fixture types, as in `requires = [TokenFixture, OracleFixture]`",
+        );
+        err.combine(Error::new_spanned(
+            &name_value.value,
+            "note: expected an array of fixture type names enclosed in `[...]`",
         ));
+        return Err(err);
     };
 
-    array
-        .elems
-        .iter()
-        .map(|element| match element {
-            syn::Expr::Path(path) => Ok(path.path.clone()),
-            other => Err(Error::new_spanned(
-                other,
-                "each entry in `requires` must be a fixture type name",
-            )),
-        })
-        .collect()
+    let mut errors: Option<Error> = None;
+    let mut paths = Vec::new();
+
+    for element in &array.elems {
+        match element {
+            syn::Expr::Path(path) => paths.push(path.path.clone()),
+            other => {
+                let mut err = Error::new_spanned(
+                    other,
+                    "each entry in `requires` must be a fixture type name",
+                );
+                err.combine(Error::new_spanned(
+                    other,
+                    "note: expected a type path (e.g. `TokenFixture` or `path::to::Fixture`)",
+                ));
+                match &mut errors {
+                    Some(e) => e.combine(err),
+                    None => errors = Some(err),
+                }
+            }
+        }
+    }
+
+    if let Some(err) = errors {
+        return Err(err);
+    }
+
+    Ok(paths)
 }
 
 /// Returns the first path that appears more than once in `paths`.
@@ -820,3 +854,70 @@ fn expand_quickcheck(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_fixture_args_empty() {
+        let args = quote! {};
+        let result = parse_fixture_args(args).expect("empty args should succeed");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_fixture_args_valid() {
+        let args = quote! { requires = [TokenFixture, OracleFixture] };
+        let result = parse_fixture_args(args).expect("valid args should succeed");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].segments.last().unwrap().ident, "TokenFixture");
+        assert_eq!(result[1].segments.last().unwrap().ident, "OracleFixture");
+    }
+
+    #[test]
+    fn test_parse_fixture_args_syntax_error_preserves_cause() {
+        // Consecutive commas in array is a syn syntax error
+        let args = quote! { requires = [TokenFixture,,] };
+        let err = parse_fixture_args(args).expect_err("syntax error must fail");
+        let err_msg = err.to_string();
+        // Preserves underlying syn error cause
+        assert!(
+            err_msg.contains("expected") || err_msg.contains("unexpected"),
+            "Expected underlying syn error, got: {err_msg}"
+        );
+        // And chains the diagnostic note indicating expected format
+        assert!(
+            err_msg.contains("#[fixture] takes no arguments other than `requires = [..]`"),
+            "Expected combined diagnostic note, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_parse_fixture_args_non_array_value() {
+        let args = quote! { requires = "TokenFixture" };
+        let err = parse_fixture_args(args).expect_err("string literal should fail");
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("`requires` expects a list of fixture types"));
+        assert!(err_msg.contains("note: expected an array of fixture type names"));
+    }
+
+    #[test]
+    fn test_parse_fixture_args_invalid_element_type() {
+        let args = quote! { requires = [123, "invalid"] };
+        let err = parse_fixture_args(args).expect_err("non-path elements must fail");
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("each entry in `requires` must be a fixture type name"));
+        assert!(err_msg.contains("note: expected a type path"));
+    }
+
+    #[test]
+    fn test_parse_fixture_args_unrecognized_argument() {
+        let args = quote! { invalid_arg = [TokenFixture] };
+        let err = parse_fixture_args(args).expect_err("unknown argument must fail");
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("#[fixture] takes no arguments other than `requires = [..]`"));
+        assert!(err_msg.contains("note: expected syntax is `#[fixture(requires = [..])]`"));
+    }
+}
+

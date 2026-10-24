@@ -431,6 +431,10 @@ fn has_derive(attrs: &[syn::Attribute], name: &str) -> bool {
 #[proc_macro_derive(Fixture, attributes(contract_client))]
 pub fn fixture_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    expand_fixture_derive(input).into()
+}
+
+fn expand_fixture_derive(input: DeriveInput) -> proc_macro2::TokenStream {
     let name = input.ident.clone();
 
     let mut has_debug = false;
@@ -517,7 +521,7 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                     }
                 } else {
                     field_bindings.push(quote! {
-                        let #field_name = Default::default();
+                        let #field_name = ::core::default::Default::default();
                     });
                     field_inits.push(quote! { #field_name, });
                 }
@@ -527,17 +531,16 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
 
     if !has_env {
         return syn::Error::new_spanned(name, "#[derive(Fixture)] requires an `env: MockEnv` field")
-            .to_compile_error()
-            .into();
+            .to_compile_error();
     }
 
     let with_contracts = contract_types.iter().map(|ty| quote! { .with_contract::<#ty>() });
-    let env_init = quote! { MockEnv::builder() #(#with_contracts)* .build() };
+    let env_init = quote! { ::crucible::MockEnv::builder() #(#with_contracts)* .build() };
 
     // A derive macro only *adds* items; re-emitting the struct would define it
     // twice. `Debug` likewise cannot be injected from a derive, so the field
     // walk below reads the original input rather than a rewritten copy.
-    let expanded = quote! {
+    quote! {
         impl #name {
             /// Creates a new instance with all fields initialized.
             ///
@@ -555,9 +558,7 @@ pub fn fixture_derive(input: TokenStream) -> TokenStream {
                 }
             }
         }
-    };
-
-    expanded.into()
+    }
 }
 
 /// Turns a function into a property-based fuzz test.
@@ -820,3 +821,58 @@ fn expand_quickcheck(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fixture_derive_hygienic_contract_client_expansion() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct MyFixture {
+                env: MockEnv,
+                #[contract_client(contract = MyContract)]
+                client: MyClient,
+                count: u32,
+            }
+        };
+
+        let generated = expand_fixture_derive(input).to_string();
+
+        // Must qualify MockEnv as ::crucible::MockEnv
+        assert!(
+            generated.contains(":: crucible :: MockEnv :: builder ()"),
+            "Expected ::crucible::MockEnv::builder(), got: {}",
+            generated
+        );
+
+        // Must register contract
+        assert!(
+            generated.contains(". with_contract :: < MyContract > ()"),
+            "Expected .with_contract::<MyContract>(), got: {}",
+            generated
+        );
+
+        // Must bind client using hygienic __crucible_env.inner() and contract_id
+        assert!(
+            generated.contains("< MyClient > :: new (__crucible_env . inner () , & __crucible_env . contract_id :: < MyContract > ())"),
+            "Expected hygienic client initialization, got: {}",
+            generated
+        );
+
+        // Must initialize non-client field with ::core::default::Default::default()
+        assert!(
+            generated.contains(":: core :: default :: Default :: default ()"),
+            "Expected ::core::default::Default::default(), got: {}",
+            generated
+        );
+
+        // Must initialize struct with env: __crucible_env
+        assert!(
+            generated.contains("env : __crucible_env"),
+            "Expected env: __crucible_env, got: {}",
+            generated
+        );
+    }
+}
+

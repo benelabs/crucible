@@ -1,3 +1,9 @@
+## [1.36.15](https://github.com/benelabs/crucible/compare/v1.36.14...v1.36.15) (2026-10-25)
+
+### Bug Fixes
+
+* **backend:** repair test regressions introduced by merged PRs ([#1370](https://github.com/benelabs/crucible/issues/1370)) ([c750b22](https://github.com/benelabs/crucible/commit/c750b22e7347e42beb7d679a50ef86a3253d68db)), closes [#1366](https://github.com/benelabs/crucible/issues/1366) [#1369](https://github.com/benelabs/crucible/issues/1369)
+
 ## [1.36.14](https://github.com/benelabs/crucible/compare/v1.36.13...v1.36.14) (2026-10-25)
 
 ### Bug Fixes

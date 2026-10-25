@@ -221,6 +221,7 @@ pub async fn submit_lcov_coverage(
     let parsed = parse_lcov_report(&payload.lcov_content, &workspace_root_path)?;
 
     let new_coverage = NewTestCoverage {
+        contract_id: None,
         project_name: payload.project_name,
         branch: payload.branch,
         commit_sha: payload.commit_sha,

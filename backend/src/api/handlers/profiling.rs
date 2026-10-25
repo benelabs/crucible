@@ -171,7 +171,7 @@ pub async fn run_contract_benchmark(
         .await
         .map_err(|error| match error {
             ContractBenchmarkError::Validation(message) => AppError::BadRequest(message),
-            ContractBenchmarkError::Database(message) => AppError::Internal(message),
+            ContractBenchmarkError::Database(message) => AppError::InternalError(message),
         })?;
     Ok(ApiResponse::new(report))
 }

@@ -633,8 +633,8 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/backups", post(create_backup).get(list_backups))
-        .route("/backups/:id", get(get_backup))
-        .route("/backups/:id/restore", post(restore_backup))
+        .route("/backups/{id}", get(get_backup))
+        .route("/backups/{id}/restore", post(restore_backup))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

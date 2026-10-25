@@ -185,6 +185,7 @@ fn test_sensitive_fields_redacted_in_debug() {
             compile_max_size: 1024 * 1024,
             sandbox_max_size: 5 * 1024 * 1024,
             http2_max_concurrent_streams: 100,
+            worker_grace_period_secs: 30,
             tls: Some(crate::config::server::TlsConfig {
                 cert_path: "/path/to/cert".into(),
                 key_path: "/path/to/secret.key".into(),

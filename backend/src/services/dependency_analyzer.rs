@@ -243,7 +243,7 @@ pub fn parse_dependency_graph(cargo_toml_content: &str) -> (String, HashMap<Stri
         // Package name
         if current_section == "package" && line.starts_with("name") {
             if let Some(eq_idx) = line.find('=') {
-                let val = line[eq_idx + 1..].trim().trim_matches('"').trim_matches(''');
+                let val = line[eq_idx + 1..].trim().trim_matches('"').trim_matches('\'');
                 if !val.is_empty() {
                     root_pkg = val.to_string();
                     current_parent = root_pkg.clone();
@@ -267,7 +267,7 @@ pub fn parse_dependency_graph(cargo_toml_content: &str) -> (String, HashMap<Stri
                     if let (Some(b_open), Some(b_close)) = (sub.find('['), sub.find(']')) {
                         let inner = &sub[b_open + 1..b_close];
                         for item in inner.split(',') {
-                            let nested = item.trim().trim_matches('"').trim_matches(''').trim();
+                            let nested = item.trim().trim_matches('"').trim_matches('\'').trim();
                             if !nested.is_empty() {
                                 graph.entry(dep_name.clone()).or_default().push(nested.to_string());
                             }

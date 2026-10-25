@@ -4,26 +4,31 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use mime::Mime;
 
 use crate::error::AppError;
 
 const BODYLESS_MUTATION_ROUTES: [&str; 2] = ["/api/config/reload", "/api/v1/auth/rotate"];
 
+/// Helper to validate if a Content-Type header string represents `application/json`.
+///
+/// Splits off any optional parameters (e.g. `; charset=utf-8`) and compares the primary
+/// media type case-insensitively. A plain `starts_with` check would wrongly accept
+/// values such as `application/json5` or `application/json_evil`.
+pub fn is_json_content_type(header_val: &str) -> bool {
+    let media_type = header_val.split(';').next().unwrap_or("").trim();
+    media_type.eq_ignore_ascii_case("application/json")
+}
+
 /// Middleware that validates the Content-Type header on mutating requests.
 ///
 /// For requests with JSON bodies, this middleware ensures the client sends a valid
-/// `Content-Type: application/json` header, parsed case-insensitively according to MIME
-/// specifications (RFC 2045, RFC 7231 §3.1.1.1). Safe methods (GET, HEAD, OPTIONS) and
-/// the explicitly bodyless mutation routes below are allowed through without validation.
-///
-/// Parameters such as `; charset=utf-8` or `; boundary=...` are ignored when matching
-/// the primary type and subtype.
+/// `Content-Type: application/json` header, matched case-insensitively according to MIME
+/// specifications (RFC 2045, RFC 7231 §3.1.1.1). Parameters such as `; charset=utf-8` are
+/// ignored. Safe methods (GET, HEAD, OPTIONS) and the explicitly bodyless mutation routes
+/// below are allowed through without validation.
 ///
 /// Returns `415 Unsupported Media Type` if the Content-Type is missing, malformed, or
 /// does not evaluate to `application/json`.
-/// Returns `415 Unsupported Media Type` if the Content-Type is missing or
-/// the parsed primary media type does not match `application/json`.
 pub async fn require_json_content_type(req: Request, next: Next) -> Result<Response, AppError> {
     let method = req.method();
     if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
@@ -34,15 +39,12 @@ pub async fn require_json_content_type(req: Request, next: Next) -> Result<Respo
         return Ok(next.run(req).await);
     }
 
-    let is_json = req
+    let content_type = req
         .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .and_then(|raw| raw.parse::<Mime>().ok())
-        .map(|m| m.type_() == mime::APPLICATION && m.subtype() == mime::JSON)
-        .unwrap_or(false);
+        .unwrap_or("");
 
-    if is_json {
     if is_json_content_type(content_type) {
         Ok(next.run(req).await)
     } else {
@@ -251,16 +253,7 @@ mod tests {
             let res = app.clone().oneshot(req).await.unwrap();
             assert_eq!(res.status(), StatusCode::OK, "route {path}");
         }
-/// Helper to validate if a Content-Type header string represents `application/json`.
-/// Splits off any optional parameters (e.g. `; charset=utf-8`) and checks primary media type case-insensitively.
-pub fn is_json_content_type(header_val: &str) -> bool {
-    let media_type = header_val.split(';').next().unwrap_or("").trim();
-    media_type.eq_ignore_ascii_case("application/json")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
+    }
 
     #[test]
     fn test_is_json_content_type_valid() {
@@ -269,17 +262,18 @@ mod tests {
         assert!(is_json_content_type("application/json;charset=utf-8"));
         assert!(is_json_content_type("APPLICATION/JSON"));
         assert!(is_json_content_type("APPLICATION/JSON; charset=utf-8"));
-        assert!(is_json_content_type("  application/json  ; boundary=something "));
+        assert!(is_json_content_type(
+            "  application/json  ; boundary=something "
+        ));
     }
 
     #[test]
     fn test_is_json_content_type_invalid_and_bypass_prevention() {
-        // Bypass attempts that starts_with would incorrectly accept
+        // Bypass attempts that a starts_with check would incorrectly accept
         assert!(!is_json_content_type("application/json_evil"));
         assert!(!is_json_content_type("application/json5"));
         assert!(!is_json_content_type("application/json-patch+json"));
 
-        // Other content types
         assert!(!is_json_content_type("text/plain"));
         assert!(!is_json_content_type("application/xml"));
         assert!(!is_json_content_type("multipart/form-data"));

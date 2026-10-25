@@ -201,7 +201,7 @@ async fn test_get_contract_stats_not_found() {
     });
 
     let app = Router::new()
-        .route("/contracts/:contract_id/stats", get(get_contract_stats))
+        .route("/contracts/{contract_id}/stats", get(get_contract_stats))
         .with_state(state);
 
     let response = app
@@ -249,7 +249,7 @@ async fn test_get_contract_stats_success() {
     });
 
     let app = Router::new()
-        .route("/contracts/:contract_id/stats", get(get_contract_stats))
+        .route("/contracts/{contract_id}/stats", get(get_contract_stats))
         .with_state(state);
 
     let response = app

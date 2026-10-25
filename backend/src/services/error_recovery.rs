@@ -14,7 +14,7 @@ use tracing::{error, info, warn, instrument};
 use crate::services::tracing::TracingService;
 
 /// Exponential backoff configuration
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct BackoffConfig {
     /// Initial retry delay in milliseconds
     pub initial_delay_ms: u64,

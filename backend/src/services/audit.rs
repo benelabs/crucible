@@ -597,7 +597,7 @@ pub fn routes(service: Arc<AuditService>) -> Router {
     Router::new()
         .route("/log", post(log_audit_event))
         .route("/reports", get(list_audit_reports))
-        .route("/reports/:id", get(get_audit_report))
+        .route("/reports/{id}", get(get_audit_report))
         .route("/export", get(export_audit_logs))
         .with_state(service)
 }

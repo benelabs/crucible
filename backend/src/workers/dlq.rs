@@ -170,7 +170,7 @@ impl DeadLetterQueue {
             );
             self.quarantine(job.clone()).await?;
             let _ = self.purge(job_id).await;
-            return Err(AppError::Validation(format!(
+            return Err(AppError::ValidationError(format!(
                 "Job {job_id} exceeded maximum replay attempts ({}) and was quarantined",
                 self.max_replay_attempts
             )));
@@ -236,8 +236,10 @@ impl DeadLetterQueue {
         }
 
         let hash_key = format!("{}:map", self.quarantine_key);
-        let job_data: Vec<Option<String>> = conn
-            .hmget(&hash_key, &job_ids)
+        let job_data: Vec<Option<String>> = redis::cmd("HMGET")
+            .arg(&hash_key)
+            .arg(&job_ids)
+            .query_async(&mut conn)
             .await
             .map_err(AppError::Redis)?;
 

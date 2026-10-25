@@ -257,13 +257,6 @@ impl AdminAuthState {
             return false;
         };
         match redis.get_multiplexed_async_connection().await {
-            Ok(mut conn) => match conn.exists::<_, bool>(key).await {
-                Ok(exists) => exists,
-                Err(err) => {
-                    warn!(error = %err, "JWT revocation lookup failed; denying request");
-                    true
-                }
-            },
             Ok(mut conn) => {
                 let jti_key = format!("{TOKEN_BLOCKLIST_PREFIX}{jti}");
                 if conn.exists::<_, bool>(jti_key).await.unwrap_or(false) {
@@ -387,16 +380,7 @@ impl AdminAuthState {
             .map_err(|error| error.to_string())?;
         Ok(())
     }
-}
 
-/// Extract the bearer token from the `Authorization` header, if well-formed.
-fn bearer_token(request: &Request) -> Option<String> {
-    let value = request
-        .headers()
-        .get(header::AUTHORIZATION)?
-        .to_str()
-        .ok()?;
-    let token = value.strip_prefix("Bearer ")?.trim();
     /// Check whether a token is valid (either as a registered static token or valid JWT).
     pub async fn is_token_valid(&self, token: &str) -> bool {
         if self.tokens.contains_key(token) {
@@ -412,6 +396,11 @@ fn bearer_token(request: &Request) -> Option<String> {
             ) {
                 if let Some(jti) = claims.jti.as_deref() {
                     if self.is_jti_revoked(jti).await {
+                        return false;
+                    }
+                }
+                if let Some(sub) = claims.sub.as_deref() {
+                    if self.is_token_or_user_revoked("", Some(sub)).await {
                         return false;
                     }
                 }
@@ -470,12 +459,13 @@ pub fn extract_bearer_token(request: &Request) -> Result<String, AuthHeaderError
         Err(_) => return Err(AuthHeaderError::NonAscii),
     };
 
-    let trimmed = header_str.trim();
-    if !trimmed.starts_with("Bearer ") {
-        return Err(AuthHeaderError::MissingBearerPrefix);
+    let trimmed = header_str.trim_start();
+    let token = match trimmed.strip_prefix("Bearer ") {
+        Some(rest) => rest,
+        None if trimmed.eq_ignore_ascii_case("Bearer") => "",
+        None => return Err(AuthHeaderError::MissingBearerPrefix),
     }
-
-    let token = trimmed["Bearer ".len()..].trim();
+    .trim();
     if token.is_empty() {
         return Err(AuthHeaderError::EmptyToken);
     }
@@ -636,7 +626,10 @@ pub async fn require_admin_auth(
             auth.jwt_audience.as_deref(),
         ) {
             if let Some(jti) = claims.jti.as_deref() {
-                if auth.is_token_or_user_revoked(jti, claims.sub.as_deref()).await {
+                if auth
+                    .is_token_or_user_revoked(jti, claims.sub.as_deref())
+                    .await
+                {
                     warn!(jti, sub = ?claims.sub, "Privileged request rejected: JWT jti or user session is revoked");
                     return reject(
                         StatusCode::UNAUTHORIZED,
@@ -726,6 +719,7 @@ mod tests {
                 id: 2,
                 address: "operator".into(),
                 role: Role::User,
+                organization_id: None,
             },
         );
         auth
@@ -788,7 +782,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_header_with_non_ascii_is_rejected() {
-        let non_ascii_val = HeaderValue::from_bytes(b"Bearer \xFF\xFE\x01\x02").unwrap();
+        let non_ascii_val = HeaderValue::from_bytes(b"Bearer \xFF\xFE\xFA\xFB").unwrap();
         let resp = response_for(Some(non_ascii_val)).await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(
@@ -942,7 +936,7 @@ mod tests {
     fn verify_hs256_jwt_rejects_token_without_expiration() {
         let secret = "test-secret";
         let token = sign_jwt(secret, r#"{"jti":"no-exp","sub":"1","role":"admin"}"#);
-        assert!(verify_hs256_jwt(&token, secret).is_none());
+        assert!(verify_hs256_jwt(&token, secret, None, None).is_none());
     }
 
     #[tokio::test]
@@ -979,6 +973,9 @@ mod tests {
             exp: Some(chrono::Utc::now().timestamp() + 3600),
             sub: Some("42".to_string()),
             role: Some("admin".to_string()),
+            org_id: None,
+            iss: None,
+            aud: None,
         };
         let principal = principal_from_jwt_claims(&claims);
         assert_eq!(principal.id, 42);
@@ -992,6 +989,9 @@ mod tests {
             exp: Some(chrono::Utc::now().timestamp() + 3600),
             sub: Some("non-numeric-wallet".to_string()),
             role: Some("user".to_string()),
+            org_id: None,
+            iss: None,
+            aud: None,
         };
         let principal = principal_from_jwt_claims(&claims);
         assert_eq!(principal.id, 0);
@@ -1015,36 +1015,51 @@ mod tests {
                 r#"{{"jti":"staging-jti","exp":{exp},"sub":"9","role":"admin","iss":"crucible-staging","aud":"crucible-admin"}}"#
             ),
         );
+        let wrong_aud_token = sign_jwt(
+            secret,
+            &format!(
+                r#"{{"jti":"other-aud","exp":{exp},"sub":"9","role":"admin","iss":"crucible-prod","aud":"crucible-readonly"}}"#
+            ),
+        );
 
         let auth = AdminAuthState::new()
             .with_jwt_secret(secret)
             .with_jwt_issuer("crucible-prod")
             .with_jwt_audience("crucible-admin");
 
-        // Valid prod token succeeds
-        let req_valid = Request::builder()
-            .uri("/admin")
-            .header(header::AUTHORIZATION, format!("Bearer {valid_token}"))
-            .body(Body::empty())
-            .unwrap();
-        let status_valid = guarded_app(auth.clone())
-            .oneshot(req_valid)
-            .await
-            .unwrap()
-            .status();
-        assert_eq!(status_valid, StatusCode::OK);
+        // A token with the expected issuer and audience passes header validation and
+        // reaches the account-lookup stage. No database is configured here, so the
+        // fail-closed guard denies it there instead of rejecting it as a bad credential.
+        let (status_valid, detail_valid) = guarded_response(auth.clone(), &valid_token).await;
+        assert_eq!(status_valid, StatusCode::UNAUTHORIZED);
+        assert!(
+            detail_valid.contains("suspended or unavailable"),
+            "issuer/audience mismatch rejected the token: {detail_valid}"
+        );
 
-        // Staging token with wrong issuer rejected
-        let req_staging = Request::builder()
+        // Wrong issuer and wrong audience never pass signature validation.
+        for token in [&staging_token, &wrong_aud_token] {
+            let (status, detail) = guarded_response(auth.clone(), token).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+            assert!(
+                detail.contains("Invalid authentication credentials"),
+                "expected a credential rejection, got: {detail}"
+            );
+        }
+    }
+
+    async fn guarded_response(auth: AdminAuthState, token: &str) -> (StatusCode, String) {
+        let request = Request::builder()
             .uri("/admin")
-            .header(header::AUTHORIZATION, format!("Bearer {staging_token}"))
+            .method("GET")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
             .body(Body::empty())
             .unwrap();
-        let status_staging = guarded_app(auth)
-            .oneshot(req_staging)
+        let response = guarded_app(auth).oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
-            .unwrap()
-            .status();
-        assert_eq!(status_staging, StatusCode::UNAUTHORIZED);
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).to_string())
     }
 }

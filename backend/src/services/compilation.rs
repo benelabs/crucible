@@ -232,7 +232,8 @@ impl CompilationService {
             func_payload.push(i as u8);
         }
         wasm.push(0x03);
-        Self::encode_leb128(&mut func_payload, func_payload.len());
+        let func_len = func_payload.len();
+        Self::encode_leb128(&mut func_payload, func_len);
         wasm.extend_from_slice(&func_payload);
 
         // 3. Export Section (id 7)

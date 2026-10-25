@@ -9,6 +9,9 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
+/// Upper bound (seconds) for the connection acquisition timeout, preventing request stalls.
+const MAX_ACQUIRE_TIMEOUT_SECS: u64 = 5;
+
 /// Database configuration for PostgreSQL via SQLx.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct DatabaseConfig {
@@ -20,6 +23,7 @@ pub struct DatabaseConfig {
     /// Minimum number of idle connections to maintain.
     pub min_connections: u32,
     /// Maximum time in seconds to wait for a connection.
+    #[serde(default = "default_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
     /// Maximum time in seconds a connection can remain idle before being closed.
     pub idle_timeout_secs: u64,
@@ -36,6 +40,10 @@ pub struct DatabaseConfig {
 
 fn default_pool_retry_after_secs() -> u64 {
     5
+}
+
+fn default_connect_timeout_secs() -> u64 {
+    3
 }
 
 fn default_worker_max_connections() -> u32 {
@@ -119,7 +127,7 @@ impl DatabaseConfig {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_acquire {
     use super::*;
 
     #[test]

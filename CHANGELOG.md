@@ -1,3 +1,10 @@
+## [1.36.12](https://github.com/benelabs/crucible/compare/v1.36.11...v1.36.12) (2026-10-25)
+
+### Bug Fixes
+
+* **auth:** Incomplete Session Invalidation on User Suspension or Role Revocation  ([#1300](https://github.com/benelabs/crucible/issues/1300)) ([181fdd2](https://github.com/benelabs/crucible/commit/181fdd2a53aaf416c0f12b4113469c8b6d71091f)), closes [#1166](https://github.com/benelabs/crucible/issues/1166)
+* **macros:** preserve syn error cause and chain diagnostics in parse_fixture_args ([#1069](https://github.com/benelabs/crucible/issues/1069)) ([e58ba87](https://github.com/benelabs/crucible/commit/e58ba87830e54d031730978dd3659fecec29f98a))
+
 ## [1.36.11](https://github.com/benelabs/crucible/compare/v1.36.10...v1.36.11) (2026-10-23)
 
 ### Bug Fixes

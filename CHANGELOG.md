@@ -1,3 +1,9 @@
+## [1.36.14](https://github.com/benelabs/crucible/compare/v1.36.13...v1.36.14) (2026-10-25)
+
+### Bug Fixes
+
+* **backend:** repair compilation errors introduced by recent merged PRs ([#1369](https://github.com/benelabs/crucible/issues/1369)) ([74312ab](https://github.com/benelabs/crucible/commit/74312ab9b6e73ec7785c16ea1c85c2ca583d308e))
+
 ## [1.36.13](https://github.com/benelabs/crucible/compare/v1.36.12...v1.36.13) (2026-10-25)
 
 ### Bug Fixes

@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_redacts_database_url() {
-        let config = crate::config::AppConfig::load(Environment::Development)
+        let config = crate::config::AppConfig::load_isolated(Environment::Development)
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_redacts_redis_url() {
-        let config = crate::config::AppConfig::load(Environment::Development)
+        let config = crate::config::AppConfig::load_isolated(Environment::Development)
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 
@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_redacts_tls_key_path() {
-        let config = crate::config::AppConfig::load(Environment::Development)
+        let config = crate::config::AppConfig::load_isolated(Environment::Development)
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_preserves_non_secret_fields() {
-        let config = crate::config::AppConfig::load(Environment::Development)
+        let config = crate::config::AppConfig::load_isolated(Environment::Development)
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_serializes_without_secrets() {
-        let config = crate::config::AppConfig::load(Environment::Development)
+        let config = crate::config::AppConfig::load_isolated(Environment::Development)
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_optional_redis_job_queue_url() {
-        let config = crate::config::AppConfig::load(Environment::Development)
+        let config = crate::config::AppConfig::load_isolated(Environment::Development)
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_preserves_tls_cert_path() {
-        let config = crate::config::AppConfig::load(Environment::Development)
+        let config = crate::config::AppConfig::load_isolated(Environment::Development)
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_sanitize_produces_valid_json() {
-        let config = crate::config::AppConfig::load(Environment::Development)
+        let config = crate::config::AppConfig::load_isolated(Environment::Development)
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 

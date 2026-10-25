@@ -8,13 +8,16 @@ use sqlx::PgPool;
 /// Uses a conservative allowlist approach - only allows safe tags
 fn sanitize_html(input: &str) -> String {
     // Use a simple HTML escaping for documentation content
-    // This prevents any HTML/JavaScript from being interpreted
+    // This prevents any HTML/JavaScript from being interpreted. `=` is escaped as well so an
+    // attribute assignment (`onerror=`, `src=`) can never be reconstructed by a consumer that
+    // decodes the entities a second time; it renders back as `=`.
     input
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+        .replace('=', "&#x3d;")
 }
 
 /// Abstract Syntax Tree representing a Soroban/Rust type.

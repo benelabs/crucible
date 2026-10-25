@@ -95,17 +95,13 @@ pub async fn execute_contract(
 }
 
 fn map_sandbox_error(error: SandboxError) -> ApiError {
+    if error.is_capacity_rejection() {
+        return ApiError::RateLimited;
+    }
+
     match error {
-        SandboxError::InvalidRequest(message) => ApiError::Validation(message),
-        SandboxError::Rejected(message) => {
-            if message.contains("capacity")
-                || message.contains("concurrency")
-                || message.contains("too many")
-            {
-                ApiError::RateLimited
-            } else {
-                ApiError::Validation(message)
-            }
+        SandboxError::InvalidRequest(message) | SandboxError::Rejected(message) => {
+            ApiError::Validation(message)
         }
         SandboxError::TimedOut(message) => ApiError::Internal(message.to_string()),
         SandboxError::FuelExhausted(limit) => ApiError::Validation(format!(

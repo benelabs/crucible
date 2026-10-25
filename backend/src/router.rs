@@ -446,7 +446,7 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_config() -> AppConfig {
-        AppConfig::load(Environment::Development).expect("config")
+        AppConfig::load_isolated(Environment::Development).expect("config")
     }
 
     // Lazy connections: no real DB/Redis required to construct the router.

@@ -1,3 +1,10 @@
+## [1.36.13](https://github.com/benelabs/crucible/compare/v1.36.12...v1.36.13) (2026-10-25)
+
+### Bug Fixes
+
+* **governance:** prevent self-delegation state anomaly in delegate_voting_power ([7d6d7e7](https://github.com/benelabs/crucible/commit/7d6d7e7ce444584c62ce6bd2790c431e7c4127a3))
+* **macros:** hygienically qualify MockEnv and contract client initializer bindings ([#1070](https://github.com/benelabs/crucible/issues/1070)) ([fe02508](https://github.com/benelabs/crucible/commit/fe02508d879ddca5f8ac5c95810ef151a918da68))
+
 ## [1.36.12](https://github.com/benelabs/crucible/compare/v1.36.11...v1.36.12) (2026-10-25)
 
 ### Bug Fixes

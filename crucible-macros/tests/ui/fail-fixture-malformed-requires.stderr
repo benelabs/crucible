@@ -1,11 +1,10 @@
-error: #[fixture] takes no arguments other than `requires = [..]`
- --> tests/ui/fail-fixture-malformed-requires.rs:5:11
+error: unexpected closing delimiter: `]`
+ --> tests/ui/fail-fixture-malformed-requires.rs:5:37
   |
 5 | #[fixture(requires = [TokenFixture))]
-  |           ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-error: unexpected closing delimiter: `)`
- --> tests/ui/fail-fixture-malformed-requires.rs:5:35
-  |
-5 | #[fixture(requires = [TokenFixture))]
-  |                                   ^
+  |  -                   -            --^ unexpected closing delimiter
+  |  |                   |            ||
+  |  |                   |            |missing open `(` for this delimiter
+  |  |                   |            missing open `(` for this delimiter
+  |  |                   the nearest open delimiter
+  |  the nearest open delimiter

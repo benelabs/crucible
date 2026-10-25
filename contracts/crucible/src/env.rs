@@ -3256,11 +3256,12 @@ mod protocol_version_tests {
     }
 
     #[test]
-    fn test_with_custom_protocol_version_sets_ledger() {
-        let env = MockEnv::builder()
-            .with_protocol_version(42)
-            .build();
-        assert_eq!(env.protocol_version(), 42);
+    #[should_panic]
+    fn test_with_protocol_version_newer_than_host_panics() {
+        // The Soroban test host only accepts its own protocol version, so a
+        // newer one is rejected while building the env instead of being
+        // silently applied.
+        MockEnv::builder().with_protocol_version(u32::MAX).build();
     }
 
     #[test]

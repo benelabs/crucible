@@ -3,3 +3,9 @@ error: #[fixture] takes no arguments other than `requires = [..]`
   |
 4 | #[fixture(debug)]
   |           ^^^^^
+
+error: note: expected syntax is `#[fixture(requires = [FixtureA, FixtureB])]`
+ --> tests/ui/fail-fixture-args.rs:4:11
+  |
+4 | #[fixture(debug)]
+  |           ^^^^^

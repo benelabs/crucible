@@ -29,8 +29,9 @@ impl StorageSize for soroban_sdk::String {
     fn storage_size(&self) -> usize {
         // `to_xdr` produces the exact on-wire representation; its byte length
         // is the true serialized size rather than the in-memory struct size.
-        // No unsafe code required — the SDK exposes this natively.
-        self.to_xdr(self.env()).len()
+        // No unsafe code required — the SDK exposes this natively (Soroban
+        // collections report their length as `u32`).
+        self.to_xdr(self.env()).len() as usize
     }
 }
 

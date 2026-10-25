@@ -8,7 +8,10 @@
 //! - [`AppConfig`] — hot-reloadable runtime configuration, loaded via the layered config crate.
 //! - [`reload`] — [`ConfigManager`] and Axum handlers for live config updates.
 
-use config::{Config as ConfigBuilder, Environment as ConfigEnvironment, File, FileFormat};
+use config::{
+    Config as ConfigBuilder, Environment as ConfigEnvironment, File, FileFormat, Map, Value,
+    ValueKind,
+};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -112,6 +115,22 @@ impl AppConfig {
     /// Loads the configuration by layering default settings, environment-specific
     /// settings, and finally environment variable overrides.
     pub fn load(env: Environment) -> Result<Self, ConfigError> {
+        Self::load_with_environment_source(env, None)
+    }
+
+    /// Loads the embedded configuration while ignoring the ambient `APP_*` variables.
+    ///
+    /// Tests that only need the layered defaults use this: other tests mutate the process
+    /// environment concurrently, which would otherwise leak into their assertions.
+    #[cfg(test)]
+    pub(crate) fn load_isolated(env: Environment) -> Result<Self, ConfigError> {
+        Self::load_with_environment_source(env, Some(Map::new()))
+    }
+
+    fn load_with_environment_source(
+        env: Environment,
+        environment_source: Option<Map<String, String>>,
+    ) -> Result<Self, ConfigError> {
         // Embed the TOML files into the binary to avoid distributing config files in production.
         let default_config = include_str!("defaults/default.toml");
 
@@ -121,24 +140,35 @@ impl AppConfig {
             Environment::Production => include_str!("defaults/production.toml"),
         };
 
+        let mut environment = ConfigEnvironment::with_prefix("APP")
+            .prefix_separator("_")
+            .separator("__");
+        if let Some(source) = environment_source {
+            environment = environment.source(Some(source));
+        }
+
         let builder = ConfigBuilder::builder()
             // 1. Base configuration defaults
             .add_source(File::from_str(default_config, FileFormat::Toml))
             // 2. Environment-specific overrides
             .add_source(File::from_str(env_config, FileFormat::Toml))
-            // 3. Environment variables (e.g., APP_DATABASE__URL overrides database.url)
-            .add_source(
-                ConfigEnvironment::with_prefix("APP")
-                    .separator("__")
-                    .ignore_empty(true),
-            );
+            // 3. Environment variables (e.g., APP_DATABASE__URL overrides database.url).
+            //    `config` falls back to using `separator` as the prefix separator, so the
+            //    single-underscore prefix separator must be stated explicitly.
+            .add_source(environment);
 
         let config_result = builder
             .build()
-            .map_err(|e| ConfigError::LoadError(e.to_string()))?;
-        let app_config: AppConfig = config_result
+            .map_err(|error| ConfigError::LoadError(error.to_string()))?;
+        let mut root = config_result
+            .try_deserialize::<Map<String, Value>>()
+            .map_err(|error| ConfigError::LoadError(error.to_string()))?;
+
+        normalize_indexed_tables(&mut root);
+
+        let app_config: AppConfig = Value::new(None, ValueKind::Table(root))
             .try_deserialize()
-            .map_err(|e| ConfigError::LoadError(e.to_string()))?;
+            .map_err(|error| ConfigError::LoadError(error.to_string()))?;
 
         app_config.validate(env)?;
 
@@ -198,4 +228,62 @@ impl AppConfig {
 
         Ok(())
     }
+}
+
+/// Rewrites index-keyed tables produced by the environment provider as arrays.
+///
+/// `APP_CORS__ALLOWED_ORIGINS__0` reaches the layered config as the path
+/// `cors.allowed_origins.0`, which serde reads back as a map instead of the `Vec` the
+/// documented indexed-key syntax promises.
+fn normalize_indexed_tables(root: &mut Map<String, Value>) {
+    let normalized = std::mem::take(root)
+        .into_iter()
+        .map(|(key, value)| (key, normalize_value(value)))
+        .collect();
+    *root = normalized;
+}
+
+fn normalize_value(value: Value) -> Value {
+    let origin = value.origin().map(str::to_string);
+    let kind = match value.kind {
+        ValueKind::Table(table) => match indexed_table_to_array(&table) {
+            Some(array) => ValueKind::Array(array),
+            None => ValueKind::Table(
+                table
+                    .into_iter()
+                    .map(|(key, entry)| (key, normalize_value(entry)))
+                    .collect(),
+            ),
+        },
+        ValueKind::Array(items) => {
+            ValueKind::Array(items.into_iter().map(normalize_value).collect())
+        }
+        other => other,
+    };
+
+    Value::new(origin.as_ref(), kind)
+}
+
+fn indexed_table_to_array(table: &Map<String, Value>) -> Option<Vec<Value>> {
+    if table.is_empty() {
+        return None;
+    }
+
+    let mut indexed = table
+        .iter()
+        .map(|(key, value)| key.parse::<usize>().ok().map(|index| (index, value)))
+        .collect::<Option<Vec<_>>>()?;
+
+    indexed.sort_by_key(|(index, _)| *index);
+    let contiguous = indexed
+        .iter()
+        .enumerate()
+        .all(|(position, (index, _))| position == *index);
+
+    contiguous.then(|| {
+        indexed
+            .into_iter()
+            .map(|(_, value)| value.clone())
+            .collect()
+    })
 }

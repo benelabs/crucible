@@ -227,91 +227,101 @@ pub fn configure_trusted_proxies(cidrs: Vec<&str>) {
     let _ = TRUSTED_PROXIES.set(ranges);
 }
 
-/// Parse CIDR notation to (mask, prefix_length)
+/// Parse CIDR notation into `(network, mask)` in a family-normalised `u128` space.
+///
+/// IPv4 addresses occupy the low 32 bits, so their mask must be built with a 32-bit
+/// width; using the 128-bit width for IPv4 would zero the network half of every entry
+/// and make every IPv4 address look trusted.
 fn parse_cidr(cidr: &str) -> Result<(u128, u128), String> {
     let parts: Vec<&str> = cidr.split('/').collect();
     if parts.len() != 2 {
         return Err("Invalid CIDR format".to_string());
     }
 
-    let ip_addr = parts[0].parse::<std::net::IpAddr>()
+    let ip_addr = parts[0]
+        .parse::<std::net::IpAddr>()
         .map_err(|e| e.to_string())?;
-    let prefix_len: u128 = parts[1].parse()
+    let prefix_len: u32 = parts[1]
+        .parse()
         .map_err(|e: std::num::ParseIntError| e.to_string())?;
 
-    let ip_num = match ip_addr {
-        std::net::IpAddr::V4(v4) => u32::from(v4) as u128,
-        std::net::IpAddr::V6(v6) => u128::from(v6),
+    let (width, ip_num) = match ip_addr {
+        std::net::IpAddr::V4(v4) => (32u32, u128::from(u32::from(v4))),
+        std::net::IpAddr::V6(v6) => (128u32, u128::from(v6)),
     };
+    if prefix_len > width {
+        return Err("CIDR prefix length out of range".to_string());
+    }
 
-    let mask = if prefix_len >= 128 {
+    let full: u128 = if width == 128 {
         u128::MAX
     } else {
-        (u128::MAX << (128 - prefix_len)) & u128::MAX
+        (1u128 << width) - 1
+    };
+    let host_bits = width - prefix_len;
+    let mask = if host_bits == 0 {
+        full
+    } else {
+        full & !((1u128 << host_bits) - 1)
     };
 
     Ok((ip_num & mask, mask))
 }
 
-/// Check if an IP address is from a trusted proxy
+/// Returns true when `ip_str` falls inside one of the configured trusted proxy ranges.
 fn is_trusted_proxy(ip_str: &str) -> bool {
     let Ok(ip_addr) = ip_str.parse::<std::net::IpAddr>() else {
         return false;
     };
 
     let ip_num = match ip_addr {
-        std::net::IpAddr::V4(v4) => u32::from(v4) as u128,
+        std::net::IpAddr::V4(v4) => u128::from(u32::from(v4)),
         std::net::IpAddr::V6(v6) => u128::from(v6),
     };
 
     let trusted = TRUSTED_PROXIES.get_or_init(|| {
         // Default to common RFC 1918 private ranges if not configured
-        vec![
-            parse_cidr("10.0.0.0/8").unwrap(),
-            parse_cidr("172.16.0.0/12").unwrap(),
-            parse_cidr("192.168.0.0/16").unwrap(),
-            parse_cidr("127.0.0.0/8").unwrap(),
-            parse_cidr("::1/128").unwrap(),
+        [
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "127.0.0.0/8",
+            "::1/128",
         ]
+        .iter()
+        .filter_map(|cidr| parse_cidr(cidr).ok())
+        .collect()
     });
 
-    trusted.iter().any(|(mask, prefix)| (ip_num & prefix) == *mask)
+    let is_v4 = ip_addr.is_ipv4();
+    trusted.iter().any(|(network, mask)| {
+        // An IPv4 entry can never describe an IPv6 range and vice versa.
+        let entry_is_v4 = *mask <= u128::from(u32::MAX);
+        entry_is_v4 == is_v4 && (ip_num & mask) == *network
+    })
 }
 
 /// Extract the client IP from X-Forwarded-For, validating proxy trust
 fn extract_client_ip_from_forwarded(forwarded_str: &str) -> Option<String> {
-    let ips: Vec<&str> = forwarded_str.split(',')
+    let ips: Vec<&str> = forwarded_str
+        .split(',')
         .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
         .collect();
 
     if ips.is_empty() {
         return None;
     }
 
-    // Scan from right to left to find the rightmost untrusted proxy hop
-    for (idx, window) in ips.windows(2).enumerate().rev() {
-        let current_hop = window[0];
-        let next_hop = window[1];
-
-        // If current hop is untrusted (not a known proxy), it's the client
-        if !is_trusted_proxy(current_hop) {
-            return Some(current_hop.to_string());
-        }
-
-        // If next hop is untrusted and current is trusted, next is the client
-        if is_trusted_proxy(current_hop) && !is_trusted_proxy(next_hop) {
-            return Some(next_hop.to_string());
+    // Scan right to left, skipping hops we trust, and take the first untrusted one.
+    for hop in ips.iter().rev() {
+        if !is_trusted_proxy(hop) {
+            return Some((*hop).to_string());
         }
     }
 
-    // If all proxies are trusted, use the rightmost (direct client)
-    ips.last().and_then(|ip| {
-        if !ip.is_empty() {
-            Some(ip.to_string())
-        } else {
-            None
-        }
-    })
+    // Every hop is trusted: keep the rightmost entry, which is the connection peer.
+    ips.last().map(|ip| ip.to_string())
 }
 
 /// Extract rate limiting key (API Key token or IP address) from request headers
@@ -380,13 +390,23 @@ pub async fn rate_limit_middleware(
 ) -> Response {
     let key = extract_rate_limit_key(request.headers());
     let tier = resolve_rate_limit_tier(request.headers());
-    let tier_config = tier.config();
 
-    let limiter = request
+    // A limiter supplied with the request owns its bucket configuration; the shared
+    // default falls back to the caller's tier quota.
+    let (limiter, tier_config) = match request
         .extensions()
         .get::<Arc<TokenBucketRateLimiter>>()
         .cloned()
-        .unwrap_or_else(TokenBucketRateLimiter::global);
+    {
+        Some(limiter) => {
+            let config = limiter.config().clone();
+            (limiter, config)
+        }
+        None => (
+            TokenBucketRateLimiter::global(),
+            tier.config(),
+        ),
+    };
 
     match limiter.check_and_consume_with_config(&key, &tier_config).await {
         Ok(result) => {

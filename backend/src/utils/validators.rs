@@ -56,12 +56,27 @@ impl ValidationError {
 }
 
 /// Validation context for tracking multiple validation results
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationContext {
     /// List of validation errors
+    #[serde(default)]
     pub errors: Vec<ValidationError>,
     /// Whether validation passed overall
+    #[serde(default = "default_context_validity")]
     pub is_valid: bool,
+}
+
+fn default_context_validity() -> bool {
+    true
+}
+
+impl Default for ValidationContext {
+    fn default() -> Self {
+        Self {
+            errors: Vec::new(),
+            is_valid: true,
+        }
+    }
 }
 
 impl ValidationContext {
@@ -131,20 +146,20 @@ impl StringValidator {
     /// Validate email format
     pub fn email(value: &str) -> ValidationResult {
         // Simple email validation - more sophisticated validation would use a proper email library
-        let email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+        let email_regex = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
         Self::regex(value, email_regex)
     }
 
     /// Validate URL format
     pub fn url(value: &str) -> ValidationResult {
-        let url_regex = r"^https?://[^s/$.?#].[^s]*$";
+        let url_regex = r"^https?://[^\s/$.?#].[^\s]*$";
         Self::regex(value, url_regex)
     }
 
     /// Validate phone number format
     pub fn phone(value: &str) -> ValidationResult {
         // Basic phone number validation
-        let phone_regex = r"^\\+?[1-9]\\d{1,14}$";
+        let phone_regex = r"^\+?[1-9]\d{1,14}$";
         Self::regex(value, phone_regex)
     }
 

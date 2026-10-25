@@ -168,6 +168,15 @@ pub enum SandboxError {
     Worker(String),
 }
 
+impl SandboxError {
+    /// True when a rejection came from sandbox saturation instead of the invocation itself.
+    /// Such requests are retryable and must not be reported as invalid input.
+    pub fn is_capacity_rejection(&self) -> bool {
+        matches!(self, SandboxError::Rejected(message)
+            if message.contains("capacity") || message.contains("concurrency") || message.contains("too many"))
+    }
+}
+
 /// Prepared execution payload with decoded binary data and cooperative cancellation.
 #[derive(Debug, Clone)]
 pub struct PreparedExecution {
@@ -339,6 +348,9 @@ impl ContractSandboxService {
                 drop(permit);
                 match result.map_err(join_error_to_sandbox)? {
                     Ok(raw) => raw,
+                    Err(error @ SandboxError::Rejected(_)) if error.is_capacity_rejection() => {
+                        return Err(error);
+                    }
                     Err(SandboxError::Rejected(message)) => {
                         return Ok(ContractExecutionResponse {
                             execution_id: Uuid::new_v4(),

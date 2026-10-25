@@ -622,10 +622,7 @@ impl DependencyAnalyzer {
             }
         }
 
-        let vulnerability_count = dependencies
-            .iter()
-            .filter(|d| d.status == "vulnerable")
-            .count();
+        let vulnerability_count = vulnerabilities.len();
 
         Ok(DependencyAnalysis {
             dependencies,

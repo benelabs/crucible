@@ -69,6 +69,9 @@ pub struct TaskExecutor {
     max_concurrency: usize,
     /// Atomic counter for currently running tasks
     running_count: Arc<AtomicU64>,
+    /// Atomic counter for tasks that were submitted but have not finished yet.
+    /// Includes tasks still waiting on a concurrency permit.
+    pending_count: Arc<AtomicU64>,
     /// Atomic counter for successfully completed tasks
     completed_count: Arc<AtomicU64>,
     /// Atomic counter for failed tasks
@@ -97,6 +100,7 @@ impl TaskExecutor {
             semaphore: Arc::new(Semaphore::new(max_concurrency)),
             max_concurrency,
             running_count: Arc::new(AtomicU64::new(0)),
+            pending_count: Arc::new(AtomicU64::new(0)),
             completed_count: Arc::new(AtomicU64::new(0)),
             failed_count: Arc::new(AtomicU64::new(0)),
             task_timeout,
@@ -158,18 +162,23 @@ impl TaskExecutor {
         // Clone the semaphore and counters for the task closure
         let semaphore = self.semaphore.clone();
         let running_count = self.running_count.clone();
+        let pending_count = self.pending_count.clone();
         let completed_count = self.completed_count.clone();
         let failed_count = self.failed_count.clone();
         let task_timeout = self.task_timeout;
 
-        // Increment running count before attempting to acquire permit
-        running_count.fetch_add(1, Ordering::Relaxed);
+        // Submitted tasks count as pending right away, even while they wait for a permit,
+        // so shutdown cannot return while a spawned task is still queued.
+        pending_count.fetch_add(1, Ordering::Relaxed);
 
         // Spawn the task with tracing instrumentation
         tokio::spawn(
             async move {
                 // Acquire semaphore permit (waits if necessary)
                 let permit = semaphore.acquire_owned().await;
+
+                // Only tasks holding a permit are counted as running
+                running_count.fetch_add(1, Ordering::Relaxed);
 
                 // Catch task panics and enforce a bounded timeout.
                 let task_with_catch = AssertUnwindSafe(task).catch_unwind();
@@ -201,6 +210,9 @@ impl TaskExecutor {
 
                 // Decrement running count
                 running_count.fetch_sub(1, Ordering::Relaxed);
+
+                // Task is no longer pending
+                pending_count.fetch_sub(1, Ordering::Relaxed);
 
                 // Update appropriate counter based on result
                 match result {
@@ -239,8 +251,8 @@ impl TaskExecutor {
             "Waiting for executor tasks to complete"
         );
 
-        // Wait until no tasks are running
-        while self.running_count.load(Ordering::Relaxed) > 0 {
+        // Wait until no task is still outstanding
+        while self.pending_count.load(Ordering::Relaxed) > 0 {
             tracing::debug!(
                 running = self.running_count(),
                 "Still waiting for tasks to complete"

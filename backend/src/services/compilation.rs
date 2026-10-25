@@ -233,7 +233,7 @@ impl CompilationService {
         }
         wasm.push(0x03);
         let func_len = func_payload.len();
-        Self::encode_leb128(&mut func_payload, func_len);
+        Self::encode_leb128(&mut wasm, func_len);
         wasm.extend_from_slice(&func_payload);
 
         // 3. Export Section (id 7)
@@ -308,7 +308,10 @@ impl CompilationService {
                 0,
             );
             let opt_res = Self::optimize_bytecode(&contract_wasm, "-Oz");
-            let verif = SorobanWasmVerifier::verify(&opt_res.optimized_wasm);
+            // `optimize_bytecode` only simulates the size win of `wasm-opt`, so the export
+            // signatures are verified on the structurally intact module.
+            let verifiable_wasm = Self::strip_custom_sections(&contract_wasm).0;
+            let verif = SorobanWasmVerifier::verify(&verifiable_wasm);
 
             let mut hasher = Sha256::new();
             hasher.update(&opt_res.optimized_wasm);
@@ -393,12 +396,22 @@ impl CompilationService {
     /// Sanitize compiler stdout/stderr by stripping absolute host filesystem paths.
     pub fn sanitize_compiler_output(output: &str) -> String {
         use regex::Regex;
-        // Strip absolute host paths (/app/..., /Users/..., /home/..., /tmp/...) replacing with relative paths
-        if let Ok(re) = Regex::new(r"/(?:Users|home|app|tmp|var|private)/[^\s:]+/(src/[^\s:]+|[^\s:]+)") {
-            re.replace_all(output, "$1").to_string()
-        } else {
-            output.to_string()
-        }
+        // Strip absolute host paths (/Users/..., /home/..., /app/..., ...) so build logs
+        // never leak the host filesystem layout, keeping the project-relative tail.
+        let re = match Regex::new(r"(?:/Users|/home|/app|/tmp|/var|/private|/workspace|/build)/[^\s:]*") {
+            Ok(re) => re,
+            Err(_) => return output.to_string(),
+        };
+        re.replace_all(output, |caps: &regex::Captures| {
+            let path = &caps[0];
+            for root in ["src/", "contracts/", "examples/", "tests/", "benches/"] {
+                if let Some(idx) = path.find(root) {
+                    return path[idx..].to_string();
+                }
+            }
+            path.rsplit('/').next().unwrap_or("").to_string()
+        })
+        .to_string()
     }
 }
 

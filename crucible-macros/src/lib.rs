@@ -548,7 +548,7 @@ fn expand_fixture_derive(input: DeriveInput) -> proc_macro2::TokenStream {
                         field_bindings.push(quote! {
                             let #field_name = <#field_ty>::new(
                                 #env_ident.inner(),
-                                &#env_ident.contract_id::<#ct>(),
+                                &#env_ident.contract_id::<#ct>()
                             );
                         });
                         field_inits.push(quote! { #field_name, });
@@ -907,6 +907,15 @@ mod tests {
             "Expected env: __crucible_env, got: {}",
             generated
         );
+    }
+
+    /// `syn::Error`'s `Display` only renders the first message, so assertions
+    /// about combined diagnostic notes must inspect the compiler rendering.
+    fn diagnostics(err: &Error) -> String {
+        err.to_compile_error().to_string()
+    }
+
+    #[test]
     fn test_parse_fixture_args_empty() {
         let args = quote! {};
         let result = parse_fixture_args(args).expect("empty args should succeed");
@@ -927,7 +936,7 @@ mod tests {
         // Consecutive commas in array is a syn syntax error
         let args = quote! { requires = [TokenFixture,,] };
         let err = parse_fixture_args(args).expect_err("syntax error must fail");
-        let err_msg = err.to_string();
+        let err_msg = diagnostics(&err);
         // Preserves underlying syn error cause
         assert!(
             err_msg.contains("expected") || err_msg.contains("unexpected"),
@@ -944,7 +953,7 @@ mod tests {
     fn test_parse_fixture_args_non_array_value() {
         let args = quote! { requires = "TokenFixture" };
         let err = parse_fixture_args(args).expect_err("string literal should fail");
-        let err_msg = err.to_string();
+        let err_msg = diagnostics(&err);
         assert!(err_msg.contains("`requires` expects a list of fixture types"));
         assert!(err_msg.contains("note: expected an array of fixture type names"));
     }
@@ -953,7 +962,7 @@ mod tests {
     fn test_parse_fixture_args_invalid_element_type() {
         let args = quote! { requires = [123, "invalid"] };
         let err = parse_fixture_args(args).expect_err("non-path elements must fail");
-        let err_msg = err.to_string();
+        let err_msg = diagnostics(&err);
         assert!(err_msg.contains("each entry in `requires` must be a fixture type name"));
         assert!(err_msg.contains("note: expected a type path"));
     }
@@ -962,7 +971,7 @@ mod tests {
     fn test_parse_fixture_args_unrecognized_argument() {
         let args = quote! { invalid_arg = [TokenFixture] };
         let err = parse_fixture_args(args).expect_err("unknown argument must fail");
-        let err_msg = err.to_string();
+        let err_msg = diagnostics(&err);
         assert!(err_msg.contains("#[fixture] takes no arguments other than `requires = [..]`"));
         assert!(err_msg.contains("note: expected syntax is `#[fixture(requires = [..])]`"));
     }

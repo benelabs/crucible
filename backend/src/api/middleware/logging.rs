@@ -77,22 +77,25 @@ use axum::{
 use std::{sync::Arc, time::Instant};
 use tracing::Instrument;
 
-/// Sanitize a string for safe log output by stripping newlines and control characters.
+/// Sanitize a string for safe log output by neutralizing control characters.
 ///
 /// Replaces:
 /// - `\n` (newline) → space
 /// - `\r` (carriage return) → space
 /// - `\t` (tab) → space
-/// - All other ASCII control characters (0x00–0x1F, 0x7F) → empty string
+/// - All other ASCII control characters (0x00–0x1F, 0x7F) → space, except `\0` which is dropped
 ///
 /// This prevents log injection attacks where user-controlled input
-/// contains fake log entries via embedded newlines.
+/// contains fake log entries via embedded newlines. Control characters are substituted rather
+/// than deleted so a smuggled ANSI introducer (`\x1b`) cannot splice the surrounding tokens into
+/// a terminal escape sequence, while `\0` is dropped outright because it is a truncation vector
+/// with no printable meaning.
 pub fn sanitize_for_log(input: &str) -> String {
-    input.chars().filter_map(|c| match c {
-        '\n' | '\r' | '\t' => Some(' '),
-        c if c.is_ascii_control() => None,
-        c => Some(c),
-    }).collect()
+    input
+        .chars()
+        .filter(|c| *c != '\0')
+        .map(|c| if c.is_ascii_control() { ' ' } else { c })
+        .collect()
 }
 
 /// Middleware to log HTTP requests and responses.

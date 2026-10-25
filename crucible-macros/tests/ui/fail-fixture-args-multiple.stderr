@@ -1,3 +1,9 @@
+error: unexpected token
+ --> tests/ui/fail-fixture-args-multiple.rs:4:14
+  |
+4 | #[fixture(foo, bar)]
+  |              ^
+
 error: #[fixture] takes no arguments other than `requires = [..]`
  --> tests/ui/fail-fixture-args-multiple.rs:4:11
   |

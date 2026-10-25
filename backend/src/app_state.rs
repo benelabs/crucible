@@ -104,7 +104,7 @@ mod tests {
     }
 
     fn test_services() -> SharedServices {
-        let app_config = AppConfig::load(Environment::Development).expect("config");
+        let app_config = AppConfig::load_isolated(Environment::Development).expect("config");
         SharedServices {
             metrics_exporter: Arc::new(MetricsExporter::new()),
             error_manager: Arc::new(ErrorManager::new()),

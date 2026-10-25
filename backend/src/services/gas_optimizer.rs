@@ -500,9 +500,13 @@ mod tests {
     #[test]
     fn test_analyze_bytecode_success() {
         let optimizer = GasOptimizer::new();
-        let bytecode = vec![0xFF, 0x50, 0x50, 0x50, 0x50, 0x03, 0x0B, 0x21];
+        // Realistic module: the pattern heuristics only fire above their minimum bytecode sizes.
+        let mut bytecode = vec![0xFFu8, 0x21];
+        bytecode.extend_from_slice(&[0x03, 0x0B, 0x03, 0x0B, 0x03, 0x0B]);
+        bytecode.extend_from_slice(&[0x50, 0x50, 0x50, 0x50, 0x50, 0x50, 0x50]);
+        bytecode.resize(600, 0x01);
         let result = optimizer.analyze_bytecode("0x123".to_string(), bytecode);
-        
+
         assert!(result.is_ok());
         let analysis = result.unwrap();
         assert_eq!(analysis.contract_address, "0x123");

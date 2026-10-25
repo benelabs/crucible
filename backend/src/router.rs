@@ -32,8 +32,6 @@ use crate::{
         idempotency::idempotency_middleware,
         logging::logging_middleware,
         request_id::request_id_middleware,
-        content_type::require_json_content_type, idempotency::idempotency_middleware,
-        logging::logging_middleware, request_id::request_id_middleware,
     },
     app_state::ApplicationStates,
     config::{
@@ -104,7 +102,9 @@ pub fn build_router(
             .with_db(db_pool.clone()),
     );
 
-    let dlq_coordinator = Arc::new(crate::workers::retry::DlqCoordinator::new(Arc::new(redis_client.clone())));
+    let dlq_coordinator = Arc::new(crate::workers::retry::DlqCoordinator::new(Arc::new(
+        redis_client.clone(),
+    )));
     let dlq_coordinator = Arc::new(crate::workers::retry::DlqCoordinator::new(Arc::new(
         redis_client.clone(),
     )));
@@ -141,16 +141,10 @@ pub fn build_router(
         .route("/system-stats", get(admin::get_system_stats))
         .route("/maintenance", post(admin::set_maintenance_mode))
         .route("/logs", get(admin::get_admin_logs))
-        .route("/users/:id/suspend", post(admin::suspend_user))
-        .route("/users/:id/revoke-role", post(admin::revoke_user_role))
-        .route_layer(middleware::from_fn_with_state(
-            admin_auth_state.clone(),
-            require_admin_auth,
-        ))
         .route("/users/suspend", post(admin::suspend_user))
         .route("/roles/revoke", post(admin::revoke_user_role))
         .route(
-            "/users/:id/role",
+            "/users/{id}/role",
             put(admin::update_user_role)
                 .post(admin::update_user_role)
                 .get(admin::get_user_role),
@@ -160,6 +154,10 @@ pub fn build_router(
             "/audit/role-elevations",
             get(admin::get_role_elevation_audit_logs),
         )
+        .route_layer(middleware::from_fn_with_state(
+            admin_auth_state.clone(),
+            require_admin_auth,
+        ))
         .with_state(profiling_state.clone());
 
     let cors = build_cors_layer(config);
@@ -290,7 +288,7 @@ pub fn build_router(
                 .route("/", get(get_dashboard))
                 .route("/metrics", get(dashboard::get_dashboard_metrics))
                 .route(
-                    "/contracts/:contract_id/stats",
+                    "/contracts/{contract_id}/stats",
                     get(dashboard::get_contract_stats),
                 )
                 .route(
@@ -320,14 +318,14 @@ pub fn build_router(
                 .route("/", post(coverage::submit_coverage))
                 .route("/lcov", post(coverage::submit_lcov_coverage))
                 .route(
-                    "/:contract_id/history",
+                    "/{contract_id}/history",
                     get(coverage::get_coverage_progression),
                 )
                 .route(
-                    "/progression/:contract_id",
+                    "/progression/{contract_id}",
                     get(coverage::get_coverage_progression),
                 )
-                .route("/:project", get(coverage::get_latest_coverage))
+                .route("/{project}", get(coverage::get_latest_coverage))
                 .with_state(coverage_state),
         )
         .nest(
@@ -340,13 +338,13 @@ pub fn build_router(
             "/api/v1/deployments",
             Router::new()
                 .route("/", post(deploy_health::create_deployment))
-                .route("/:id", get(deploy_health::get_deployment))
+                .route("/{id}", get(deploy_health::get_deployment))
                 .route(
-                    "/contract/:contract_id",
+                    "/contract/{contract_id}",
                     get(deploy_health::list_deployments_for_contract),
                 )
                 .route(
-                    "/:id/status",
+                    "/{id}/status",
                     axum::routing::patch(deploy_health::update_deployment_status),
                 )
                 .with_state(deploy_health_state),
@@ -487,8 +485,8 @@ mod tests {
         )
     }
 
-    #[test]
-    fn build_router_constructs_with_test_state() {
+    #[tokio::test]
+    async fn build_router_constructs_with_test_state() {
         // Constructing the router exercises every `.route`, `.nest`, and
         // `.layer` call. If any handler/state pairing is wrong, or any path
         // syntax is invalid, this panics at build time rather than at
@@ -565,18 +563,28 @@ mod tests {
 
     #[tokio::test]
     async fn build_router_protects_admin_user_mutations() {
-        let response = test_router()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/v1/admin/users/42/suspend")
-                    .method("POST")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from("{}"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        for uri in [
+            "/api/v1/admin/users/suspend",
+            "/api/v1/admin/roles/revoke",
+            "/api/v1/admin/users/42/role",
+        ] {
+            let response = test_router()
+                .oneshot(
+                    Request::builder()
+                        .uri(uri)
+                        .method("POST")
+                        .header("Content-Type", "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::UNAUTHORIZED,
+                "route {uri} must require admin auth"
+            );
+        }
     }
 }

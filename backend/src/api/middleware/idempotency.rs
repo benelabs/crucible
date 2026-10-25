@@ -316,7 +316,7 @@ pub async fn idempotency_middleware(
         .key(&cache_key)
         .arg(&completed_record)
         .arg(IDEMPOTENCY_TTL_SECONDS)
-        .invoke_async::<_, i32>(&mut conn)
+        .invoke_async::<i32>(&mut conn)
         .await?;
 
     let mut rebuilt = Response::from_parts(parts, Body::from(body_text));

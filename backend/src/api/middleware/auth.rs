@@ -726,6 +726,7 @@ mod tests {
                 id: 2,
                 address: "operator".into(),
                 role: Role::User,
+                organization_id: None,
             },
         );
         auth

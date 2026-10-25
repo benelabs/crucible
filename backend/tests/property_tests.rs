@@ -72,6 +72,7 @@ fn arb_compilation_result() -> impl Strategy<Value = CompilationResult> {
                     unoptimized_size_bytes: wasm_size_bytes,
                     compile_time_ms,
                     optimization: None,
+                    verification: None,
                 }
             },
         )

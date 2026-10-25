@@ -200,6 +200,7 @@ impl TestCoverageService {
             resolver.calculate_resolved_coverage(total_lines, hits);
 
         let report = NewTestCoverage {
+            contract_id: None,
             project_name: project_name.into(),
             branch: branch.into(),
             commit_sha: commit_sha.into(),

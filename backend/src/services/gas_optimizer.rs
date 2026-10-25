@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Represents a single gas optimization opportunity.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OptimizationOpportunity {
     pub id: String,
     pub optimization_type: String,
@@ -562,6 +562,8 @@ mod tests {
                     severity: OptimizationSeverity::Medium,
                 },
             ],
+            storage_footprint: None,
+            rent_projection: None,
         };
 
         let report = optimizer.generate_report(&result);

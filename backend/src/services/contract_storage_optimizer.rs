@@ -190,7 +190,7 @@ pub struct StorageDiffReport {
 pub fn serialize_datakey_to_canonical_xdr(key: &ScVal) -> Result<String, AppError> {
     let bytes = key
         .to_xdr(Limits::none())
-        .map_err(|e| AppError::Internal(format!("failed to serialize DataKey to XDR: {e}")))?;
+        .map_err(|e| AppError::InternalError(format!("failed to serialize DataKey to XDR: {e}")))?;
     Ok(STANDARD.encode(bytes))
 }
 
@@ -306,7 +306,7 @@ impl ContractStorageOptimizer {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
             .build()
-            .map_err(|e| AppError::Internal(format!("failed to build HTTP client: {e}")))?;
+            .map_err(|e| AppError::InternalError(format!("failed to build HTTP client: {e}")))?;
 
         let body = serde_json::json!({
             "jsonrpc": "2.0",
@@ -320,12 +320,12 @@ impl ContractStorageOptimizer {
             .json(&body)
             .send()
             .await
-            .map_err(|e| AppError::Internal(format!("failed to call Soroban RPC: {e}")))?;
+            .map_err(|e| AppError::InternalError(format!("failed to call Soroban RPC: {e}")))?;
 
         let val: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| AppError::Internal(format!("failed to parse Soroban RPC JSON: {e}")))?;
+            .map_err(|e| AppError::InternalError(format!("failed to parse Soroban RPC JSON: {e}")))?;
 
         DynamicStorageRentConfig::parse_rpc_latest_ledger(&val)
     }
@@ -434,7 +434,7 @@ impl ContractStorageOptimizer {
         .bind(i64::from(report.storage_entries_estimate))
         .bind(report.estimated_rent_savings_percent)
         .bind(&report.ttl_strategy)
-        .bind(serde_json::to_value(&report.recommendations).map_err(|e| AppError::Internal(e.to_string()))?)
+        .bind(serde_json::to_value(&report.recommendations).map_err(|e| AppError::InternalError(e.to_string()))?)
         .bind(report.generated_at)
         .execute(&self.db)
         .await;

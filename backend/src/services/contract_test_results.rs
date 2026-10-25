@@ -133,7 +133,7 @@ impl StoreTestRunRequest {
                 use sha2::Sha256;
 
                 let mut mac = Hmac::<Sha256>::new_from_slice(key)
-                    .map_err(|e| AppError::Internal(format!("invalid HMAC key: {e}")))?;
+                    .map_err(|e| AppError::InternalError(format!("invalid HMAC key: {e}")))?;
                 mac.update(expected_checksum.as_bytes());
                 mac.update(b"|");
                 mac.update(receipt.runner_id.as_bytes());

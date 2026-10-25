@@ -6,6 +6,7 @@ pub mod call_graph;
 pub mod checkpoint;
 pub mod cost;
 pub mod env;
+pub use crate::env::{MockEnv, MockEnvBuilder};
 #[cfg(test)]
 mod assertions_tests;
 #[cfg(test)]

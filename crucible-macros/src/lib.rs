@@ -907,6 +907,9 @@ mod tests {
             "Expected env: __crucible_env, got: {}",
             generated
         );
+    }
+
+    #[test]
     fn test_parse_fixture_args_empty() {
         let args = quote! {};
         let result = parse_fixture_args(args).expect("empty args should succeed");

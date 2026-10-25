@@ -26,6 +26,7 @@ pub enum GovernanceError {
     InsufficientPowerToDelegate = 17,
     VotingPowerUnderflow = 18,
     VotingPowerOverflow = 19,
+    CannotDelegateToSelf = 20,
 }
 
 #[contracttype]
@@ -319,6 +320,10 @@ impl Governance {
     ) -> Result<(), GovernanceError> {
         from.require_auth();
 
+        if from == to {
+            return Err(GovernanceError::CannotDelegateToSelf);
+        }
+
         if amount <= 0 {
             return Err(GovernanceError::InvalidDelegationAmount);
         }
@@ -399,7 +404,11 @@ impl PackedState {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{contract, contractimpl, IntoVal};
+    use soroban_sdk::{
+        contract, contractimpl,
+        testutils::{Address as _, Ledger as _},
+        IntoVal,
+    };
 
     #[contract]
     pub struct ActionTarget;
@@ -450,7 +459,7 @@ mod test {
                 &function,
                 &args,
             ),
-            Ok(Err(GovernanceError::InsufficientProposalPower))
+            Err(Ok(GovernanceError::InsufficientProposalPower))
         ));
 
         let proposal_id = client.create_proposal(
@@ -466,11 +475,27 @@ mod test {
 
         assert!(matches!(
             client.try_delegate_voting_power(&admin, &voter, &100_000i128),
-            Ok(Err(GovernanceError::CannotDelegateDuringActiveVote))
+            Err(Ok(GovernanceError::CannotDelegateDuringActiveVote))
         ));
 
         env.ledger().set_timestamp(deadline + 1);
         client.delegate_voting_power(&admin, &voter, &100_000i128);
+    }
+
+    #[test]
+    fn cannot_delegate_to_self() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, Governance);
+        let client = GovernanceClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.initialize(&admin, &1_000_000);
+
+        assert!(matches!(
+            client.try_delegate_voting_power(&admin, &admin, &100_000i128),
+            Err(Ok(GovernanceError::CannotDelegateToSelf))
+        ));
     }
 
     #[test]

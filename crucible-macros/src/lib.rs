@@ -645,8 +645,9 @@ fn expand_fixture_derive(input: DeriveInput) -> proc_macro2::TokenStream {
 ///
 /// # Generated code
 ///
-/// The body is moved into a closure that destructures the generated tuple, so
-/// parameter names and patterns work exactly as written:
+/// The body is moved into a closure with normalized tuple argument identifiers
+/// (`arg_0, arg_1, ...`) that are destructured in the block preamble, so
+/// parameter names, mutable bindings, and patterns work exactly as written:
 ///
 /// ```rust,ignore
 /// #[test]
@@ -654,7 +655,11 @@ fn expand_fixture_derive(input: DeriveInput) -> proc_macro2::TokenStream {
 ///     crucible::quickcheck::check::<(i64, i64), _>(
 ///         "addition_is_commutative",
 ///         crucible::quickcheck::Config { cases: 32, seed: Some(42), ..Default::default() },
-///         |(a, b)| { /* original body */ },
+///         |(arg_0, arg_1)| {
+///             let a = arg_0;
+///             let b = arg_1;
+///             /* original body */
+///         },
 ///     );
 /// }
 /// ```
@@ -788,8 +793,10 @@ fn expand_quickcheck(
     }
 
     // Split the parameter list into the patterns to destructure and the types
-    // to generate. A generated tuple is destructured back into the original
-    // patterns, so the body needs no rewriting.
+    // to generate. Function parameter patterns are normalized into fresh
+    // `arg_0, arg_1, ...` identifiers in the closure header, and destructured
+    // back into the original patterns via preamble `let #pat = #ident;` statements
+    // at the beginning of the inner test block.
     let mut patterns = Vec::new();
     let mut types = Vec::new();
     for arg in &sig.inputs {
@@ -806,6 +813,11 @@ fn expand_quickcheck(
             }
         }
     }
+
+    let arg_idents: Vec<syn::Ident> = (0..patterns.len())
+        .map(|i| syn::Ident::new(&format!("arg_{i}"), proc_macro2::Span::call_site()))
+        .collect();
+    let stmts = &block.stmts;
 
     let name = &sig.ident;
     let name_literal = name.to_string();
@@ -850,7 +862,10 @@ fn expand_quickcheck(
                     #max_depth
                     ..::core::default::Default::default()
                 },
-                |( #(#patterns,)* )| #block,
+                |( #(#arg_idents,)* )| {
+                    #( let #patterns = #arg_idents; )*
+                    #(#stmts)*
+                },
             );
         }
     })
@@ -974,6 +989,85 @@ mod tests {
         let err_msg = diagnostics(&err);
         assert!(err_msg.contains("#[fixture] takes no arguments other than `requires = [..]`"));
         assert!(err_msg.contains("note: expected syntax is `#[fixture(requires = [..])]`"));
+    }
+
+    #[test]
+    fn test_quickcheck_normalizes_patterns_and_emits_preamble() {
+        let input: syn::ItemFn = syn::parse_quote! {
+            fn test_patterns(mut x: u32, ref y: u32, (a, b): (u16, u16)) {
+                x += 1;
+                let _ = *y;
+                let _ = a + b;
+            }
+        };
+
+        let generated = expand_quickcheck(QuickcheckArgs::default(), input)
+            .expect("expansion should succeed")
+            .to_string();
+
+        // Closure header must use normalized fresh identifiers `arg_0, arg_1, arg_2`
+        assert!(
+            generated.contains("| (arg_0 , arg_1 , arg_2 ,) |"),
+            "Expected normalized closure args `| (arg_0 , arg_1 , arg_2 ,) |`, got: {generated}"
+        );
+
+        // Inner test block must start with preamble destructuring statements
+        assert!(
+            generated.contains("let mut x = arg_0 ;"),
+            "Expected preamble `let mut x = arg_0 ;`, got: {generated}"
+        );
+        assert!(
+            generated.contains("let ref y = arg_1 ;"),
+            "Expected preamble `let ref y = arg_1 ;`, got: {generated}"
+        );
+        assert!(
+            generated.contains("let (a , b) = arg_2 ;"),
+            "Expected preamble `let (a , b) = arg_2 ;`, got: {generated}"
+        );
+    }
+
+    #[test]
+    fn test_quickcheck_single_mut_parameter() {
+        let input: syn::ItemFn = syn::parse_quote! {
+            fn prop_single_mut(mut count: u32) {
+                count += 1;
+            }
+        };
+
+        let generated = expand_quickcheck(QuickcheckArgs::default(), input)
+            .expect("expansion should succeed")
+            .to_string();
+
+        assert!(
+            generated.contains("| (arg_0 ,) |"),
+            "Expected closure header `| (arg_0 ,) |`, got: {generated}"
+        );
+        assert!(
+            generated.contains("let mut count = arg_0 ;"),
+            "Expected preamble `let mut count = arg_0 ;`, got: {generated}"
+        );
+    }
+
+    #[test]
+    fn test_quickcheck_struct_pattern_destructuring() {
+        let input: syn::ItemFn = syn::parse_quote! {
+            fn prop_struct(Point { x, y }: Point) {
+                assert_eq!(x, y);
+            }
+        };
+
+        let generated = expand_quickcheck(QuickcheckArgs::default(), input)
+            .expect("expansion should succeed")
+            .to_string();
+
+        assert!(
+            generated.contains("| (arg_0 ,) |"),
+            "Expected closure header `| (arg_0 ,) |`, got: {generated}"
+        );
+        assert!(
+            generated.contains("let Point { x , y } = arg_0 ;"),
+            "Expected preamble `let Point {{ x , y }} = arg_0 ;`, got: {generated}"
+        );
     }
 }
 

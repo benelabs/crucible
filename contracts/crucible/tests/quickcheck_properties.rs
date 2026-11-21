@@ -219,6 +219,41 @@ fn parameters_may_be_destructured((low, high): (u8, u8)) {
     assert!(low <= high);
 }
 
+/// Mutable parameter bindings (`mut x: T`) are normalized and usable in the property body.
+#[crucible::quickcheck(cases = 16)]
+fn mutable_parameter_binding(mut count: SorobanU32) {
+    let initial = count.get();
+    count.0 = count.0.wrapping_add(1);
+    assert_eq!(count.get(), initial.wrapping_add(1));
+}
+
+/// Ref parameter bindings (`ref x: T`) bind a reference to the generated input.
+#[crucible::quickcheck(cases = 16)]
+fn ref_parameter_binding(ref value: SorobanU32) {
+    assert_eq!(*value, *value);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TestPair {
+    a: u32,
+    b: u32,
+}
+
+impl Arbitrary for TestPair {
+    fn arbitrary(rng: &mut crucible::quickcheck::Rng, size: u32) -> Self {
+        Self {
+            a: u32::arbitrary(rng, size),
+            b: u32::arbitrary(rng, size),
+        }
+    }
+}
+
+/// Struct pattern destructuring in the parameter list works seamlessly.
+#[crucible::quickcheck(cases = 16)]
+fn struct_pattern_destructuring(TestPair { a, b }: TestPair) {
+    assert_eq!(a.wrapping_add(b), b.wrapping_add(a));
+}
+
 /// The checkpoint engine and the property harness compose: each generated case
 /// can speculatively mutate the ledger and roll it back.
 #[crucible::quickcheck(cases = 32)]

@@ -1,3 +1,9 @@
+## [1.36.16](https://github.com/benelabs/crucible/compare/v1.36.15...v1.36.16) (2026-11-21)
+
+### Bug Fixes
+
+* **macros:** normalize parameter bindings in quickcheck macro ([#1063](https://github.com/benelabs/crucible/issues/1063)) ([5f1e498](https://github.com/benelabs/crucible/commit/5f1e498ebc0ff1832989be46e118952ced50cdcf)), closes [#pat](https://github.com/benelabs/crucible/issues/pat) [#ident](https://github.com/benelabs/crucible/issues/ident)
+
 ## [1.36.15](https://github.com/benelabs/crucible/compare/v1.36.14...v1.36.15) (2026-10-25)
 
 ### Bug Fixes

@@ -1,0 +1,36 @@
+name: Docs Check
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "*.md"
+      - "**/*.md"
+      - "docs/**"
+      - "CONTRIBUTING.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "scripts/check-docs.sh"
+      - ".github/workflows/docs-check.yml"
+  pull_request:
+    paths:
+      - "*.md"
+      - "**/*.md"
+      - "docs/**"
+      - "CONTRIBUTING.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "scripts/check-docs.sh"
+      - ".github/workflows/docs-check.yml"
+  schedule:
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  docs-check:
+    name: documentation hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check docs for placeholders and local paths
+        run: ./scripts/check-docs.sh

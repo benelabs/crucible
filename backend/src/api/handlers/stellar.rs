@@ -399,7 +399,7 @@ NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
 ACCOUNTS=[
   "GBBD67IF6I2E7E5NCTZTTG46YAKMBH2O7662T7O4B5XW4YVRE3L363C6"
 ]
-DOCUMENTATION_URL="https://github.com/your-org/crucible"
+DOCUMENTATION_URL="https://github.com/benelabs/crucible"
 
 [[CURRENCIES]]
 code="USDC"

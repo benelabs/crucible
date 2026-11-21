@@ -5,7 +5,7 @@ info:
   version: 0.1.0
   contact:
     name: Crucible Contributors
-    url: https://github.com/anumukul/crucible
+    url: https://github.com/benelabs/crucible
   license:
     name: MIT
 servers:

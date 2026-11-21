@@ -5,7 +5,9 @@
 [![Crates.io](https://img.shields.io/crates/v/crucible.svg)](https://crates.io/crates/crucible)
 [![Docs.rs](https://docs.rs/crucible/badge.svg)](https://docs.rs/crucible)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/your-org/crucible/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/crucible/actions)
+[![CI](https://github.com/benelabs/crucible/actions/workflows/ci.yml/badge.svg)](https://github.com/benelabs/crucible/actions/workflows/ci.yml)
+[![Backend CI](https://github.com/benelabs/crucible/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/benelabs/crucible/actions/workflows/backend-ci.yml)
+[![Security](https://github.com/benelabs/crucible/actions/workflows/security.yml/badge.svg)](https://github.com/benelabs/crucible/actions/workflows/security.yml)
 
 ---
 
@@ -1252,12 +1254,11 @@ Contributions are very welcome. crucible is designed to be contributor-friendly 
 - Add `assert_approx_eq!` macro with configurable tolerance
 - Write docs and usage examples for `SimulatedTx`
 - Add `env.events_matching()` ergonomics for programmatic event inspection
-- Set up GitHub Actions CI with `cargo test` and `cargo clippy`
 
 ### Getting started
 
 ```bash
-git clone https://github.com/your-org/crucible
+git clone https://github.com/benelabs/crucible.git
 cd crucible
 cargo test
 ```

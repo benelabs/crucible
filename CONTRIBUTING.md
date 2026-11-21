@@ -25,6 +25,20 @@ cargo build --package crucible --target wasm32-unknown-unknown
 
 text
 
+### Documentation checks
+
+`scripts/check-docs.sh` is a grep-based guard that rejects placeholder repository
+URLs, stale repository slugs, machine-specific absolute paths, and README badges
+that no longer point at the canonical repository's workflows. Run it locally
+before opening a PR:
+
+```sh
+./scripts/check-docs.sh
+```
+
+The same check runs in the `Docs Check` workflow on pull requests, on pushes to
+`main` that touch documentation, and weekly on `main`.
+
 ## Benchmarks
 
 Crucible uses [Criterion](https://github.com/bheisler/criterion.rs) for performance benchmarks. Benchmarks are located in:

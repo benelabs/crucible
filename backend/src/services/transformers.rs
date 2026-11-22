@@ -2,6 +2,12 @@ use serde_json::{Map, Value};
 
 pub struct DataTransformer;
 
+impl Default for DataTransformer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DataTransformer {
     pub fn new() -> Self {
         Self {}

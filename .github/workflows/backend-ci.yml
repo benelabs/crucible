@@ -1,30 +1,120 @@
-name: Backend CI/CD Pipeline
+name: Backend CI
+
+# This is the required status check for changes under backend/.
+# Keep the job name `backend` stable: branch protection refers to
+# "Backend CI / backend".
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'backend/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'backend/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - '.github/workflows/backend-ci.yml'
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  DATABASE_URL: postgres://postgres:postgres@localhost:5432/crucible_test
+  TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/crucible_test
+  REDIS_URL: redis://127.0.0.1:6379
+  TEST_REDIS_URL: redis://127.0.0.1:6379/1
+
 jobs:
-  check:
-    name: Minimal Backend Check
+  backend:
+    name: backend
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crucible_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d crucible_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        run: |
-          rustup toolchain install stable
-          rustup default stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-      - name: Verify backend
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: backend-ci
+
+      - name: Cache SQLx CLI
+        id: cache-sqlx-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/sqlx
+          key: sqlx-cli-0.8.6-${{ runner.os }}
+
+      - name: Install SQLx CLI
+        if: steps.cache-sqlx-cli.outputs.cache-hit != 'true'
+        run: cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features postgres,rustls
+
+      # Some unit tests connect with the `test:test` credentials used by
+      # backend/docker-compose.yml; the service container only creates postgres.
+      - name: Provision test database roles
         run: |
-          cargo check -p backend
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'test') THEN CREATE ROLE test LOGIN PASSWORD 'test'; END IF; END \$\$;"
+          psql "postgres://postgres:postgres@localhost:5432/postgres" -v ON_ERROR_STOP=1 -tc \
+            "SELECT 1 FROM pg_database WHERE datname = 'test'" | grep -q 1 || \
+          psql "postgres://postgres:postgres@localhost:5432/postgres" -v ON_ERROR_STOP=1 -c \
+            "CREATE DATABASE test OWNER test"
+
+      - name: Apply SQLx migrations
+        run: sqlx migrate run --source backend/migrations
+
+      - name: Verify SQLx strategy
+        run: ./backend/scripts/check-sqlx-strategy.sh
+
+      - name: Check formatting
+        run: cargo fmt -p backend -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy -p backend --all-targets -- -D warnings
+
+      - name: Check offline build (no DATABASE_URL, no services)
+        env:
+          DATABASE_URL: ''
+          SQLX_OFFLINE: 'true'
+        run: cargo check -p backend --all-targets
+
+      - name: Check build against migrated database
+        run: cargo check -p backend --all-targets
+
+      - name: Unit and integration tests
+        run: cargo test -p backend --all-features

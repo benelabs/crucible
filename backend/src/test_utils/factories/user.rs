@@ -10,19 +10,15 @@ use uuid::Uuid;
 /// User role in the system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Role {
     /// Regular user with basic permissions.
+    #[default]
     User,
     /// Moderator with content management permissions.
     Moderator,
     /// Administrator with full system access.
     Admin,
-}
-
-impl Default for Role {
-    fn default() -> Self {
-        Role::User
-    }
 }
 
 /// User domain model.

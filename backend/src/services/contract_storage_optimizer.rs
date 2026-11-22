@@ -322,10 +322,9 @@ impl ContractStorageOptimizer {
             .await
             .map_err(|e| AppError::InternalError(format!("failed to call Soroban RPC: {e}")))?;
 
-        let val: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| AppError::InternalError(format!("failed to parse Soroban RPC JSON: {e}")))?;
+        let val: serde_json::Value = resp.json().await.map_err(|e| {
+            AppError::InternalError(format!("failed to parse Soroban RPC JSON: {e}"))
+        })?;
 
         DynamicStorageRentConfig::parse_rpc_latest_ledger(&val)
     }

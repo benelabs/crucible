@@ -5,13 +5,13 @@
 
 #![allow(dead_code)]
 
+use crate::services::tracing::TracingService;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
-use tracing::{error, info, warn, instrument};
-use crate::services::tracing::TracingService;
+use tracing::{error, info, instrument, warn};
 
 /// Exponential backoff configuration
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -40,18 +40,17 @@ impl Default for BackoffConfig {
 impl BackoffConfig {
     /// Calculate delay for a given retry attempt
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
-        let mut delay = self.initial_delay_ms as f64
-            * self.multiplier.powi(attempt as i32);
-        
+        let mut delay = self.initial_delay_ms as f64 * self.multiplier.powi(attempt as i32);
+
         // Cap at max_delay_ms
         delay = delay.min(self.max_delay_ms as f64);
-        
+
         // Apply jitter: add random ±10% to prevent thundering herd
         if self.jitter {
             let jitter_factor = 0.9 + (rand::random::<f64>() * 0.2);
-            delay = delay * jitter_factor;
+            delay *= jitter_factor;
         }
-        
+
         Duration::from_millis(delay as u64)
     }
 }
@@ -104,7 +103,11 @@ impl ErrorManager {
     }
 
     #[instrument(skip(self), fields(service.name = "ErrorManager", service.method = "handle_error"))]
-    pub async fn handle_error(&self, error: RecoveryError, task_name: &str) -> Result<(), RecoveryError> {
+    pub async fn handle_error(
+        &self,
+        error: RecoveryError,
+        task_name: &str,
+    ) -> Result<(), RecoveryError> {
         let span = TracingService::service_method_span("ErrorManager", "handle_error");
         let _enter = span.enter();
 
@@ -114,7 +117,7 @@ impl ErrorManager {
         if let Some(task) = tasks.iter_mut().find(|t| t.name == task_name) {
             task.retries += 1;
             task.last_attempt = chrono::Utc::now().timestamp_millis();
-            
+
             if task.retries > task.max_retries {
                 error!(task = %task_name, "Max retries reached");
                 TracingService::record_error(
@@ -124,16 +127,16 @@ impl ErrorManager {
                 );
                 return Err(RecoveryError::MaxRetriesReached(task_name.to_string()));
             }
-            
+
             // Calculate exponential backoff with jitter
             let backoff_config = task.backoff_config.unwrap_or(self.backoff_config);
             let delay = backoff_config.calculate_delay(task.retries - 1);
-            
+
             info!(task = %task_name, retry = task.retries, delay_ms = delay.as_millis(), "Retrying task with backoff");
-            
+
             // Drop the write lock before sleeping
             drop(tasks);
-            
+
             // Wait before retrying
             sleep(delay).await;
         } else {
@@ -169,7 +172,10 @@ mod tests {
         let task_name = "test_task";
 
         manager
-            .handle_error(RecoveryError::Database("connection lost".to_string()), task_name)
+            .handle_error(
+                RecoveryError::Database("connection lost".to_string()),
+                task_name,
+            )
             .await
             .unwrap();
         assert_eq!(manager.get_active_tasks().await.len(), 1);

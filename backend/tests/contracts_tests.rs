@@ -69,7 +69,7 @@ async fn test_compile_endpoint_success() {
     let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(json["status"], "success");
     assert_eq!(json["data"]["status"], "success");
-    assert!(!json["data"]["wasmHash"].as_str().unwrap().is_empty());
+    assert!(!json["data"]["wasm_hash"].as_str().unwrap().is_empty());
 }
 
 #[tokio::test]

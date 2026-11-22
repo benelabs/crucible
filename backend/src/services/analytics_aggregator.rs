@@ -698,8 +698,8 @@ mod tests {
         assert_eq!(back.total_contracts, 10);
     }
 
-    #[test]
-    fn test_detect_anomaly_no_spike() {
+    #[tokio::test]
+    async fn test_detect_anomaly_no_spike() {
         let aggregator = AnalyticsAggregator::new(lazy_pool(), lazy_redis());
         let historical_gas = vec![1000.0, 1050.0, 980.0, 1020.0, 1010.0, 990.0];
         let current_gas = 1040.0;
@@ -707,8 +707,8 @@ mod tests {
         assert!(alert.is_none());
     }
 
-    #[test]
-    fn test_detect_anomaly_gas_spike() {
+    #[tokio::test]
+    async fn test_detect_anomaly_gas_spike() {
         let aggregator = AnalyticsAggregator::new(lazy_pool(), lazy_redis());
         // Stable baseline with mean ~1000.0, std dev ~14.14
         let historical_gas = vec![1000.0, 1010.0, 990.0, 1000.0, 1010.0, 990.0];

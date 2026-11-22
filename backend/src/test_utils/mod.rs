@@ -98,4 +98,3 @@ pub async fn setup() -> TestContext {
 pub mod db;
 
 pub use db::*;
-pub use factories::*;

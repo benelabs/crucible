@@ -1,10 +1,9 @@
 //! Integration tests for the Build Error Analytics Dashboard API
 
 use axum::http::StatusCode;
-use axum::Router;
-use backend::api::handlers::errors::{error_analytics_routes, BuildErrorDetail};
+use backend::api::handlers::errors::error_analytics_routes;
 use redis::Client as RedisClient;
-use sqlx::{Executor, PgPool};
+use sqlx::PgPool;
 use tower::ServiceExt; // for `oneshot` method
 
 #[tokio::test]
@@ -83,6 +82,6 @@ async fn test_build_error_analytics_with_data() {
         .unwrap();
     let analytics: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(analytics["total_errors"], 2);
-    assert!(analytics["error_types"].as_array().unwrap().len() > 0);
-    assert!(analytics["recent_errors"].as_array().unwrap().len() > 0);
+    assert!(!analytics["error_types"].as_array().unwrap().is_empty());
+    assert!(!analytics["recent_errors"].as_array().unwrap().is_empty());
 }

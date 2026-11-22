@@ -4,22 +4,18 @@ use crate::config::reload::ConfigManager;
 use crate::config::sanitize;
 use crate::error::AppError;
 use crate::services::contract_call_logger::ContractCallLogger;
-use axum::{
-    extract::{Path, State},
-    response::IntoResponse,
-    Json,
-};
-use chrono::{DateTime, Utc};
+use axum::{extract::State, response::IntoResponse, Json};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tracing::info;
 
 pub const SESSION_REVOCATION_CHANNEL: &str = "session:revocations";
 pub const DEFAULT_REVOCATION_TTL_SECS: u64 = 86_400; // 24 hours
 
+// Kept for the upcoming key-revocation admin endpoint.
+#[allow(dead_code)]
 async fn delete_matching_redis_keys(
     conn: &mut redis::aio::MultiplexedConnection,
     pattern: &str,
@@ -349,7 +345,7 @@ pub async fn get_system_stats(
         false
     };
 
-    let redis_connected = state.redis.get_async_connection().await.is_ok();
+    let redis_connected = state.redis.get_multiplexed_async_connection().await.is_ok();
 
     let total_calls = if let Some(ref pool) = state.db {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM contract_call_logs")

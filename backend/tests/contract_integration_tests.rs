@@ -63,7 +63,7 @@ async fn test_system_status_contract() {
 
 #[tokio::test]
 async fn test_profile_trigger_validation_success() {
-    let state = Arc::new(AppState {
+    let _state = Arc::new(AppState {
         db: None,
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
@@ -103,7 +103,7 @@ async fn test_profile_trigger_validation_success() {
 
 #[tokio::test]
 async fn test_profile_trigger_validation_failure() {
-    let state = Arc::new(AppState {
+    let _state = Arc::new(AppState {
         db: None,
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
@@ -146,7 +146,7 @@ async fn test_profile_trigger_validation_failure() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(json["code"], "VALIDATION_ERROR");
-    assert!(json["error"]
+    assert!(json["message"]
         .as_str()
         .unwrap()
         .contains("Validation failed"));

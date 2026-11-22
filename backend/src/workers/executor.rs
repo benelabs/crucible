@@ -44,7 +44,7 @@ pub fn handle_join_error(err: JoinError) -> AppError {
 /// # Example
 ///
 /// ```
-/// use crucible_backend::workers::executor::TaskExecutor;
+/// use backend::workers::executor::TaskExecutor;
 /// use std::time::Duration;
 ///
 /// #[tokio::main]
@@ -287,7 +287,7 @@ mod tests {
         // Execute 4 tasks that each take some time
         let mut handles = Vec::new();
 
-        for i in 0..4 {
+        for _i in 0..4 {
             let executor = executor.clone();
             let handle = executor.execute(Box::pin(async move {
                 sleep(Duration::from_millis(100)).await;
@@ -340,7 +340,7 @@ mod tests {
 
         // Start some long-running tasks
         let mut handles = Vec::new();
-        for i in 0..3 {
+        for _i in 0..3 {
             let executor = executor.clone();
             let handle = executor.execute(Box::pin(async move {
                 sleep(Duration::from_millis(200)).await;

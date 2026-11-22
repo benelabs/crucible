@@ -107,7 +107,7 @@ impl InternalGrpcService {
     }
 
     /// Process high-speed ping diagnostic request
-    pub async fn handle_ping(&self, req: PingRequest) -> Result<PingResponse, String> {
+    pub async fn handle_ping(&self, _req: PingRequest) -> Result<PingResponse, String> {
         let now = chrono::Utc::now().timestamp_millis();
         Ok(PingResponse {
             status: "OK".to_string(),

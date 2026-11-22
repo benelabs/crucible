@@ -1,21 +1,19 @@
 //! Integration tests for permissions middleware.
 
-use axum::{
-    body::Body,
-    extract::State,
-    http::{Request, StatusCode},
-    middleware,
-    response::IntoResponse,
-    routing::get,
-    Router,
-};
-use backend::api::middleware::permissions::{
-    AuthUser, Permission, PermissionChecker, PermissionState, Role,
-};
+use axum::{body::Body, http::Request, response::IntoResponse, routing::get, Router};
+use backend::api::middleware::permissions::{Permission, PermissionChecker, PermissionState, Role};
 use redis::Client as RedisClient;
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::{Mutex, MutexGuard};
 use tower::ServiceExt;
+
+// These tests share fixed users/permissions rows and Redis cache keys.
+static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+async fn test_lock() -> MutexGuard<'static, ()> {
+    TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await
+}
 
 async fn setup_test_env() -> (PgPool, RedisClient) {
     let db = PgPool::connect(&std::env::var("DATABASE_URL").unwrap_or_else(|_| {
@@ -97,6 +95,7 @@ async fn cleanup_test_data(db: &PgPool) {
 
 #[tokio::test]
 async fn test_permission_checker_has_permission() {
+    let _guard = test_lock().await;
     let (db, redis) = setup_test_env().await;
     cleanup_test_data(&db).await;
 
@@ -143,6 +142,7 @@ async fn test_permission_checker_has_permission() {
 
 #[tokio::test]
 async fn test_permission_checker_caching() {
+    let _guard = test_lock().await;
     let (db, redis) = setup_test_env().await;
     cleanup_test_data(&db).await;
 
@@ -186,6 +186,7 @@ async fn test_permission_checker_caching() {
 
 #[tokio::test]
 async fn test_permission_checker_invalidate_cache() {
+    let _guard = test_lock().await;
     let (db, redis) = setup_test_env().await;
     cleanup_test_data(&db).await;
 
@@ -215,6 +216,7 @@ async fn test_permission_checker_invalidate_cache() {
 
 #[tokio::test]
 async fn test_get_user_role() {
+    let _guard = test_lock().await;
     let (db, redis) = setup_test_env().await;
     cleanup_test_data(&db).await;
 
@@ -236,6 +238,7 @@ async fn test_get_user_role() {
 
 #[tokio::test]
 async fn test_middleware_with_permission() {
+    let _guard = test_lock().await;
     let (db, redis) = setup_test_env().await;
     cleanup_test_data(&db).await;
 
@@ -277,7 +280,7 @@ async fn test_middleware_with_permission() {
         .with_state(state);
 
     // Test without auth user - should fail
-    let response = app
+    let _response = app
         .clone()
         .oneshot(
             Request::builder()

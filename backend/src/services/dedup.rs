@@ -343,7 +343,9 @@ impl BuildDedupService {
         &self,
         request: BuildRequest,
     ) -> Result<DedupDecision, DedupError> {
-        let lock_ttl = self.config.compute_lock_ttl(request.crate_dependency_count());
+        let lock_ttl = self
+            .config
+            .compute_lock_ttl(request.crate_dependency_count());
         self.check_or_register_with_ttl(request, lock_ttl).await
     }
 
@@ -639,7 +641,7 @@ impl DedupHeartbeatGuard {
 
     /// Checks whether the heartbeat is currently active.
     pub fn is_active(&self) -> bool {
-        self.handle.as_ref().map_or(false, |h| !h.is_finished())
+        self.handle.as_ref().is_some_and(|h| !h.is_finished())
     }
 }
 
@@ -795,24 +797,40 @@ mod tests {
         let req_empty = BuildRequest::new("POST", "/build", json!({}));
         assert_eq!(req_empty.crate_dependency_count(), 0);
 
-        let req_array = BuildRequest::new("POST", "/build", json!({
-            "dependencies": ["syn", "quote", "proc-macro2", "serde"]
-        }));
+        let req_array = BuildRequest::new(
+            "POST",
+            "/build",
+            json!({
+                "dependencies": ["syn", "quote", "proc-macro2", "serde"]
+            }),
+        );
         assert_eq!(req_array.crate_dependency_count(), 4);
 
-        let req_obj = BuildRequest::new("POST", "/build", json!({
-            "dependencies": { "syn": "2.0", "serde": "1.0" }
-        }));
+        let req_obj = BuildRequest::new(
+            "POST",
+            "/build",
+            json!({
+                "dependencies": { "syn": "2.0", "serde": "1.0" }
+            }),
+        );
         assert_eq!(req_obj.crate_dependency_count(), 2);
 
-        let req_num = BuildRequest::new("POST", "/build", json!({
-            "dependency_count": 15
-        }));
+        let req_num = BuildRequest::new(
+            "POST",
+            "/build",
+            json!({
+                "dependency_count": 15
+            }),
+        );
         assert_eq!(req_num.crate_dependency_count(), 15);
 
-        let req_crate_deps = BuildRequest::new("POST", "/build", json!({
-            "crate_dependencies": ["dep1", "dep2", "dep3"]
-        }));
+        let req_crate_deps = BuildRequest::new(
+            "POST",
+            "/build",
+            json!({
+                "crate_dependencies": ["dep1", "dep2", "dep3"]
+            }),
+        );
         assert_eq!(req_crate_deps.crate_dependency_count(), 3);
     }
 

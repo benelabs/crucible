@@ -25,7 +25,6 @@ impl VulnerabilitySeverity {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RustSecAdvisory {
     pub id: String,
@@ -207,7 +206,11 @@ pub fn parse_dependency_graph(cargo_toml_content: &str) -> (String, HashMap<Stri
 
         // Support explicit dependency arrows: "A -> B -> C"
         if line.contains("->") {
-            let parts: Vec<&str> = line.split("->").map(str::trim).filter(|s| !s.is_empty()).collect();
+            let parts: Vec<&str> = line
+                .split("->")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
             for i in 0..parts.len().saturating_sub(1) {
                 let from = parts[i].to_string();
                 let to = parts[i + 1].to_string();
@@ -243,7 +246,10 @@ pub fn parse_dependency_graph(cargo_toml_content: &str) -> (String, HashMap<Stri
         // Package name
         if current_section == "package" && line.starts_with("name") {
             if let Some(eq_idx) = line.find('=') {
-                let val = line[eq_idx + 1..].trim().trim_matches('"').trim_matches('\'');
+                let val = line[eq_idx + 1..]
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'');
                 if !val.is_empty() {
                     root_pkg = val.to_string();
                     current_parent = root_pkg.clone();
@@ -259,7 +265,10 @@ pub fn parse_dependency_graph(cargo_toml_content: &str) -> (String, HashMap<Stri
                 let dep_name = dep_name_raw.trim().trim_matches('"').to_string();
                 let val = val_raw.trim();
 
-                graph.entry(current_parent.clone()).or_default().push(dep_name.clone());
+                graph
+                    .entry(current_parent.clone())
+                    .or_default()
+                    .push(dep_name.clone());
 
                 // Nested inline dependencies: dependencies = ["b", "c"]
                 if let Some(deps_idx) = val.find("dependencies") {
@@ -269,7 +278,10 @@ pub fn parse_dependency_graph(cargo_toml_content: &str) -> (String, HashMap<Stri
                         for item in inner.split(',') {
                             let nested = item.trim().trim_matches('"').trim_matches('\'').trim();
                             if !nested.is_empty() {
-                                graph.entry(dep_name.clone()).or_default().push(nested.to_string());
+                                graph
+                                    .entry(dep_name.clone())
+                                    .or_default()
+                                    .push(nested.to_string());
                             }
                         }
                     }
@@ -281,10 +293,19 @@ pub fn parse_dependency_graph(cargo_toml_content: &str) -> (String, HashMap<Stri
     if cargo_toml_content.contains("CYCLE_DETECTION_TEST")
         || cargo_toml_content.contains("dependency_a -> dependency_b -> dependency_a")
     {
-        graph.entry("dependency_a".to_string()).or_default().push("dependency_b".to_string());
-        graph.entry("dependency_b".to_string()).or_default().push("dependency_a".to_string());
+        graph
+            .entry("dependency_a".to_string())
+            .or_default()
+            .push("dependency_b".to_string());
+        graph
+            .entry("dependency_b".to_string())
+            .or_default()
+            .push("dependency_a".to_string());
         if !graph.contains_key(&root_pkg) {
-            graph.entry(root_pkg.clone()).or_default().push("dependency_a".to_string());
+            graph
+                .entry(root_pkg.clone())
+                .or_default()
+                .push("dependency_a".to_string());
         }
     }
 
@@ -302,11 +323,17 @@ impl DependencyAnalyzer {
     pub fn new(db: PgPool) -> Self {
         let advisories = Self::load_rustsec_database_cache();
         let deprecated_list = vec![
-            ("lazy_static", "Use std::sync::LazyLock or once_cell instead"),
+            (
+                "lazy_static",
+                "Use std::sync::LazyLock or once_cell instead",
+            ),
             ("rustc-serialize", "Use serde and serde_json instead"),
             ("net2", "Use socket2 or tokio::net instead"),
             ("gcc", "Use the cc crate instead"),
-            ("time", "Upgrade to time >= 0.3.0 to resolve RUSTSEC-2020-0071"),
+            (
+                "time",
+                "Upgrade to time >= 0.3.0 to resolve RUSTSEC-2020-0071",
+            ),
         ];
 
         Self {
@@ -394,17 +421,31 @@ impl DependencyAnalyzer {
                     deps.push(Dependency {
                         name,
                         version,
-                        source: current_source.take().unwrap_or_else(|| "crates.io".to_string()),
+                        source: current_source
+                            .take()
+                            .unwrap_or_else(|| "crates.io".to_string()),
                         dep_type: "transitive".to_string(),
                         status: "up-to-date".to_string(),
                     });
                 }
             } else if line.starts_with("name = ") {
-                current_name = Some(line.trim_start_matches("name = ").trim_matches('"').to_string());
+                current_name = Some(
+                    line.trim_start_matches("name = ")
+                        .trim_matches('"')
+                        .to_string(),
+                );
             } else if line.starts_with("version = ") {
-                current_version = Some(line.trim_start_matches("version = ").trim_matches('"').to_string());
+                current_version = Some(
+                    line.trim_start_matches("version = ")
+                        .trim_matches('"')
+                        .to_string(),
+                );
             } else if line.starts_with("source = ") {
-                current_source = Some(line.trim_start_matches("source = ").trim_matches('"').to_string());
+                current_source = Some(
+                    line.trim_start_matches("source = ")
+                        .trim_matches('"')
+                        .to_string(),
+                );
             }
         }
 
@@ -440,13 +481,17 @@ impl DependencyAnalyzer {
 
             for dep in &mut res.dependencies {
                 for adv in &self.advisories {
-                    if adv.package == dep.name && (dep.version.starts_with(&adv.affected_version_prefix) || dep.version == "1.0.0" || dep.name.contains("vulnerable")) {
+                    if adv.package == dep.name
+                        && (dep.version.starts_with(&adv.affected_version_prefix)
+                            || dep.version == "1.0.0"
+                            || dep.name.contains("vulnerable"))
+                    {
                         dep.status = "vulnerable".to_string();
                         vuln_reports.push(VulnerabilityReport {
                             advisory_id: adv.id.clone(),
                             package_name: dep.name.clone(),
                             installed_version: dep.version.clone(),
-                            severity: adv.severity.clone(),
+                            severity: adv.severity,
                             title: adv.title.clone(),
                             remediation: adv.remediation.clone(),
                             is_deprecated: false,
@@ -538,7 +583,12 @@ impl DependencyAnalyzer {
                     };
 
                     for adv in &self.advisories {
-                        if adv.package == name && (version.starts_with(&adv.affected_version_prefix) || version.contains("vulnerable") || name.contains("vulnerable") || cargo_toml_content.contains("VULNERABLE_TEST")) {
+                        if adv.package == name
+                            && (version.starts_with(&adv.affected_version_prefix)
+                                || version.contains("vulnerable")
+                                || name.contains("vulnerable")
+                                || cargo_toml_content.contains("VULNERABLE_TEST"))
+                        {
                             status = "vulnerable".to_string();
                             break;
                         }
@@ -602,12 +652,15 @@ impl DependencyAnalyzer {
 
         for dep in &dependencies {
             for adv in &self.advisories {
-                if adv.package == dep.name && (dep.version.starts_with(&adv.affected_version_prefix) || dep.status == "vulnerable") {
+                if adv.package == dep.name
+                    && (dep.version.starts_with(&adv.affected_version_prefix)
+                        || dep.status == "vulnerable")
+                {
                     vulnerabilities.push(VulnerabilityReport {
                         advisory_id: adv.id.clone(),
                         package_name: dep.name.clone(),
                         installed_version: dep.version.clone(),
-                        severity: adv.severity.clone(),
+                        severity: adv.severity,
                         title: adv.title.clone(),
                         remediation: adv.remediation.clone(),
                         is_deprecated: false,
@@ -701,9 +754,18 @@ mod tests {
         let res = service.analyze(content).await.unwrap();
 
         assert!(res.vulnerability_count >= 2);
-        assert!(res.vulnerabilities.iter().any(|v| v.severity == VulnerabilitySeverity::Critical));
-        assert!(res.vulnerabilities.iter().any(|v| v.severity == VulnerabilitySeverity::High));
-        assert!(res.vulnerabilities.iter().any(|v| v.remediation.contains("Upgrade")));
+        assert!(res
+            .vulnerabilities
+            .iter()
+            .any(|v| v.severity == VulnerabilitySeverity::Critical));
+        assert!(res
+            .vulnerabilities
+            .iter()
+            .any(|v| v.severity == VulnerabilitySeverity::High));
+        assert!(res
+            .vulnerabilities
+            .iter()
+            .any(|v| v.remediation.contains("Upgrade")));
     }
 
     #[tokio::test]
@@ -738,9 +800,15 @@ mod tests {
             source = "registry+https://github.com/rust-lang/crates.io-index"
         "#;
 
-        let res = service.analyze_with_lockfile(toml_content, Some(lock_content)).await.unwrap();
+        let res = service
+            .analyze_with_lockfile(toml_content, Some(lock_content))
+            .await
+            .unwrap();
         assert!(res.dependencies.iter().any(|d| d.name == "openssl"));
-        assert!(res.vulnerabilities.iter().any(|v| v.advisory_id == "RUSTSEC-2021-0139"));
+        assert!(res
+            .vulnerabilities
+            .iter()
+            .any(|v| v.advisory_id == "RUSTSEC-2021-0139"));
     }
 
     #[test]

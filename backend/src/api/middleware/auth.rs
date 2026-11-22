@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Request, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, StatusCode},
     middleware::Next,
     response::Response,
 };
@@ -357,8 +357,7 @@ impl AdminAuthState {
         };
         let ttl = expires_at
             .saturating_sub(chrono::Utc::now().timestamp())
-            .min(86_400)
-            .max(1) as u64;
+            .clamp(1, 86_400) as u64;
         let sessions_key = format!("user_sessions:{user_id}");
         let mut conn = redis
             .get_multiplexed_async_connection()
@@ -474,6 +473,7 @@ pub fn extract_bearer_token(request: &Request) -> Result<String, AuthHeaderError
 }
 
 /// Extract the bearer token from the `Authorization` header, if well-formed.
+#[allow(dead_code)]
 fn bearer_token(request: &Request) -> Option<String> {
     extract_bearer_token(request).ok()
 }
@@ -510,7 +510,7 @@ pub(crate) fn verify_hs256_jwt(
     mac.update(signing_input.as_bytes());
     let expected = mac.finalize().into_bytes();
     let actual = b64url_decode(signature)?;
-    if expected.as_slice() != actual.as_slice() {
+    if &expected[..] != actual.as_slice() {
         return None;
     }
 
@@ -707,7 +707,7 @@ async fn authorize_principal(principal: Principal, mut request: Request, next: N
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, middleware, routing::get, Router};
+    use axum::{body::Body, http::HeaderValue, middleware, routing::get, Router};
     use tower::ServiceExt; // for `oneshot`
 
     fn registry() -> AdminAuthState {

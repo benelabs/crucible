@@ -2,7 +2,6 @@ use backend::api::{
     handlers::graphql::{GraphQLFederationGateway, GraphQLRequest},
     middleware::rate_limit::{RateLimitConfig, TokenBucketRateLimiter},
 };
-use serde_json::json;
 
 #[tokio::test]
 async fn test_graphql_federation_introspection() {

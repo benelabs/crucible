@@ -3,7 +3,7 @@
 //! These tests require a running PostgreSQL instance and Redis instance.
 //! They can be run with: cargo test -p backend --test build_metrics_tests
 
-use backend::services::sys_metrics::{BuildMetric, BuildMetricsService, BuildStatus, MetricsError};
+use backend::services::sys_metrics::{BuildMetric, BuildMetricsService, BuildStatus};
 use chrono::Utc;
 use redis::Client as RedisClient;
 use rust_decimal_macros::dec;
@@ -247,7 +247,7 @@ async fn test_get_recent_metrics() {
     let service = BuildMetricsService::new(pool.clone(), redis);
 
     // Record metrics for different projects
-    let projects = vec!["project-a", "project-b", "project-c"];
+    let projects = ["project-a", "project-b", "project-c"];
     for (i, project) in projects.iter().enumerate() {
         let metric = BuildMetric {
             id: None,
@@ -280,7 +280,7 @@ async fn test_build_status_variations() {
 
     let service = BuildMetricsService::new(pool.clone(), redis);
 
-    let statuses = vec![
+    let statuses = [
         BuildStatus::Success,
         BuildStatus::Failed,
         BuildStatus::Cancelled,

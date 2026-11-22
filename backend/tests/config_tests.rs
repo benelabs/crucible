@@ -16,6 +16,7 @@ use redis::Client as RedisClient;
 use std::sync::Arc;
 use tower::ServiceExt;
 
+#[allow(dead_code)]
 fn test_state(config_manager: Arc<ConfigManager>) -> Arc<AppState> {
     let (log_aggregator, _receiver) = LogAggregator::new();
 
@@ -34,7 +35,7 @@ fn test_state(config_manager: Arc<ConfigManager>) -> Arc<AppState> {
 async fn test_config_get_endpoint() {
     let config = AppConfig::default();
     let config_manager = Arc::new(ConfigManager::new(config));
-    let state = Arc::new(AppState {
+    let _state = Arc::new(AppState {
         db: None,
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
@@ -64,7 +65,7 @@ async fn test_config_get_endpoint() {
 async fn test_config_reload_endpoint_no_file() {
     let config = AppConfig::default();
     let config_manager = Arc::new(ConfigManager::new(config));
-    let state = Arc::new(AppState {
+    let _state = Arc::new(AppState {
         db: None,
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),
@@ -88,9 +89,8 @@ async fn test_config_reload_endpoint_no_file() {
         .await
         .unwrap();
 
-    // Since config.json doesn't exist, it should return an error
-    // In our implementation, ConfigReloadError::Io maps to INTERNAL_SERVER_ERROR
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    // Reload succeeds from the embedded defaults even without a config.json.
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -112,8 +112,8 @@ async fn test_config_manager_patch() {
     let updated = config_manager.load();
     assert_eq!(updated.observability.log_level, "debug");
     assert_eq!(updated.server.port, 4000);
-    // Ensure other fields are preserved
-    assert_eq!(updated.server.host, "0.0.0.0");
+    // Ensure other fields are preserved (development defaults bind to loopback).
+    assert_eq!(updated.server.host, "127.0.0.1");
 }
 
 #[tokio::test]

@@ -87,7 +87,10 @@ impl SanitizedRedisConfig {
     fn from_original(redis: &RedisConfig) -> Self {
         Self {
             url: "[REDACTED]".to_string(),
-            job_queue_url: redis.job_queue_url.as_ref().map(|_| "[REDACTED]".to_string()),
+            job_queue_url: redis
+                .job_queue_url
+                .as_ref()
+                .map(|_| "[REDACTED]".to_string()),
             pool_size: redis.pool_size,
             connection_timeout_ms: redis.connection_timeout_ms,
             max_retries: redis.max_retries,
@@ -268,7 +271,10 @@ mod tests {
         let sanitized = sanitize(&config);
 
         if sanitized.redis.job_queue_url.is_some() {
-            assert_eq!(sanitized.redis.job_queue_url, Some("[REDACTED]".to_string()));
+            assert_eq!(
+                sanitized.redis.job_queue_url,
+                Some("[REDACTED]".to_string())
+            );
         } else {
             assert_eq!(sanitized.redis.job_queue_url, None);
         }
@@ -294,11 +300,10 @@ mod tests {
             .expect("Failed to load test config");
         let sanitized = sanitize(&config);
 
-        let json_str = serde_json::to_string_pretty(&sanitized)
-            .expect("Failed to serialize sanitized config");
+        let json_str =
+            serde_json::to_string_pretty(&sanitized).expect("Failed to serialize sanitized config");
 
         // Verify we can parse it back
-        let _: serde_json::Value =
-            serde_json::from_str(&json_str).expect("Invalid JSON produced");
+        let _: serde_json::Value = serde_json::from_str(&json_str).expect("Invalid JSON produced");
     }
 }

@@ -19,7 +19,10 @@ pub struct StructuredLog {
 /// Redacts sensitive query parameters (e.g. `token=`, `secret=`, `api_key=`, `password=`) from a query string.
 pub fn sanitize_query_string(query: &str) -> String {
     let re = SENSITIVE_CREDENTIALS_REGEX.get_or_init(|| {
-        Regex::new(r"(?i)(token|secret|api_key|apikey|password|auth|access_token)=([^& \t\r\n\x22]*)").unwrap()
+        Regex::new(
+            r"(?i)(token|secret|api_key|apikey|password|auth|access_token)=([^& \t\r\n\x22]*)",
+        )
+        .unwrap()
     });
     re.replace_all(query, "$1=[REDACTED]").to_string()
 }
@@ -40,7 +43,10 @@ pub fn sanitize_log_message(msg: &str) -> String {
     let sec_re = SECRET_KEY_REGEX.get_or_init(|| Regex::new(r"S[A-Z2-7]{55}").unwrap());
     let scrubbed = sec_re.replace_all(msg, "[REDACTED_SECRET_KEY]");
     let cred_re = SENSITIVE_CREDENTIALS_REGEX.get_or_init(|| {
-        Regex::new(r"(?i)(token|secret|api_key|apikey|password|auth|access_token)=([^& \t\r\n\x22]*)").unwrap()
+        Regex::new(
+            r"(?i)(token|secret|api_key|apikey|password|auth|access_token)=([^& \t\r\n\x22]*)",
+        )
+        .unwrap()
     });
     cred_re.replace_all(&scrubbed, "$1=[REDACTED]").to_string()
 }
@@ -166,7 +172,10 @@ pub async fn logging_middleware(
         // We don't want to block the response on logging persistence
         let aggregator = state.log_aggregator.clone();
         tokio::spawn(async move {
-            if let Err(e) = aggregator.log("INFO", &sanitized_message, "api_gateway").await {
+            if let Err(e) = aggregator
+                .log("INFO", &sanitized_message, "api_gateway")
+                .await
+            {
                 tracing::error!(error = %e, "Failed to send log to aggregator");
             }
         });
@@ -240,7 +249,7 @@ mod tests {
         assert!(result.contains("HTTP/1.1"));
         assert!(result.contains("X-User"));
     }
-    use crate::config::{reload::ConfigManager, AppConfig};
+
     use crate::services::{
         contract_benchmark::ContractBenchmarkService, error_recovery::ErrorManager,
         log_aggregator::LogAggregator, sys_metrics::MetricsExporter,
@@ -298,7 +307,12 @@ mod tests {
 
     #[test]
     fn test_format_structured_log_json() {
-        let json_str = format_structured_log("INFO", "trace-123", "User login success", serde_json::json!({"user_id": 42}));
+        let json_str = format_structured_log(
+            "INFO",
+            "trace-123",
+            "User login success",
+            serde_json::json!({"user_id": 42}),
+        );
         let parsed: StructuredLog = serde_json::from_str(&json_str).unwrap();
         assert_eq!(parsed.level, "INFO");
         assert_eq!(parsed.trace_id, "trace-123");

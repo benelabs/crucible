@@ -21,7 +21,7 @@ pub use dlq::{DeadLetterJob, DeadLetterQueue};
 pub use executor::TaskExecutor;
 pub use health::WorkerHealthMonitor;
 pub use progress::JobProgressTracker;
-pub use scheduler::{Scheduler, SchedulerHandle, JobContext, JobHandler, JobDefinition};
+pub use scheduler::{JobContext, JobDefinition, JobHandler, Scheduler, SchedulerHandle};
 pub use webhook::WebhookDispatcherWorker;
 
 use std::sync::Arc;
@@ -34,6 +34,12 @@ use tracing::{info, warn};
 pub struct ShutdownCoordinator {
     shutdown_tx: Arc<watch::Sender<bool>>,
     active_tasks: Arc<tokio::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+}
+
+impl Default for ShutdownCoordinator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ShutdownCoordinator {
@@ -75,10 +81,13 @@ impl ShutdownCoordinator {
             let _ = handle.await;
         });
 
-        info!("Waiting for active jobs to complete (grace period: {:?})...", grace_period);
+        info!(
+            "Waiting for active jobs to complete (grace period: {:?})...",
+            grace_period
+        );
         let wait_all = futures_util::future::join_all(futures);
 
-        if let Err(_) = tokio::time::timeout(grace_period, wait_all).await {
+        if tokio::time::timeout(grace_period, wait_all).await.is_err() {
             warn!("Grace period exceeded. Some tasks did not finish in time.");
         } else {
             info!("All registered tasks completed successfully.");
@@ -123,7 +132,7 @@ mod shutdown_tests {
         let coordinator = ShutdownCoordinator::new();
         let job_completed = Arc::new(AtomicBool::new(false));
         let job_completed_clone = job_completed.clone();
-        let mut rx = coordinator.subscribe();
+        let rx = coordinator.subscribe();
 
         let handle = tokio::spawn(async move {
             loop {
@@ -137,7 +146,9 @@ mod shutdown_tests {
         });
 
         coordinator.register(handle).await;
-        coordinator.shutdown_with_grace(Duration::from_millis(200)).await;
+        coordinator
+            .shutdown_with_grace(Duration::from_millis(200))
+            .await;
 
         assert!(job_completed.load(Ordering::SeqCst));
     }

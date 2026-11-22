@@ -7,7 +7,12 @@
 
 #![allow(dead_code)]
 
+use crate::services::tracing::TracingService;
 use chrono::{DateTime, Utc};
+use prometheus::{
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry,
+    TextEncoder,
+};
 use redis::{AsyncCommands, Client as RedisClient};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -17,11 +22,6 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
 use uuid::Uuid;
-use prometheus::{
-    Encoder, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
-    IntGaugeVec, Opts, Registry, TextEncoder,
-};
-use crate::services::tracing::TracingService;
 
 // ---------------------------------------------------------------------------
 // Prometheus System & Health Metrics Registry
@@ -39,6 +39,12 @@ pub struct PrometheusMetrics {
 
 static PROMETHEUS_METRICS: OnceLock<PrometheusMetrics> = OnceLock::new();
 
+impl Default for PrometheusMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PrometheusMetrics {
     pub fn new() -> Self {
         let registry = Registry::new();
@@ -54,13 +60,19 @@ impl PrometheusMetrics {
         .expect("compilation_duration_seconds histogram must be valid");
 
         let gas_usage_total = IntCounterVec::new(
-            Opts::new("contract_gas_usage_total", "Total contract execution gas consumed"),
+            Opts::new(
+                "contract_gas_usage_total",
+                "Total contract execution gas consumed",
+            ),
             &["contract_id", "function"],
         )
         .expect("contract_gas_usage_total counter must be valid");
 
         let gas_usage_average = IntGaugeVec::new(
-            Opts::new("contract_gas_usage_average", "Average gas used per invocation"),
+            Opts::new(
+                "contract_gas_usage_average",
+                "Average gas used per invocation",
+            ),
             &["contract_id"],
         )
         .expect("contract_gas_usage_average gauge must be valid");
@@ -72,7 +84,10 @@ impl PrometheusMetrics {
         .expect("active_websocket_connections gauge must be valid");
 
         let error_rates_total = IntCounterVec::new(
-            Opts::new("application_errors_total", "Total error count by component and error code"),
+            Opts::new(
+                "application_errors_total",
+                "Total error count by component and error code",
+            ),
             &["component", "error_type"],
         )
         .expect("application_errors_total counter must be valid");
@@ -87,12 +102,24 @@ impl PrometheusMetrics {
         )
         .expect("rpc_request_latency_seconds histogram must be valid");
 
-        registry.register(Box::new(compilation_duration_seconds.clone())).unwrap();
-        registry.register(Box::new(gas_usage_total.clone())).unwrap();
-        registry.register(Box::new(gas_usage_average.clone())).unwrap();
-        registry.register(Box::new(active_websockets.clone())).unwrap();
-        registry.register(Box::new(error_rates_total.clone())).unwrap();
-        registry.register(Box::new(rpc_latency_seconds.clone())).unwrap();
+        registry
+            .register(Box::new(compilation_duration_seconds.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(gas_usage_total.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(gas_usage_average.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(active_websockets.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(error_rates_total.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(rpc_latency_seconds.clone()))
+            .unwrap();
 
         Self {
             registry,
@@ -274,11 +301,8 @@ impl BuildMetricsService {
 
     /// Record a build metric.
     pub async fn record_build(&self, metric: BuildMetric) -> Result<Uuid, MetricsError> {
-        let db_span = TracingService::db_query_span(
-            "INSERT INTO build_metrics",
-            "postgres",
-            "INSERT",
-        );
+        let db_span =
+            TracingService::db_query_span("INSERT INTO build_metrics", "postgres", "INSERT");
         let _db_enter = db_span.enter();
 
         let id = Uuid::new_v4();
@@ -317,7 +341,7 @@ impl BuildMetricsService {
         Ok(id)
     }
 
-        /// Get metrics for a specific project.
+    /// Get metrics for a specific project.
     pub async fn get_project_metrics(
         &self,
         project_name: &str,
@@ -379,8 +403,7 @@ impl BuildMetricsService {
                     id: Some(id),
                     project_name,
                     build_id,
-                    build_status: BuildStatus::from_str(&status_str)
-                        .unwrap_or(BuildStatus::Failed),
+                    build_status: BuildStatus::from_str(&status_str).unwrap_or(BuildStatus::Failed),
                     compilation_time_ms,
                     dependency_count,
                     cache_hit_rate,
@@ -499,8 +522,7 @@ impl BuildMetricsService {
                     id: Some(id),
                     project_name,
                     build_id,
-                    build_status: BuildStatus::from_str(&status_str)
-                        .unwrap_or(BuildStatus::Failed),
+                    build_status: BuildStatus::from_str(&status_str).unwrap_or(BuildStatus::Failed),
                     compilation_time_ms,
                     dependency_count,
                     cache_hit_rate,
@@ -514,7 +536,7 @@ impl BuildMetricsService {
         Ok(metrics)
     }
 
-/// Delete all metrics for a project.
+    /// Delete all metrics for a project.
     pub async fn delete_project_metrics(&self, project_name: &str) -> Result<u64, MetricsError> {
         let result = sqlx::query("DELETE FROM build_metrics WHERE project_name = $1")
             .bind(project_name)
@@ -534,7 +556,7 @@ impl BuildMetricsService {
 
     async fn invalidate_project_cache(&self, project_name: &str) -> Result<(), MetricsError> {
         let mut conn = self.redis.get_multiplexed_async_connection().await?;
-        
+
         let pattern = format!("build_metrics:{}:*", project_name);
         let keys: Vec<String> = redis::cmd("KEYS")
             .arg(&pattern)
@@ -548,7 +570,7 @@ impl BuildMetricsService {
         if !keys.is_empty() {
             let key_count = keys.len();
             for key in &keys {
-                let _: () = conn.del(&key).await?;
+                let _: () = conn.del(key).await?;
             }
             debug!(project = %project_name, count = key_count, "Invalidated project cache");
             debug!(project = %project_name, count = keys.len(), "Invalidated project cache");
@@ -703,7 +725,8 @@ impl SystemHardwareProbeManager {
 
     /// Refresh hardware stats (called only by periodic background worker, never on HTTP scrape).
     pub async fn refresh_probes(&self) {
-        self.probe_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.probe_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (rss, heap) = get_linux_memory_stats();
         let mut metrics = self.cached_metrics.write().await;
         metrics.cpu_usage = 12.5;
@@ -715,7 +738,8 @@ impl SystemHardwareProbeManager {
 
     /// Get total number of hardware probe executions.
     pub fn probe_executions(&self) -> u64 {
-        self.probe_counter.load(std::sync::atomic::Ordering::Relaxed)
+        self.probe_counter
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Spawn the periodic 5-second background refresh task.
@@ -881,4 +905,3 @@ mod tests {
         assert_eq!(metrics.memory_usage, 1024 * 1024 * 512);
     }
 }
-

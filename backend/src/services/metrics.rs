@@ -1,5 +1,5 @@
 use axum::{response::IntoResponse, routing::get, Router};
-use prometheus::{Encoder, TextEncoder, Registry, Counter};
+use prometheus::{Counter, Encoder, Registry, TextEncoder};
 
 pub struct MetricsService {
     pub registry: Registry,
@@ -62,10 +62,17 @@ pub fn inc_dropped_logs_metric() {
     dropped_logs_counter().inc();
 }
 
+impl Default for MetricsService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetricsService {
     pub fn new() -> Self {
         let registry = Registry::new();
-        let active_users = Counter::new("business_daily_active_users", "Daily active users").unwrap();
+        let active_users =
+            Counter::new("business_daily_active_users", "Daily active users").unwrap();
         let volume = Counter::new("business_volume_total", "Total business volume").unwrap();
         let pool_exhaustion = pool_exhaustion_counter().clone();
         let worker_job_dropped = worker_job_dropped_counter().clone();
@@ -96,7 +103,10 @@ pub async fn metrics_handler() -> impl IntoResponse {
     // Read the actual memory stats
     let (rss, _heap) = crate::services::sys_metrics::get_linux_memory_stats();
 
-    let opts = prometheus::Opts::new("process_resident_memory_bytes", "Resident set size in bytes");
+    let opts = prometheus::Opts::new(
+        "process_resident_memory_bytes",
+        "Resident set size in bytes",
+    );
     let rss_gauge = prometheus::IntGauge::with_opts(opts).unwrap();
     rss_gauge.set(rss as i64);
 

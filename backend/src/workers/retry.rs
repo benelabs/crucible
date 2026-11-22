@@ -111,7 +111,7 @@ impl<E> ShouldRetry<E> for bool {
 }
 
 /// Blanket implementation for closures `Fn(&E) -> bool`.
-impl<E, F: Fn(&E) -> bool> ShouldRetry<E, > for F {
+impl<E, F: Fn(&E) -> bool> ShouldRetry<E> for F {
     fn should_retry(&self, error: &E) -> bool {
         (self)(error)
     }
@@ -122,6 +122,7 @@ impl<E, F: Fn(&E) -> bool> ShouldRetry<E, > for F {
 // ---------------------------------------------------------------------------
 
 /// Outcome of a single attempt — used internally to drive the retry loop.
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Attempt<T, E> {
     Ok(T),
@@ -581,7 +582,7 @@ impl RetryPolicy {
     /// let policy = RetryPolicy::default();
     /// let _ = policy.retry_if(
     ///     || async { Err::<(), _>(MyError::Transient) },
-    ///     |e| matches!(e, MyError::Transient),
+    ///     |e: &MyError| matches!(e, MyError::Transient),
     /// ).await;
     /// # }
     /// ```
@@ -607,7 +608,11 @@ impl RetryPolicy {
 
         loop {
             attempt += 1;
-            debug!(attempt, max = self.max_attempts, "retry: attempting operation");
+            debug!(
+                attempt,
+                max = self.max_attempts,
+                "retry: attempting operation"
+            );
 
             match operation().await {
                 Ok(value) => {
@@ -850,7 +855,10 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(result, Err(RetryError::Aborted { attempts: 1, .. })));
+        assert!(matches!(
+            result,
+            Err(RetryError::Aborted { attempts: 1, .. })
+        ));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
@@ -879,7 +887,10 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(result, Err(RetryError::Aborted { attempts: 3, .. })));
+        assert!(matches!(
+            result,
+            Err(RetryError::Aborted { attempts: 3, .. })
+        ));
     }
 
     // ---- single attempt means no retries ----------------------------------
@@ -920,7 +931,10 @@ mod tests {
 
         let restored = RetryPolicy::from_config(cfg.clone());
         assert_eq!(restored.max_attempts, cfg.max_attempts);
-        assert_eq!(restored.base_delay, Duration::from_millis(cfg.base_delay_ms));
+        assert_eq!(
+            restored.base_delay,
+            Duration::from_millis(cfg.base_delay_ms)
+        );
         assert_eq!(restored.max_delay, Duration::from_millis(cfg.max_delay_ms));
     }
 
@@ -954,9 +968,15 @@ mod tests {
 
     #[test]
     fn retry_error_attempts_count() {
-        let e: RetryError<&str> = RetryError::Exhausted { attempts: 5, last_error: "x" };
+        let e: RetryError<&str> = RetryError::Exhausted {
+            attempts: 5,
+            last_error: "x",
+        };
         assert_eq!(e.attempts(), 5);
-        let a: RetryError<&str> = RetryError::Aborted { attempts: 2, last_error: "y" };
+        let a: RetryError<&str> = RetryError::Aborted {
+            attempts: 2,
+            last_error: "y",
+        };
         assert_eq!(a.attempts(), 2);
     }
 
@@ -1017,18 +1037,8 @@ mod tests {
         let max = Duration::from_millis(120);
         for seq in 0..100 {
             let delay = compute_jitter_delay(min, max, seq);
-            assert!(
-                delay >= min,
-                "delay {:?} should be >= min {:?}",
-                delay,
-                min
-            );
-            assert!(
-                delay <= max,
-                "delay {:?} should be <= max {:?}",
-                delay,
-                max
-            );
+            assert!(delay >= min, "delay {:?} should be >= min {:?}", delay, min);
+            assert!(delay <= max, "delay {:?} should be <= max {:?}", delay, max);
         }
     }
 

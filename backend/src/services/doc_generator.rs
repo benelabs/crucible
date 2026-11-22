@@ -716,7 +716,7 @@ mod tests {
         "#;
 
         let doc = service.generate("TestContract", source).await.unwrap();
-        assert!(doc.functions.len() > 0);
+        assert!(!doc.functions.is_empty());
         assert!(!doc.functions[0].description.contains("<script>"));
         assert!(doc.functions[0].description.contains("&lt;script&gt;"));
     }
@@ -753,8 +753,8 @@ mod tests {
         assert!(!d.returns.is_empty());
     }
 
-    #[test]
-    fn test_markdown_generation_includes_types() {
+    #[tokio::test]
+    async fn test_markdown_generation_includes_types() {
         let doc = ContractDoc {
             contract_name: "TokenContract".to_string(),
             version: "0.1.0".to_string(),

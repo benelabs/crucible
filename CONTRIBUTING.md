@@ -39,6 +39,25 @@ before opening a PR:
 The same check runs in the `Docs Check` workflow on pull requests, on pushes to
 `main` that touch documentation, and weekly on `main`.
 
+### Backend CI
+
+`Backend CI` (`.github/workflows/backend-ci.yml`) is the required status check
+for pull requests touching `backend/**`. Keep the `Backend CI / backend` job
+enabled in branch protection. It provisions PostgreSQL and Redis service
+containers, applies `backend/migrations` with `sqlx migrate run`, and enforces:
+
+```sh
+./backend/scripts/check-sqlx-strategy.sh
+cargo fmt -p backend -- --check
+cargo clippy -p backend --all-targets -- -D warnings
+SQLX_OFFLINE=true cargo check -p backend --all-targets
+cargo check -p backend --all-targets
+cargo test -p backend --all-features
+```
+
+The backend uses runtime-checked SQLx queries, so the offline check passes from
+a clean checkout. Compile-time query macros require a committed `.sqlx` cache.
+
 ## Benchmarks
 
 Crucible uses [Criterion](https://github.com/bheisler/criterion.rs) for performance benchmarks. Benchmarks are located in:

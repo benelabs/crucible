@@ -127,9 +127,25 @@ fn seccomp_profile_allows_the_syscalls_a_tokio_http_service_needs() {
     // deliberately broader than the issue's illustrative "read, write, exit,
     // futex" — that literal set cannot host an HTTP service at all.
     let required = [
-        "read", "write", "exit", "exit_group", "futex", "mmap", "munmap", "mprotect", "brk",
-        "clone", "clone3", "socket", "bind", "listen", "accept4", "epoll_wait", "epoll_ctl",
-        "close", "openat",
+        "read",
+        "write",
+        "exit",
+        "exit_group",
+        "futex",
+        "mmap",
+        "munmap",
+        "mprotect",
+        "brk",
+        "clone",
+        "clone3",
+        "socket",
+        "bind",
+        "listen",
+        "accept4",
+        "epoll_wait",
+        "epoll_ctl",
+        "close",
+        "openat",
     ];
 
     for syscall in required {
@@ -149,8 +165,8 @@ fn sandbox_resource_limits_match_the_dockerfile_env_defaults() {
     // accepts could still be rejected by the container's own env-configured
     // limits (or vice versa) — a silent policy drift, not a crash, so it
     // needs an explicit test rather than relying on a build failure.
-    let dockerfile_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../deployments/docker/sandbox.Dockerfile");
+    let dockerfile_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../deployments/docker/sandbox.Dockerfile");
     let dockerfile = fs::read_to_string(&dockerfile_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", dockerfile_path.display()));
 

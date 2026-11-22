@@ -322,7 +322,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(60)).await;
 
         let probe_result = cb.call(|| async { Err::<(), _>("probe_failed") }).await;
-        assert!(matches!(probe_result, Err(CircuitBreakerError::ServiceError(_))));
+        assert!(matches!(
+            probe_result,
+            Err(CircuitBreakerError::ServiceError(_))
+        ));
 
         // Circuit must immediately be Open again
         assert_eq!(cb.state_label().await, "open");

@@ -62,7 +62,7 @@ pub async fn execute_contract(
     // Validate args size and recursion depth if present
     if !request.args_xdr_base64.is_empty() {
         let args_size: usize = request.args_xdr_base64.iter().map(|s| s.len()).sum();
-        const MAX_ARGS_SIZE: usize = 1 * 1024 * 1024; // 1MB
+        const MAX_ARGS_SIZE: usize = 1024 * 1024; // 1MB
 
         if args_size > MAX_ARGS_SIZE {
             return Err(ApiError::Validation(format!(

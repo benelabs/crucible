@@ -1,7 +1,6 @@
 use crate::error::AppError;
-use sqlx::{postgres::PgPool, Pool, Postgres};
+use sqlx::postgres::PgPool;
 use std::env;
-use std::sync::Arc;
 use tokio::runtime::Handle;
 use uuid::Uuid;
 
@@ -32,10 +31,11 @@ pub async fn setup_test_db() -> Result<(PgPool, String), AppError> {
     let mut url = url::Url::parse(&database_url)?;
 
     // Extract the current database name
-    let db_name = url.path().trim_start_matches('/').to_string();
+    let _db_name = url.path().trim_start_matches('/').to_string();
 
     // Generate a unique test database name
-    let test_db_name = format!("crucible_test_{}", Uuid::new_v4());
+    // PostgreSQL identifiers cannot contain the hyphens in a hyphenated UUID.
+    let test_db_name = format!("crucible_test_{}", Uuid::new_v4().simple());
 
     // Connect to the default database (usually 'postgres') to create our test DB
     url.set_path("/postgres");
@@ -84,7 +84,8 @@ pub async fn teardown_test_db(pool: PgPool, db_name: &str) -> Result<(), AppErro
     pool.close().await;
 
     // Extract connection details to connect to admin database from the environment
-    let db_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set for test database teardown");
+    let db_url =
+        env::var("DATABASE_URL").expect("DATABASE_URL must be set for test database teardown");
     let mut url = url::Url::parse(&db_url)?;
 
     // Switch to admin database
@@ -184,7 +185,7 @@ mod tests {
         let db = TestDb::new().await.expect("Failed to create test database");
 
         // Verify we can query the database
-        let result = sqlx::query_scalar::<_, i64>("SELECT 1")
+        let result = sqlx::query_scalar::<_, i64>("SELECT 1::BIGINT")
             .fetch_one(&db.pool)
             .await
             .expect("Failed to query test database");
@@ -212,7 +213,7 @@ mod tests {
             .expect("Failed to create test database");
 
         // Verify we can query the database
-        let result = sqlx::query_scalar::<_, i64>("SELECT 1")
+        let result = sqlx::query_scalar::<_, i64>("SELECT 1::BIGINT")
             .fetch_one(&pool)
             .await
             .expect("Failed to query test database");

@@ -3,7 +3,6 @@
 
 use crate::test_utils::client::ApiTestClient;
 use axum::Router;
-use redis::AsyncCommands;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 

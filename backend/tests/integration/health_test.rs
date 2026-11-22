@@ -8,17 +8,30 @@ use axum::{
     http::{Request, StatusCode},
     Router,
 };
-use backend::api::handlers::health::{self, HealthState, LivenessResponse};
+use backend::api::handlers::health::{self, HealthState};
 use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
 use redis::Client as RedisClient;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use std::sync::OnceLock;
+use tokio::sync::{Mutex, MutexGuard};
 use tower::ServiceExt;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// The worker probes inspect shared Redis keys. Serialise the tests that add or
+// remove those keys so their expectations cannot race each other.
+static WORKER_STATE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+async fn worker_state_lock() -> MutexGuard<'static, ()> {
+    WORKER_STATE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .await
+}
 
 /// A pool whose queries will succeed (requires a reachable PostgreSQL).
 fn live_pool() -> PgPool {
@@ -79,6 +92,23 @@ async fn remove_worker_hb(conn: &mut ConnectionManager) {
     let _: Result<(), _> = conn.del("worker:health-test-worker:health").await;
 }
 
+/// Remove any worker heartbeat or consumer-set keys left by earlier runs.
+async fn clear_worker_state(conn: &mut ConnectionManager) {
+    for pattern in ["worker:*:health", "*:consumers"] {
+        let Ok(keys) = redis::cmd("KEYS")
+            .arg(pattern)
+            .query_async::<Vec<String>>(conn)
+            .await
+        else {
+            continue;
+        };
+
+        for key in keys {
+            let _: Result<(), _> = redis::cmd("DEL").arg(key).query_async(conn).await;
+        }
+    }
+}
+
 /// Parse the response body into a JSON value.
 async fn body_json(resp: axum::response::Response) -> serde_json::Value {
     let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
@@ -111,6 +141,7 @@ async fn liveness_returns_200() {
 
 #[tokio::test]
 async fn readiness_all_healthy() {
+    let _guard = worker_state_lock().await;
     let db = live_pool();
     let cache = live_redis().await;
     let mut queue = cache.clone();
@@ -192,12 +223,13 @@ async fn readiness_db_unavailable() {
 
 #[tokio::test]
 async fn readiness_queue_unavailable() {
+    let _guard = worker_state_lock().await;
     let db = live_pool();
     let cache = live_redis().await;
-    // Re-use the same Redis — no worker heartbeat or Apalis consumer set
-    // exists in the test namespace, so the queue probe will correctly
-    // report "down".
-    let queue = cache.clone();
+    // Re-use the same Redis, but clear worker markers left by other tests or
+    // earlier runs so the queue probe reports "down" deterministically.
+    let mut queue = cache.clone();
+    clear_worker_state(&mut queue).await;
 
     let state = HealthState {
         db,

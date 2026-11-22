@@ -13,10 +13,10 @@ use crate::services::contract_storage_optimizer::{
 use crate::services::contract_test_results::{
     ContractTestResultStorageService, StoreTestRunRequest,
 };
+use crate::services::contract_upgrade::{ContractUpgradeManager, ContractUpgradeRequest};
 use crate::services::contract_versioning::{
     ContractVersioningService, CreateContractVersionRequest, VersionDiffRequest,
 };
-use crate::services::contract_upgrade::{ContractUpgradeManager, ContractUpgradeRequest};
 use crate::services::dependency_analyzer::DependencyAnalyzer;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,21 +70,25 @@ pub async fn compile_contract(
     Json(payload): Json<CompileRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     // Validate payload size
-    validate_payload_size(&payload, state.config_manager.load().server.compile_max_size, "compile")?;
-    
+    validate_payload_size(
+        &payload,
+        state.config_manager.load().server.compile_max_size,
+        "compile",
+    )?;
+
     // Validate source code
     if payload.source_code.trim().is_empty() {
         return Err(AppError::ValidationError(
             "source_code cannot be empty".to_string(),
         ));
     }
-    
+
     if payload.source_code.len() > 1_000_000 {
         return Err(AppError::ValidationError(
             "source_code exceeds maximum size of 1MB".to_string(),
         ));
     }
-    
+
     // Validate project name
     if payload.project_name.trim().is_empty() {
         return Err(AppError::ValidationError(
@@ -139,7 +143,12 @@ pub async fn verify_bytecode(
             use base64::Engine;
             base64::engine::general_purpose::STANDARD
                 .decode(raw_str.trim())
-                .map_err(|e| AppError::ValidationError(format!("Invalid bytecode encoding (expected hex or base64): {}", e)))?
+                .map_err(|e| {
+                    AppError::ValidationError(format!(
+                        "Invalid bytecode encoding (expected hex or base64): {}",
+                        e
+                    ))
+                })?
         }
     } else {
         return Err(AppError::ValidationError(
@@ -156,19 +165,15 @@ fn validate_payload_size<T: serde::Serialize>(
     max_size: usize,
     endpoint: &str,
 ) -> Result<(), AppError> {
-    let size = serde_json::to_string(payload)
-        .map(|s| s.len())
-        .unwrap_or(0);
-    
+    let size = serde_json::to_string(payload).map(|s| s.len()).unwrap_or(0);
+
     if size > max_size {
-        return Err(AppError::ValidationError(
-            format!(
-                "Request payload for {} exceeds maximum size of {} bytes (got {} bytes)",
-                endpoint, max_size, size
-            ),
-        ));
+        return Err(AppError::ValidationError(format!(
+            "Request payload for {} exceeds maximum size of {} bytes (got {} bytes)",
+            endpoint, max_size, size
+        )));
     }
-    
+
     Ok(())
 }
 

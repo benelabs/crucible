@@ -138,8 +138,8 @@ impl ContractMonitor {
         alerts
             .iter()
             .filter(|a| {
-                contract_address.map_or(true, |addr| a.contract_address == addr)
-                    && resolved.map_or(true, |r| a.resolved == r)
+                contract_address.is_none_or(|addr| a.contract_address == addr)
+                    && resolved.is_none_or(|r| a.resolved == r)
             })
             .cloned()
             .collect()
@@ -269,21 +269,16 @@ mod tests {
 
         let mut count = 0;
         let alerts = monitor
-            .poll_contract_metrics(
-                "0xCADENCE",
-                Duration::from_millis(5),
-                3,
-                || {
-                    count += 1;
-                    async move {
-                        if count == 2 {
-                            0.10 // Triggers warning alert
-                        } else {
-                            0.01
-                        }
+            .poll_contract_metrics("0xCADENCE", Duration::from_millis(5), 3, || {
+                count += 1;
+                async move {
+                    if count == 2 {
+                        0.10 // Triggers warning alert
+                    } else {
+                        0.01
                     }
-                },
-            )
+                }
+            })
             .await;
 
         assert_eq!(alerts.len(), 1);

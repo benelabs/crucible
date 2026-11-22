@@ -2,8 +2,8 @@
 
 #![allow(dead_code)]
 
-use arc_swap::ArcSwap;
 use crate::services::tracing::TracingService;
+use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
 use redis::{AsyncCommands, Client as RedisClient};
 use serde::{Deserialize, Serialize};
@@ -102,7 +102,11 @@ impl FeatureFlagService {
         let cache_key = format!("flag:{key}");
 
         // 1. Try Redis cache first
-        let redis_result: Result<Option<String>, redis::RedisError> = match self.redis.get_multiplexed_async_connection().await {
+        let redis_result: Result<Option<String>, redis::RedisError> = match self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+        {
             Ok(mut conn) => {
                 let redis_span = TracingService::redis_command_span("GET", Some(&cache_key));
                 let _redis_enter = redis_span.enter();
@@ -366,4 +370,3 @@ mod tests {
         assert_eq!(local_cache.load().get("dark_mode"), None);
     }
 }
-

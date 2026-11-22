@@ -35,13 +35,13 @@ impl fmt::Display for ConfigError {
             ),
             ConfigError::LoadError(reason) => write!(f, "Failed to load configuration: {}", reason),
             ConfigError::ValidationError(errors) => {
-                write!(
+                writeln!(
                     f,
-                    "Configuration validation failed with {} errors:\n",
+                    "Configuration validation failed with {} errors:",
                     errors.len()
                 )?;
                 for (i, err) in errors.iter().enumerate() {
-                    write!(f, "  {}. {}\n", i + 1, err)?;
+                    writeln!(f, "  {}. {}", i + 1, err)?;
                 }
                 Ok(())
             }

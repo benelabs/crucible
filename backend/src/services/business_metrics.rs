@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tokio::sync::RwLock;
 use tracing::{error, info, instrument};
-use uuid::Uuid;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::error::AppError;
 
@@ -169,12 +169,18 @@ impl CumulativeMetricsAccumulator {
 
     /// Safely accumulate volume using checked addition, saturating at Decimal::MAX on overflow.
     pub fn add_volume(&mut self, volume: Decimal) {
-        self.cumulative_volume = self.cumulative_volume.checked_add(volume).unwrap_or(Decimal::MAX);
+        self.cumulative_volume = self
+            .cumulative_volume
+            .checked_add(volume)
+            .unwrap_or(Decimal::MAX);
     }
 
     /// Safely accumulate costs using checked addition, saturating at Decimal::MAX on overflow.
     pub fn add_cost(&mut self, cost: Decimal) {
-        self.cumulative_cost = self.cumulative_cost.checked_add(cost).unwrap_or(Decimal::MAX);
+        self.cumulative_cost = self
+            .cumulative_cost
+            .checked_add(cost)
+            .unwrap_or(Decimal::MAX);
     }
 
     /// Ingest a business metric and safely update cumulative accumulators.
@@ -250,12 +256,12 @@ impl BusinessMetricsService {
     ) -> Result<BusinessMetric, AppError> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        let name: String = name.into();
-        let unit: String = unit.into();
+        let name: String = name;
+        let unit: String = unit;
 
-        tracing::Span::current().record("metric_name", &name.as_str());
+        tracing::Span::current().record("metric_name", name.as_str());
 
-        let category_str = match &category {
+        let _category_str = match &category {
             MetricCategory::Revenue => "revenue".to_string(),
             MetricCategory::Costs => "costs".to_string(),
             MetricCategory::Users => "users".to_string(),
@@ -264,7 +270,7 @@ impl BusinessMetricsService {
             MetricCategory::Custom(s) => format!("custom:{}", s),
         };
 
-        let source_str = match &source {
+        let _source_str = match &source {
             MetricSource::OnChain => "on_chain",
             MetricSource::OffChain => "off_chain",
             MetricSource::Database => "database",
@@ -272,13 +278,13 @@ impl BusinessMetricsService {
             MetricSource::Manual => "manual",
         };
 
-        let tags_json = serde_json::to_value(&tags)
-            .map_err(|e| AppError::InternalError(e.to_string()))?;
+        let tags_json =
+            serde_json::to_value(&tags).map_err(|e| AppError::InternalError(e.to_string()))?;
 
-        let category_str = serde_json::to_string(&category)
-            .map_err(|e| AppError::InternalError(e.to_string()))?;
-        let source_str = serde_json::to_string(&source)
-            .map_err(|e| AppError::InternalError(e.to_string()))?;
+        let category_str =
+            serde_json::to_string(&category).map_err(|e| AppError::InternalError(e.to_string()))?;
+        let source_str =
+            serde_json::to_string(&source).map_err(|e| AppError::InternalError(e.to_string()))?;
         // Store Decimal as string to avoid sqlx type issues
         let value_str = value.to_string();
 
@@ -370,8 +376,8 @@ impl BusinessMetricsService {
                 MetricSource::Manual => "manual",
             };
 
-            let tags_json = serde_json::to_value(&tags)
-                .map_err(|e| AppError::InternalError(e.to_string()))?;
+            let tags_json =
+                serde_json::to_value(&tags).map_err(|e| AppError::InternalError(e.to_string()))?;
 
             sqlx::query(
                 r#"
@@ -424,34 +430,51 @@ impl BusinessMetricsService {
         let limit = query.limit.unwrap_or(100);
         let offset = query.offset.unwrap_or(0);
 
-        let total: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM business_metrics"
-        )
-        .fetch_one(&self.db)
-        .await
-        .map_err(AppError::Database)?;
-
-        // Build metrics from raw rows
-        let rows: Vec<(Uuid, String, Decimal, String, String, serde_json::Value, DateTime<Utc>, String)> =
-            sqlx::query_as(
-                "SELECT id, name, value, unit, category, tags, recorded_at, source \
-                 FROM business_metrics ORDER BY recorded_at DESC LIMIT $1 OFFSET $2",
-            )
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.db)
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM business_metrics")
+            .fetch_one(&self.db)
             .await
             .map_err(AppError::Database)?;
 
+        // Build metrics from raw rows
+        let rows: Vec<(
+            Uuid,
+            String,
+            Decimal,
+            String,
+            String,
+            serde_json::Value,
+            DateTime<Utc>,
+            String,
+        )> = sqlx::query_as(
+            "SELECT id, name, value, unit, category, tags, recorded_at, source \
+                 FROM business_metrics ORDER BY recorded_at DESC LIMIT $1 OFFSET $2",
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.db)
+        .await
+        .map_err(AppError::Database)?;
+
         let metrics = rows
             .into_iter()
-            .map(|(id, name, value, unit, category_str, tags_val, recorded_at, source_str)| {
-                let category = parse_category(&category_str);
-                let source = parse_source(&source_str);
-                let tags: HashMap<String, String> =
-                    serde_json::from_value(tags_val).unwrap_or_default();
-                BusinessMetric { id, name, value, unit, category, tags, recorded_at, source }
-            })
+            .map(
+                |(id, name, value, unit, category_str, tags_val, recorded_at, source_str)| {
+                    let category = parse_category(&category_str);
+                    let source = parse_source(&source_str);
+                    let tags: HashMap<String, String> =
+                        serde_json::from_value(tags_val).unwrap_or_default();
+                    BusinessMetric {
+                        id,
+                        name,
+                        value,
+                        unit,
+                        category,
+                        tags,
+                        recorded_at,
+                        source,
+                    }
+                },
+            )
             .collect();
 
         Ok((metrics, total))
@@ -529,23 +552,42 @@ impl BusinessMetricsService {
         }
 
         // Fall back to database
-        let row: Option<(Uuid, String, Decimal, String, String, serde_json::Value, DateTime<Utc>, String)> =
-            sqlx::query_as(
-                "SELECT id, name, value, unit, category, tags, recorded_at, source \
+        let row: Option<(
+            Uuid,
+            String,
+            Decimal,
+            String,
+            String,
+            serde_json::Value,
+            DateTime<Utc>,
+            String,
+        )> = sqlx::query_as(
+            "SELECT id, name, value, unit, category, tags, recorded_at, source \
                  FROM business_metrics WHERE name = $1 ORDER BY recorded_at DESC LIMIT 1",
-            )
-            .bind(name)
-            .fetch_optional(&self.db)
-            .await
-            .map_err(AppError::Database)?;
+        )
+        .bind(name)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(AppError::Database)?;
 
-        let metric = row.map(|(id, name, value, unit, category_str, tags_val, recorded_at, source_str)| {
-            let category = parse_category(&category_str);
-            let source = parse_source(&source_str);
-            let tags: HashMap<String, String> =
-                serde_json::from_value(tags_val).unwrap_or_default();
-            BusinessMetric { id, name, value, unit, category, tags, recorded_at, source }
-        });
+        let metric = row.map(
+            |(id, name, value, unit, category_str, tags_val, recorded_at, source_str)| {
+                let category = parse_category(&category_str);
+                let source = parse_source(&source_str);
+                let tags: HashMap<String, String> =
+                    serde_json::from_value(tags_val).unwrap_or_default();
+                BusinessMetric {
+                    id,
+                    name,
+                    value,
+                    unit,
+                    category,
+                    tags,
+                    recorded_at,
+                    source,
+                }
+            },
+        );
 
         Ok(metric)
     }
@@ -555,14 +597,12 @@ impl BusinessMetricsService {
     pub async fn prune_old_metrics(&self, retention_days: i64) -> Result<u64, AppError> {
         let cutoff = Utc::now() - Duration::days(retention_days);
 
-        let _deleted = sqlx::query(
-            "DELETE FROM business_metrics WHERE recorded_at < $1",
-        )
-        .bind(cutoff)
-        .execute(&self.db)
-        .await
-        .map_err(AppError::Database)?
-        .rows_affected();
+        let _deleted = sqlx::query("DELETE FROM business_metrics WHERE recorded_at < $1")
+            .bind(cutoff)
+            .execute(&self.db)
+            .await
+            .map_err(AppError::Database)?
+            .rows_affected();
         let result = sqlx::query("DELETE FROM business_metrics WHERE recorded_at < $1")
             .bind(cutoff)
             .execute(&self.db)
@@ -610,9 +650,7 @@ fn parse_category(s: &str) -> MetricCategory {
         "users" => MetricCategory::Users,
         "transactions" => MetricCategory::Transactions,
         "performance" => MetricCategory::Performance,
-        other => MetricCategory::Custom(
-            other.strip_prefix("custom:").unwrap_or(other).to_string(),
-        ),
+        other => MetricCategory::Custom(other.strip_prefix("custom:").unwrap_or(other).to_string()),
     }
 }
 

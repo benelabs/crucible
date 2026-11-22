@@ -3,11 +3,10 @@
 //! This module provides a comprehensive set of validation utilities for HTTP request
 //! data, including string, numeric, date/time, and custom business logic validation.
 
-use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
+use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
 
 /// Validation result type
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,10 +135,15 @@ impl StringValidator {
                 if regex::Regex::is_match(&re, value) {
                     ValidationResult::Valid
                 } else {
-                    ValidationResult::Invalid(format!("string does not match pattern '{}'", pattern))
+                    ValidationResult::Invalid(format!(
+                        "string does not match pattern '{}'",
+                        pattern
+                    ))
                 }
             }
-            Err(e) => ValidationResult::Error(format!("invalid regex pattern '{}': {}", pattern, e)),
+            Err(e) => {
+                ValidationResult::Error(format!("invalid regex pattern '{}': {}", pattern, e))
+            }
         }
     }
 
@@ -168,7 +172,9 @@ impl StringValidator {
         if value.chars().all(|c| c.is_alphanumeric()) {
             ValidationResult::Valid
         } else {
-            ValidationResult::Invalid("string must contain only alphanumeric characters".to_string())
+            ValidationResult::Invalid(
+                "string must contain only alphanumeric characters".to_string(),
+            )
         }
     }
 
@@ -187,7 +193,7 @@ pub struct NumberValidator;
 
 impl NumberValidator {
     /// Validate number is within range
-    pub fn range<T>(value: T, min: T, max: T) -> ValidationResult 
+    pub fn range<T>(value: T, min: T, max: T) -> ValidationResult
     where
         T: PartialOrd + Display + Copy,
     {
@@ -201,7 +207,7 @@ impl NumberValidator {
     }
 
     /// Validate number is positive
-    pub fn positive<T>(value: T) -> ValidationResult 
+    pub fn positive<T>(value: T) -> ValidationResult
     where
         T: PartialOrd + Display + Copy + From<u8>,
     {
@@ -213,7 +219,7 @@ impl NumberValidator {
     }
 
     /// Validate number is non-negative
-    pub fn non_negative<T>(value: T) -> ValidationResult 
+    pub fn non_negative<T>(value: T) -> ValidationResult
     where
         T: PartialOrd + Display + Copy + From<u8>,
     {
@@ -240,18 +246,18 @@ impl DateTimeValidator {
             "%Y-%m-%d %H:%M:%S%.fZ",
             "%Y-%m-%d %H:%M:%SZ",
         ];
-        
+
         for format in &formats {
             if let Ok(dt) = DateTime::parse_from_str(value, format) {
                 return Ok(dt.to_utc());
             }
         }
-        
+
         // Try ISO 8601 basic format
         if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
             return Ok(dt.to_utc());
         }
-        
+
         Err("could not parse datetime".to_string())
     }
 
@@ -289,7 +295,7 @@ pub struct CustomValidator;
 
 impl CustomValidator {
     /// Validate using custom function
-    pub fn custom<F, T>(value: T, validator: F, message: &str) -> ValidationResult 
+    pub fn custom<F, T>(value: T, validator: F, message: &str) -> ValidationResult
     where
         F: FnOnce(T) -> bool,
     {
@@ -322,7 +328,7 @@ impl ValidationHelpers {
         rules: HashMap<String, Vec<String>>,
     ) -> ValidationContext {
         let mut context = ValidationContext::new();
-        
+
         // Convert request to JSON for field access
         let json_value = match serde_json::to_value(request) {
             Ok(v) => v,
@@ -335,18 +341,14 @@ impl ValidationHelpers {
                 return context;
             }
         };
-        
+
         // Apply validation rules
         for (field, field_rules) in rules {
             if let Some(field_value) = json_value.get(&field) {
                 for rule in field_rules {
                     let result = Self::apply_rule(field_value, &rule);
                     if let ValidationResult::Invalid(msg) | ValidationResult::Error(msg) = result {
-                        context.add_error(ValidationError::new(
-                            field.clone(),
-                            rule.clone(),
-                            msg,
-                        ));
+                        context.add_error(ValidationError::new(field.clone(), rule.clone(), msg));
                     }
                 }
             } else {
@@ -358,7 +360,7 @@ impl ValidationHelpers {
                 ));
             }
         }
-        
+
         context
     }
 
@@ -366,7 +368,9 @@ impl ValidationHelpers {
     fn apply_rule(field_value: &serde_json::Value, rule: &str) -> ValidationResult {
         match rule {
             "required" => {
-                if field_value.is_null() || field_value.is_object() && field_value.as_object().unwrap().is_empty() {
+                if field_value.is_null()
+                    || field_value.is_object() && field_value.as_object().unwrap().is_empty()
+                {
                     ValidationResult::Invalid("field is required".to_string())
                 } else {
                     ValidationResult::Valid
@@ -401,52 +405,95 @@ impl ValidationHelpers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_string_length_validation() {
-        assert_eq!(StringValidator::length("hello", 3, 10), ValidationResult::Valid);
-        assert_eq!(StringValidator::length("hi", 3, 10), ValidationResult::Invalid("string length must be at least 3 characters".to_string()));
-        assert_eq!(StringValidator::length("hello world!", 3, 10), ValidationResult::Invalid("string length must be at most 10 characters".to_string()));
+        assert_eq!(
+            StringValidator::length("hello", 3, 10),
+            ValidationResult::Valid
+        );
+        assert_eq!(
+            StringValidator::length("hi", 3, 10),
+            ValidationResult::Invalid("string length must be at least 3 characters".to_string())
+        );
+        assert_eq!(
+            StringValidator::length("hello world!", 3, 10),
+            ValidationResult::Invalid("string length must be at most 10 characters".to_string())
+        );
     }
-    
+
     #[test]
     fn test_string_required_validation() {
         assert_eq!(StringValidator::required("hello"), ValidationResult::Valid);
-        assert_eq!(StringValidator::required(""), ValidationResult::Invalid("field is required".to_string()));
-        assert_eq!(StringValidator::required("   "), ValidationResult::Invalid("field is required".to_string()));
+        assert_eq!(
+            StringValidator::required(""),
+            ValidationResult::Invalid("field is required".to_string())
+        );
+        assert_eq!(
+            StringValidator::required("   "),
+            ValidationResult::Invalid("field is required".to_string())
+        );
     }
-    
+
     #[test]
     fn test_email_validation() {
-        assert_eq!(StringValidator::email("test@example.com"), ValidationResult::Valid);
-        assert_eq!(StringValidator::email("invalid-email"), ValidationResult::Invalid("string does not match pattern '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'".to_string()));
+        assert_eq!(
+            StringValidator::email("test@example.com"),
+            ValidationResult::Valid
+        );
+        assert_eq!(
+            StringValidator::email("invalid-email"),
+            ValidationResult::Invalid(
+                "string does not match pattern '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'"
+                    .to_string()
+            )
+        );
     }
-    
+
     #[test]
     fn test_number_range_validation() {
         assert_eq!(NumberValidator::range(5, 1, 10), ValidationResult::Valid);
-        assert_eq!(NumberValidator::range(0, 1, 10), ValidationResult::Invalid("value must be at least 1".to_string()));
-        assert_eq!(NumberValidator::range(15, 1, 10), ValidationResult::Invalid("value must be at most 10".to_string()));
+        assert_eq!(
+            NumberValidator::range(0, 1, 10),
+            ValidationResult::Invalid("value must be at least 1".to_string())
+        );
+        assert_eq!(
+            NumberValidator::range(15, 1, 10),
+            ValidationResult::Invalid("value must be at most 10".to_string())
+        );
     }
-    
+
     #[test]
     fn test_datetime_validation() {
         // Test valid datetime
-        assert_eq!(DateTimeValidator::past("2020-01-01T00:00:00Z"), ValidationResult::Valid);
-        
+        assert_eq!(
+            DateTimeValidator::past("2020-01-01T00:00:00Z"),
+            ValidationResult::Valid
+        );
+
         // Test future datetime
-        assert_eq!(DateTimeValidator::future("3000-01-01T00:00:00Z"), ValidationResult::Valid);
-        
+        assert_eq!(
+            DateTimeValidator::future("3000-01-01T00:00:00Z"),
+            ValidationResult::Valid
+        );
+
         // Test invalid format
-        assert!(matches!(DateTimeValidator::past("invalid-date"), ValidationResult::Error(_)));
+        assert!(matches!(
+            DateTimeValidator::past("invalid-date"),
+            ValidationResult::Error(_)
+        ));
     }
-    
+
     #[test]
     fn test_validation_context() {
         let mut context = ValidationContext::new();
         assert!(context.is_valid());
-        
-        context.add_error(ValidationError::new("email".to_string(), "email".to_string(), "invalid email".to_string()));
+
+        context.add_error(ValidationError::new(
+            "email".to_string(),
+            "email".to_string(),
+            "invalid email".to_string(),
+        ));
         assert!(!context.is_valid());
         assert_eq!(context.errors.len(), 1);
     }

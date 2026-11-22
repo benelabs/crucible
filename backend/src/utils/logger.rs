@@ -6,8 +6,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 /// Development uses a pretty formatter for readability, while staging and
 /// production emit JSON logs for easier ingestion by log pipelines.
 pub fn init_tracing(log_level: &str, env: Environment) {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
 
     let subscriber = tracing_subscriber::registry().with(filter);
 

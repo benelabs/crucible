@@ -89,10 +89,7 @@ fn test_production_missing_tls_validation() {
                 Some("postgres://user:pass@localhost/db"),
             ),
             ("APP_REDIS__URL", Some("redis://localhost:6379")),
-            (
-                "APP_CORS__ALLOWED_ORIGINS__0",
-                Some("https://example.com"),
-            ),
+            ("APP_CORS__ALLOWED_ORIGINS__0", Some("https://example.com")),
         ],
         || {
             let err = AppConfig::load(Environment::Production)
@@ -274,7 +271,9 @@ fn test_production_rejects_empty_cors_origins() {
             match err {
                 crate::config::ConfigError::ValidationError(errors) => {
                     assert!(
-                        errors.iter().any(|e| e.contains("CORS allowed_origins must not be empty")),
+                        errors
+                            .iter()
+                            .any(|e| e.contains("CORS allowed_origins must not be empty")),
                         "Expected CORS empty error, got: {:?}",
                         errors
                     );
@@ -293,13 +292,16 @@ fn test_cors_rejects_wildcard_with_credentials_in_development_and_staging() {
             ("APP_CORS__ALLOW_CREDENTIALS", Some("true")),
         ],
         || {
-            let err = AppConfig::load(Environment::Development)
-                .expect_err("Should fail with wildcard origin and allow_credentials=true in development");
+            let err = AppConfig::load(Environment::Development).expect_err(
+                "Should fail with wildcard origin and allow_credentials=true in development",
+            );
 
             match err {
                 crate::config::ConfigError::ValidationError(errors) => {
                     assert!(
-                        errors.iter().any(|e| e.contains("AllowOrigin::any() / '*' is strictly prohibited")),
+                        errors
+                            .iter()
+                            .any(|e| e.contains("AllowOrigin::any() / '*' is strictly prohibited")),
                         "Expected CORS wildcard with credentials error, got: {:?}",
                         errors
                     );

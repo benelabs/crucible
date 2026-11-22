@@ -262,7 +262,7 @@ impl ContractCallLogger {
             .bind(&log.arguments)
             .bind(&log.caller)
             .bind(&log.status)
-            .bind(&log.gas_used)
+            .bind(log.gas_used)
             .bind(log.timestamp.unwrap_or_else(chrono::Utc::now))
             .execute(db)
             .await;
@@ -310,7 +310,7 @@ impl ContractCallLogger {
         .bind(&log.arguments)
         .bind(&log.caller)
         .bind(&log.status)
-        .bind(&log.gas_used)
+        .bind(log.gas_used)
         .bind(log.timestamp.unwrap_or_else(Utc::now))
         .execute(&self.db)
         .await

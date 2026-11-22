@@ -10,6 +10,7 @@ use uuid::Uuid;
 /// Category of a product.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ProductCategory {
     Electronics,
     Clothing,
@@ -18,29 +19,20 @@ pub enum ProductCategory {
     Sports,
     Toys,
     Food,
+    #[default]
     Other,
-}
-
-impl Default for ProductCategory {
-    fn default() -> Self {
-        ProductCategory::Other
-    }
 }
 
 /// Availability status of a product.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum Availability {
+    #[default]
     InStock,
     LowStock,
     OutOfStock,
     Discontinued,
-}
-
-impl Default for Availability {
-    fn default() -> Self {
-        Availability::InStock
-    }
 }
 
 /// Product domain model.
@@ -92,7 +84,7 @@ impl Product {
             description: "A test product description".to_string(),
             price_cents: 999,
             category: ProductCategory::default(),
-            sku: format!("SKU-{}", &Uuid::new_v4().to_string()[..8].to_uppercase()),
+            sku: format!("SKU-{}", Uuid::new_v4().to_string()[..8].to_uppercase()),
             quantity: 100,
             availability: Availability::default(),
             weight_grams: Some(500),

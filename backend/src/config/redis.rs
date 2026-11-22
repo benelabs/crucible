@@ -57,7 +57,8 @@ impl RedisConfig {
         &self,
         client: &redis::Client,
     ) -> Result<redis::aio::ConnectionManager, redis::RedisError> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(self.startup_timeout_ms);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(self.startup_timeout_ms);
         let mut delay = std::time::Duration::from_millis(100);
         let max_delay = std::time::Duration::from_secs(5);
         let timeout = std::time::Duration::from_millis(self.connection_timeout_ms);
@@ -78,16 +79,21 @@ impl RedisConfig {
                 }
                 Ok(Err(e)) => {
                     tracing::warn!("Failed to connect to Redis on attempt {}: {:?}", attempt, e);
-                    if std::time::Instant::now() >= deadline || (self.max_retries > 0 && attempt >= self.max_retries) {
+                    if std::time::Instant::now() >= deadline
+                        || (self.max_retries > 0 && attempt >= self.max_retries)
+                    {
                         return Err(e);
                     }
                 }
                 Err(_) => {
                     tracing::warn!(
                         "Connection to Redis timed out on attempt {} (limit: {}ms)",
-                        attempt, self.connection_timeout_ms
+                        attempt,
+                        self.connection_timeout_ms
                     );
-                    if std::time::Instant::now() >= deadline || (self.max_retries > 0 && attempt >= self.max_retries) {
+                    if std::time::Instant::now() >= deadline
+                        || (self.max_retries > 0 && attempt >= self.max_retries)
+                    {
                         return Err(redis::RedisError::from((
                             redis::ErrorKind::IoError,
                             "Connection timed out",

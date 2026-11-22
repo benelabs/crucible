@@ -169,22 +169,31 @@ impl ContractVersioningService {
         request: VerifySourceCodeRequest,
     ) -> Result<ContractVerificationRecord, AppError> {
         if request.contract_id.trim().is_empty() {
-            return Err(AppError::ValidationError("contractId is required".to_string()));
+            return Err(AppError::ValidationError(
+                "contractId is required".to_string(),
+            ));
         }
         if request.git_repo_url.trim().is_empty() {
-            return Err(AppError::ValidationError("gitRepoUrl is required".to_string()));
+            return Err(AppError::ValidationError(
+                "gitRepoUrl is required".to_string(),
+            ));
         }
         if request.git_commit_hash.len() < 7 {
-            return Err(AppError::ValidationError("gitCommitHash must be at least 7 characters".to_string()));
+            return Err(AppError::ValidationError(
+                "gitCommitHash must be at least 7 characters".to_string(),
+            ));
         }
         if request.source_code.trim().is_empty() {
-            return Err(AppError::ValidationError("sourceCode is required".to_string()));
+            return Err(AppError::ValidationError(
+                "sourceCode is required".to_string(),
+            ));
         }
 
         let source_hash = sha256_hex(request.source_code.as_bytes());
 
         // Check for simulated compilation failure
-        let has_build_error = request.source_code.contains("COMPILE_ERROR") || request.source_code.contains("SYNTAX_ERROR");
+        let has_build_error = request.source_code.contains("COMPILE_ERROR")
+            || request.source_code.contains("SYNTAX_ERROR");
 
         let (status, actual_wasm_hash, build_logs) = if has_build_error {
             (
@@ -192,7 +201,8 @@ impl ContractVersioningService {
                 "".to_string(),
                 "error[E0425]: cannot find value in this scope
 Build failed in deterministic container.
-".to_string(),
+"
+                .to_string(),
             )
         } else {
             // Build deterministic WASM bytecode artifact representation
@@ -200,13 +210,21 @@ Build failed in deterministic container.
             build_hasher.update(request.source_code.as_bytes());
             build_hasher.update(request.rust_version.as_bytes());
             build_hasher.update(request.soroban_sdk_version.as_bytes());
-            let computed_hash = build_hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+            let computed_hash = build_hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>();
 
             // Allow matching if computed hash equals deployed hash OR if test specifies match
-            let is_match = computed_hash == request.deployed_wasm_hash || request.deployed_wasm_hash == source_hash;
+            let is_match = computed_hash == request.deployed_wasm_hash
+                || request.deployed_wasm_hash == source_hash;
 
             let (v_status, wasm_h) = if is_match {
-                (VerificationStatus::Verified, request.deployed_wasm_hash.clone())
+                (
+                    VerificationStatus::Verified,
+                    request.deployed_wasm_hash.clone(),
+                )
             } else {
                 (VerificationStatus::Mismatch, computed_hash)
             };
@@ -219,7 +237,11 @@ Build failed in deterministic container.
    Finished release [optimized] target
    Deterministic WASM SHA-256: {}
 ",
-                request.git_repo_url, request.git_commit_hash, request.rust_version, request.soroban_sdk_version, wasm_h
+                request.git_repo_url,
+                request.git_commit_hash,
+                request.rust_version,
+                request.soroban_sdk_version,
+                wasm_h
             );
 
             (v_status, wasm_h, logs)
@@ -227,25 +249,25 @@ Build failed in deterministic container.
 
         let badge = match status {
             VerificationStatus::Verified => VerificationBadge {
-                badge_url: format!("https://img.shields.io/badge/Crucible-Verified-brightgreen?logo=stellar"),
+                badge_url: "https://img.shields.io/badge/Crucible-Verified-brightgreen?logo=stellar".to_string(),
                 status_label: "verified".to_string(),
                 color: "#28a745".to_string(),
                 svg_markup: r##"<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#28a745"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Verified</text></svg>"##.to_string(),
             },
             VerificationStatus::Mismatch => VerificationBadge {
-                badge_url: format!("https://img.shields.io/badge/Crucible-Mismatch-red?logo=stellar"),
+                badge_url: "https://img.shields.io/badge/Crucible-Mismatch-red?logo=stellar".to_string(),
                 status_label: "mismatch".to_string(),
                 color: "#dc3545".to_string(),
                 svg_markup: r##"<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#dc3545"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Mismatch</text></svg>"##.to_string(),
             },
             VerificationStatus::BuildFailed => VerificationBadge {
-                badge_url: format!("https://img.shields.io/badge/Crucible-Build_Failed-critical?logo=stellar"),
+                badge_url: "https://img.shields.io/badge/Crucible-Build_Failed-critical?logo=stellar".to_string(),
                 status_label: "build-failed".to_string(),
                 color: "#ffc107".to_string(),
                 svg_markup: r##"<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#ffc107"/><text x="55" y="14" fill="#000" text-anchor="middle">Crucible: Build Failed</text></svg>"##.to_string(),
             },
             VerificationStatus::Pending => VerificationBadge {
-                badge_url: format!("https://img.shields.io/badge/Crucible-Pending-lightgrey?logo=stellar"),
+                badge_url: "https://img.shields.io/badge/Crucible-Pending-lightgrey?logo=stellar".to_string(),
                 status_label: "pending".to_string(),
                 color: "#6c757d".to_string(),
                 svg_markup: r##"<svg xmlns="http://www.w3.org/2000/svg" width="110" height="20"><rect width="110" height="20" fill="#6c757d"/><text x="55" y="14" fill="#fff" text-anchor="middle">Crucible: Pending</text></svg>"##.to_string(),
@@ -345,14 +367,12 @@ Build failed in deterministic container.
             .await
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
-        sqlx::query(
-            "UPDATE contract_versions SET verification_badge = $1 WHERE id = $2",
-        )
-        .bind(verification_badge)
-        .bind(version_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        sqlx::query("UPDATE contract_versions SET verification_badge = $1 WHERE id = $2")
+            .bind(verification_badge)
+            .bind(version_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         sqlx::query(
             "INSERT INTO deployment_logs (id, version_id, log, created_at) VALUES ($1, $2, $3, $4)",
@@ -421,13 +441,19 @@ Build failed in deterministic container.
         request: VerifyContractSourceRequest,
     ) -> Result<SourceVerificationResult, AppError> {
         if request.contract_id.trim().is_empty() {
-            return Err(AppError::ValidationError("contractId is required".to_string()));
+            return Err(AppError::ValidationError(
+                "contractId is required".to_string(),
+            ));
         }
         if request.source_code.trim().is_empty() {
-            return Err(AppError::ValidationError("sourceCode is required".to_string()));
+            return Err(AppError::ValidationError(
+                "sourceCode is required".to_string(),
+            ));
         }
         if request.on_chain_wasm_hash.trim().is_empty() {
-            return Err(AppError::ValidationError("onChainWasmHash is required".to_string()));
+            return Err(AppError::ValidationError(
+                "onChainWasmHash is required".to_string(),
+            ));
         }
 
         let source_hash = sha256_hex(request.source_code.as_bytes());
@@ -451,9 +477,21 @@ Build failed in deterministic container.
 
         let badge = SourceVerificationBadge {
             status: status.clone(),
-            badge_url: format!("https://img.shields.io/badge/soroban_source-{}-{}.svg", status, if is_verified { "brightgreen" } else { "red" }),
-            icon: if is_verified { "shield-check".to_string() } else { "shield-alert".to_string() },
-            color: if is_verified { "#10B981".to_string() } else { "#EF4444".to_string() },
+            badge_url: format!(
+                "https://img.shields.io/badge/soroban_source-{}-{}.svg",
+                status,
+                if is_verified { "brightgreen" } else { "red" }
+            ),
+            icon: if is_verified {
+                "shield-check".to_string()
+            } else {
+                "shield-alert".to_string()
+            },
+            color: if is_verified {
+                "#10B981".to_string()
+            } else {
+                "#EF4444".to_string()
+            },
         };
 
         let compiler_ver = request
@@ -472,7 +510,11 @@ Build failed in deterministic container.
             verification_id: Uuid::new_v4().to_string(),
             contract_id: request.contract_id,
             source_hash,
-            computed_wasm_hash: if is_verified { normalized_on_chain } else { computed_wasm_hash },
+            computed_wasm_hash: if is_verified {
+                normalized_on_chain
+            } else {
+                computed_wasm_hash
+            },
             on_chain_wasm_hash: request.on_chain_wasm_hash,
             is_verified,
             badge,
@@ -596,7 +638,11 @@ impl ParsedSemVer {
         // Split build metadata after '+'
         let (without_build, build_metadata) = match s.split_once('+') {
             Some((wb, build)) => {
-                if build.is_empty() || !build.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+                if build.is_empty()
+                    || !build
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+                {
                     return None;
                 }
                 (wb, Some(build.to_string()))
@@ -607,7 +653,11 @@ impl ParsedSemVer {
         // Split pre-release after '-'
         let (core, pre_release) = match without_build.split_once('-') {
             Some((c, pre)) => {
-                if pre.is_empty() || !pre.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '-') {
+                if pre.is_empty()
+                    || !pre
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '-')
+                {
                     return None;
                 }
                 (c, Some(pre.to_string()))
@@ -643,7 +693,11 @@ impl ParsedSemVer {
     /// Compare version precedence according to SemVer 2.0.0.
     /// Build metadata MUST be ignored when determining version precedence.
     pub fn cmp_precedence(&self, other: &Self) -> std::cmp::Ordering {
-        match (self.major.cmp(&other.major), self.minor.cmp(&other.minor), self.patch.cmp(&other.patch)) {
+        match (
+            self.major.cmp(&other.major),
+            self.minor.cmp(&other.minor),
+            self.patch.cmp(&other.patch),
+        ) {
             (std::cmp::Ordering::Equal, std::cmp::Ordering::Equal, std::cmp::Ordering::Equal) => {
                 match (&self.pre_release, &other.pre_release) {
                     (None, None) => std::cmp::Ordering::Equal,
@@ -704,7 +758,11 @@ pub fn major_version(version: &str) -> Option<u64> {
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
 }
 
 #[cfg(test)]
@@ -753,7 +811,8 @@ mod tests {
             rust_version: "1.79.0".to_string(),
             soroban_sdk_version: "21.0.0".to_string(),
             source_code: "pub fn genuine_code() {}".to_string(),
-            deployed_wasm_hash: "000000000000000000000000000000000000000000000000000000000000dead".to_string(),
+            deployed_wasm_hash: "000000000000000000000000000000000000000000000000000000000000dead"
+                .to_string(),
         };
 
         let result = service.verify_source_code(req).await.unwrap();
@@ -864,7 +923,8 @@ mod tests {
             .verify_contract_source(VerifyContractSourceRequest {
                 contract_id: "CABC123456789".to_string(),
                 source_code: source_code.to_string(),
-                on_chain_wasm_hash: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+                on_chain_wasm_hash:
+                    "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
                 compiler_version: None,
                 cargo_args: None,
             })
@@ -883,8 +943,12 @@ mod tests {
         let summary = service.decompile_wasm(wasm_bytes);
 
         assert!(summary.is_valid_wasm);
-        assert!(summary.exported_functions.contains(&"increment".to_string()));
-        assert!(summary.exported_functions.contains(&"get_count".to_string()));
+        assert!(summary
+            .exported_functions
+            .contains(&"increment".to_string()));
+        assert!(summary
+            .exported_functions
+            .contains(&"get_count".to_string()));
         assert!(summary.imported_functions.contains(&"env.call".to_string()));
         assert!(summary.decompiled_preview.contains("pub struct Contract;"));
     }

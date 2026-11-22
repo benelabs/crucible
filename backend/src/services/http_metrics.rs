@@ -1,7 +1,9 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use prometheus::{Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder};
+use prometheus::{
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
+};
 
 /// Check if a path segment is a dynamic parameter (UUID, numeric ID, hex hash, or address).
 pub fn is_dynamic_segment(segment: &str) -> bool {
@@ -81,6 +83,12 @@ pub struct HttpMetrics {
 }
 
 static HTTP_METRICS: OnceLock<HttpMetrics> = OnceLock::new();
+
+impl Default for HttpMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl HttpMetrics {
     pub fn new() -> Self {
@@ -182,13 +190,19 @@ mod tests {
     #[test]
     fn test_normalize_static_routes() {
         assert_eq!(normalize_route("/metrics"), "/metrics");
-        assert_eq!(normalize_route("/api/v1/profiling/health"), "/api/v1/profiling/health");
+        assert_eq!(
+            normalize_route("/api/v1/profiling/health"),
+            "/api/v1/profiling/health"
+        );
         assert_eq!(normalize_route("/"), "/");
     }
 
     #[test]
     fn test_normalize_trailing_slash_and_query() {
-        assert_eq!(normalize_route("/api/v1/contracts/550e8400-e29b-41d4-a716-446655440000/?foo=bar"), "/api/v1/contracts/:id/");
+        assert_eq!(
+            normalize_route("/api/v1/contracts/550e8400-e29b-41d4-a716-446655440000/?foo=bar"),
+            "/api/v1/contracts/:id/"
+        );
     }
 
     #[test]
@@ -201,6 +215,8 @@ mod tests {
 
         let rendered = metrics.render().unwrap();
         assert!(rendered.contains(r#"route="/api/v1/contracts/:id""#));
-        assert!(rendered.contains(r#"http_requests_total{method="GET",route="/api/v1/contracts/:id",status="200"} 100"#));
+        assert!(rendered.contains(
+            r#"http_requests_total{method="GET",route="/api/v1/contracts/:id",status="200"} 100"#
+        ));
     }
 }

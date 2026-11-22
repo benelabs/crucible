@@ -102,7 +102,11 @@ impl DeadLetterQueue {
         let json_data = serde_json::to_string(&job).map_err(AppError::Serialization)?;
         let hash_key = format!("{}:map", self.queue_key);
 
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
 
         let _: () = conn
             .hset(&hash_key, &job.id, &json_data)
@@ -119,7 +123,11 @@ impl DeadLetterQueue {
 
     /// Fetches all dead-lettered jobs up to `limit`.
     pub async fn list(&self, limit: isize) -> Result<Vec<DeadLetterJob>, AppError> {
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
 
         let job_ids: Vec<String> = conn
             .lrange(&self.queue_key, 0, limit - 1)
@@ -141,12 +149,21 @@ impl DeadLetterQueue {
 
     /// Retrieves a single dead letter job by ID.
     pub async fn get(&self, job_id: &str) -> Result<Option<DeadLetterJob>, AppError> {
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
         let hash_key = format!("{}:map", self.queue_key);
 
-        let json_str: Option<String> = conn.hget(&hash_key, job_id).await.map_err(AppError::Redis)?;
+        let json_str: Option<String> = conn
+            .hget(&hash_key, job_id)
+            .await
+            .map_err(AppError::Redis)?;
         match json_str {
-            Some(data) => Ok(Some(serde_json::from_str(&data).map_err(AppError::Serialization)?)),
+            Some(data) => Ok(Some(
+                serde_json::from_str(&data).map_err(AppError::Serialization)?,
+            )),
             None => Ok(None),
         }
     }
@@ -176,11 +193,21 @@ impl DeadLetterQueue {
             )));
         }
 
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
         let hash_key = format!("{}:map", self.queue_key);
 
-        let _: () = conn.hdel(&hash_key, job_id).await.map_err(AppError::Redis)?;
-        let _: () = conn.lrem(&self.queue_key, 0, job_id).await.map_err(AppError::Redis)?;
+        let _: () = conn
+            .hdel(&hash_key, job_id)
+            .await
+            .map_err(AppError::Redis)?;
+        let _: () = conn
+            .lrem(&self.queue_key, 0, job_id)
+            .await
+            .map_err(AppError::Redis)?;
 
         job.replay_count += 1;
         info!(
@@ -197,7 +224,11 @@ impl DeadLetterQueue {
         let json_data = serde_json::to_string(&job).map_err(AppError::Serialization)?;
         let quarantine_hash = format!("{}:map", self.quarantine_key);
 
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
 
         let _: () = conn
             .hset(&quarantine_hash, &job.id, &json_data)
@@ -210,8 +241,14 @@ impl DeadLetterQueue {
             .map_err(AppError::Redis)?;
 
         let dlq_hash = format!("{}:map", self.queue_key);
-        let _: () = conn.hdel(&dlq_hash, &job.id).await.map_err(AppError::Redis)?;
-        let _: () = conn.lrem(&self.queue_key, 0, &job.id).await.map_err(AppError::Redis)?;
+        let _: () = conn
+            .hdel(&dlq_hash, &job.id)
+            .await
+            .map_err(AppError::Redis)?;
+        let _: () = conn
+            .lrem(&self.queue_key, 0, &job.id)
+            .await
+            .map_err(AppError::Redis)?;
 
         warn!(
             job_id = %job.id,
@@ -224,7 +261,11 @@ impl DeadLetterQueue {
 
     /// Fetches all quarantined jobs up to `limit`.
     pub async fn list_quarantine(&self, limit: isize) -> Result<Vec<DeadLetterJob>, AppError> {
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
 
         let job_ids: Vec<String> = conn
             .lrange(&self.quarantine_key, 0, limit - 1)
@@ -248,23 +289,42 @@ impl DeadLetterQueue {
 
     /// Retrieves a single quarantined dead letter job by ID.
     pub async fn get_quarantined(&self, job_id: &str) -> Result<Option<DeadLetterJob>, AppError> {
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
         let hash_key = format!("{}:map", self.quarantine_key);
 
-        let json_str: Option<String> = conn.hget(&hash_key, job_id).await.map_err(AppError::Redis)?;
+        let json_str: Option<String> = conn
+            .hget(&hash_key, job_id)
+            .await
+            .map_err(AppError::Redis)?;
         match json_str {
-            Some(data) => Ok(Some(serde_json::from_str(&data).map_err(AppError::Serialization)?)),
+            Some(data) => Ok(Some(
+                serde_json::from_str(&data).map_err(AppError::Serialization)?,
+            )),
             None => Ok(None),
         }
     }
 
     /// Permanently deletes a job from the DLQ.
     pub async fn purge(&self, job_id: &str) -> Result<(), AppError> {
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
         let hash_key = format!("{}:map", self.queue_key);
 
-        let _: () = conn.hdel(&hash_key, job_id).await.map_err(AppError::Redis)?;
-        let _: () = conn.lrem(&self.queue_key, 0, job_id).await.map_err(AppError::Redis)?;
+        let _: () = conn
+            .hdel(&hash_key, job_id)
+            .await
+            .map_err(AppError::Redis)?;
+        let _: () = conn
+            .lrem(&self.queue_key, 0, job_id)
+            .await
+            .map_err(AppError::Redis)?;
 
         info!(job_id = %job_id, "Purged job from DLQ");
         Ok(())

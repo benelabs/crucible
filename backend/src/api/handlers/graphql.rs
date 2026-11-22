@@ -139,7 +139,14 @@ pub fn analyze_graphql_query(query: &str) -> Result<(usize, usize), String> {
             let ident: String = chars[start..i].iter().collect();
             let is_keyword = matches!(
                 ident.to_ascii_lowercase().as_str(),
-                "query" | "mutation" | "subscription" | "fragment" | "on" | "true" | "false" | "null"
+                "query"
+                    | "mutation"
+                    | "subscription"
+                    | "fragment"
+                    | "on"
+                    | "true"
+                    | "false"
+                    | "null"
             );
             if current_depth > 0 && !is_keyword {
                 complexity += 1;
@@ -160,6 +167,7 @@ pub fn analyze_graphql_query(query: &str) -> Result<(usize, usize), String> {
 /// GraphQL Federation Gateway Manager
 #[derive(Debug, Clone)]
 pub struct GraphQLFederationGateway {
+    #[allow(dead_code)]
     subgraphs: HashMap<SubgraphDomain, String>,
     pub max_depth: usize,
     pub max_complexity: usize,
@@ -168,10 +176,22 @@ pub struct GraphQLFederationGateway {
 impl Default for GraphQLFederationGateway {
     fn default() -> Self {
         let mut subgraphs = HashMap::new();
-        subgraphs.insert(SubgraphDomain::Contracts, "http://localhost:8081/graphql".to_string());
-        subgraphs.insert(SubgraphDomain::Governance, "http://localhost:8082/graphql".to_string());
-        subgraphs.insert(SubgraphDomain::Indexing, "http://localhost:8083/graphql".to_string());
-        subgraphs.insert(SubgraphDomain::Auth, "http://localhost:8084/graphql".to_string());
+        subgraphs.insert(
+            SubgraphDomain::Contracts,
+            "http://localhost:8081/graphql".to_string(),
+        );
+        subgraphs.insert(
+            SubgraphDomain::Governance,
+            "http://localhost:8082/graphql".to_string(),
+        );
+        subgraphs.insert(
+            SubgraphDomain::Indexing,
+            "http://localhost:8083/graphql".to_string(),
+        );
+        subgraphs.insert(
+            SubgraphDomain::Auth,
+            "http://localhost:8084/graphql".to_string(),
+        );
         Self {
             subgraphs,
             max_depth: DEFAULT_MAX_QUERY_DEPTH,
@@ -244,7 +264,8 @@ impl GraphQLFederationGateway {
                 return GraphQLResponse {
                     data: None,
                     errors: Some(vec![GraphQLError {
-                        message: "GraphQL introspection is disabled in production environment".to_string(),
+                        message: "GraphQL introspection is disabled in production environment"
+                            .to_string(),
                         path: None,
                     }]),
                 };
@@ -355,7 +376,9 @@ mod tests {
         assert!(resp.errors.is_some());
         let errors = resp.errors.unwrap();
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].message.contains("Query depth limit of 6 exceeded"));
+        assert!(errors[0]
+            .message
+            .contains("Query depth limit of 6 exceeded"));
     }
 
     #[tokio::test]
@@ -408,7 +431,9 @@ mod tests {
         assert!(resp.data.is_none());
         assert!(resp.errors.is_some());
         let errors = resp.errors.unwrap();
-        assert!(errors[0].message.contains("Query complexity limit of 5 exceeded"));
+        assert!(errors[0]
+            .message
+            .contains("Query complexity limit of 5 exceeded"));
     }
 
     #[tokio::test]

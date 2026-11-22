@@ -2,14 +2,13 @@ use axum::{
     extract::Request,
     http::{HeaderMap, HeaderValue, StatusCode},
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-    net::IpAddr,
 };
 
 /// Tiered rate limit quota configuration based on caller identity/tier
@@ -105,7 +104,11 @@ impl TokenBucketRateLimiter {
     }
 
     /// Check and consume a token with specific tiered RateLimitConfig
-    pub async fn check_and_consume_with_config(&self, key: &str, config: &RateLimitConfig) -> Result<RateLimitResult, String> {
+    pub async fn check_and_consume_with_config(
+        &self,
+        key: &str,
+        config: &RateLimitConfig,
+    ) -> Result<RateLimitResult, String> {
         let key_name = format!("rate_limit:{}", key);
 
         if let Some(client) = &self.redis_client {
@@ -183,8 +186,8 @@ impl TokenBucketRateLimiter {
 
         let elapsed = now.duration_since(bucket.last_refill).as_secs();
         if elapsed > 0 {
-            bucket.tokens = (bucket.tokens + elapsed * config.refill_rate_per_sec)
-                .min(config.capacity);
+            bucket.tokens =
+                (bucket.tokens + elapsed * config.refill_rate_per_sec).min(config.capacity);
             bucket.last_refill = now;
         }
 
@@ -365,7 +368,10 @@ pub fn extract_rate_limit_key(headers: &HeaderMap) -> String {
 
 /// Resolves the tier from request headers (checking subscription tier, API keys, or fallback to IP/anonymous)
 pub fn resolve_rate_limit_tier(headers: &HeaderMap) -> RateLimitTier {
-    if let Some(tier_str) = headers.get("x-subscription-tier").and_then(|h| h.to_str().ok()) {
+    if let Some(tier_str) = headers
+        .get("x-subscription-tier")
+        .and_then(|h| h.to_str().ok())
+    {
         match tier_str.to_lowercase().as_str() {
             "enterprise" => return RateLimitTier::Enterprise,
             "standard" | "pro" => return RateLimitTier::Standard,
@@ -384,10 +390,7 @@ pub fn resolve_rate_limit_tier(headers: &HeaderMap) -> RateLimitTier {
 }
 
 /// Axum Middleware function for Token Bucket Rate Limiting with IP & API Key Tiering
-pub async fn rate_limit_middleware(
-    request: Request,
-    next: Next,
-) -> Response {
+pub async fn rate_limit_middleware(request: Request, next: Next) -> Response {
     let key = extract_rate_limit_key(request.headers());
     let tier = resolve_rate_limit_tier(request.headers());
 
@@ -402,13 +405,13 @@ pub async fn rate_limit_middleware(
             let config = limiter.config().clone();
             (limiter, config)
         }
-        None => (
-            TokenBucketRateLimiter::global(),
-            tier.config(),
-        ),
+        None => (TokenBucketRateLimiter::global(), tier.config()),
     };
 
-    match limiter.check_and_consume_with_config(&key, &tier_config).await {
+    match limiter
+        .check_and_consume_with_config(&key, &tier_config)
+        .await
+    {
         Ok(result) => {
             if !result.allowed {
                 let mut response = crate::api::errors::make_error_response(
@@ -418,7 +421,8 @@ pub async fn rate_limit_middleware(
                 );
                 let response_headers = response.headers_mut();
                 response_headers.insert("X-RateLimit-Limit", HeaderValue::from(result.limit));
-                response_headers.insert("X-RateLimit-Remaining", HeaderValue::from(result.remaining));
+                response_headers
+                    .insert("X-RateLimit-Remaining", HeaderValue::from(result.remaining));
                 response_headers.insert("X-RateLimit-Reset", HeaderValue::from(result.reset_secs));
                 response_headers.insert("Retry-After", HeaderValue::from(result.reset_secs));
                 return response;
@@ -450,7 +454,7 @@ mod tests {
 
     #[test]
     fn test_parse_cidr_ipv6() {
-        let (mask, prefix) = parse_cidr("2001:db8::/32").unwrap();
+        let (_mask, prefix) = parse_cidr("2001:db8::/32").unwrap();
         assert_eq!(prefix, u128::MAX << (128 - 32));
     }
 
@@ -493,10 +497,16 @@ mod tests {
         let mut headers = HeaderMap::new();
         assert_eq!(extract_rate_limit_key(&headers), "ip:anonymous");
 
-        headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.5, 10.0.0.1"));
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("203.0.113.5, 10.0.0.1"),
+        );
         assert!(extract_rate_limit_key(&headers).contains("203.0.113.5"));
 
-        headers.insert("authorization", HeaderValue::from_static("Bearer secret-jwt"));
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer secret-jwt"),
+        );
         assert_eq!(extract_rate_limit_key(&headers), "token:secret-jwt");
 
         headers.insert("x-api-key", HeaderValue::from_static("api-key-123"));
@@ -544,15 +554,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limit_tiering_quota_enforcement() {
-        let mut headers_anon = HeaderMap::new();
-        assert_eq!(resolve_rate_limit_tier(&headers_anon), RateLimitTier::Anonymous);
+        let headers_anon = HeaderMap::new();
+        assert_eq!(
+            resolve_rate_limit_tier(&headers_anon),
+            RateLimitTier::Anonymous
+        );
 
         let mut headers_api = HeaderMap::new();
         headers_api.insert("x-api-key", HeaderValue::from_static("key-123"));
-        assert_eq!(resolve_rate_limit_tier(&headers_api), RateLimitTier::Standard);
+        assert_eq!(
+            resolve_rate_limit_tier(&headers_api),
+            RateLimitTier::Standard
+        );
 
         let mut headers_ent = HeaderMap::new();
-        headers_ent.insert("x-subscription-tier", HeaderValue::from_static("enterprise"));
-        assert_eq!(resolve_rate_limit_tier(&headers_ent), RateLimitTier::Enterprise);
+        headers_ent.insert(
+            "x-subscription-tier",
+            HeaderValue::from_static("enterprise"),
+        );
+        assert_eq!(
+            resolve_rate_limit_tier(&headers_ent),
+            RateLimitTier::Enterprise
+        );
     }
 }

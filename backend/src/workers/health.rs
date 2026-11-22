@@ -7,6 +7,7 @@ use tracing::{debug, error, info};
 /// Worker health monitor that tracks and reports worker status
 #[derive(Debug, Clone)]
 pub struct WorkerHealthMonitor {
+    #[allow(dead_code)]
     db_pool: PgPool,
     redis_client: Client,
     check_interval: Duration,

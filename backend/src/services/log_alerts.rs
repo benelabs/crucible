@@ -106,7 +106,9 @@ impl AlertRule {
     /// Validate that the rule has sensible configuration values and a valid regex pattern.
     pub fn validate(&self) -> Result<(), AlertError> {
         if self.name.trim().is_empty() {
-            return Err(AlertError::InvalidRule("name must not be empty".to_string()));
+            return Err(AlertError::InvalidRule(
+                "name must not be empty".to_string(),
+            ));
         }
         if self.pattern.trim().is_empty() {
             return Err(AlertError::InvalidRule(
@@ -122,7 +124,9 @@ impl AlertRule {
             ));
         }
         if let Err(e) = regex::Regex::new(&self.pattern) {
-            return Err(AlertError::InvalidRule(format!("invalid regex pattern: {e}")));
+            return Err(AlertError::InvalidRule(format!(
+                "invalid regex pattern: {e}"
+            )));
         }
         Ok(())
     }
@@ -557,7 +561,9 @@ mod tests {
         // Regex pattern with wildcards and word boundary
         let rule = make_rule(r"timeout:\s+\d+ms", 2, 60);
         manager.add_rule(rule).await.unwrap();
-        manager.evaluate(&make_entry("Database timeout: 500ms")).await;
+        manager
+            .evaluate(&make_entry("Database timeout: 500ms"))
+            .await;
         manager.evaluate(&make_entry("Cache timeout: 120ms")).await;
         let alerts = manager.get_alerts(None).await;
         assert_eq!(alerts.len(), 1);
@@ -567,10 +573,19 @@ mod tests {
     #[tokio::test]
     async fn test_async_evaluate_channel() {
         let manager = AlertManager::new();
-        manager.add_rule(make_rule("ASYNC_ERR", 2, 60)).await.unwrap();
-        
-        manager.evaluate_async(make_entry("ASYNC_ERR 1")).await.unwrap();
-        manager.evaluate_async(make_entry("ASYNC_ERR 2")).await.unwrap();
+        manager
+            .add_rule(make_rule("ASYNC_ERR", 2, 60))
+            .await
+            .unwrap();
+
+        manager
+            .evaluate_async(make_entry("ASYNC_ERR 1"))
+            .await
+            .unwrap();
+        manager
+            .evaluate_async(make_entry("ASYNC_ERR 2"))
+            .await
+            .unwrap();
 
         // Give background worker time to drain queue
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -584,7 +599,9 @@ mod tests {
     async fn test_non_matching_entry_does_not_fire() {
         let manager = AlertManager::new();
         manager.add_rule(make_rule("ERROR", 1, 60)).await.unwrap();
-        manager.evaluate(&make_entry("INFO everything is fine")).await;
+        manager
+            .evaluate(&make_entry("INFO everything is fine"))
+            .await;
         assert!(manager.get_alerts(None).await.is_empty());
     }
 

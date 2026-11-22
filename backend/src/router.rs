@@ -105,10 +105,7 @@ pub fn build_router(
     let dlq_coordinator = Arc::new(crate::workers::retry::DlqCoordinator::new(Arc::new(
         redis_client.clone(),
     )));
-    let dlq_coordinator = Arc::new(crate::workers::retry::DlqCoordinator::new(Arc::new(
-        redis_client.clone(),
-    )));
-    let _ = stellar::init_faucet_pool_with_redis(redis_client.clone());
+    stellar::init_faucet_pool_with_redis(redis_client.clone());
     let deploy_health_state = Arc::new(deploy_health::DeployHealthState::new(
         db_pool.clone(),
         redis_client.clone(),

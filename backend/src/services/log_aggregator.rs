@@ -71,7 +71,12 @@ impl LogAggregator {
     /// Non-blocking attempt to send a log entry.
     ///
     /// If the channel buffer is full, increments the `dropped_logs_total` counter and returns `Err(LogAggregatorError::BufferFull)`.
-    pub fn try_log(&self, level: &str, message: &str, service: &str) -> Result<(), LogAggregatorError> {
+    pub fn try_log(
+        &self,
+        level: &str,
+        message: &str,
+        service: &str,
+    ) -> Result<(), LogAggregatorError> {
         let entry = LogEntry {
             timestamp: Utc::now(),
             level: level.to_string(),
@@ -179,7 +184,9 @@ mod tests {
         let (aggregator, _receiver) = LogAggregator::new();
         // Should be able to buffer at least 1,000 items without blocking or dropping
         for i in 0..1000 {
-            assert!(aggregator.try_log("WARN", &format!("burst log {i}"), "api").is_ok());
+            assert!(aggregator
+                .try_log("WARN", &format!("burst log {i}"), "api")
+                .is_ok());
         }
         assert_eq!(aggregator.dropped_logs_total(), 0);
     }

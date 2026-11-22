@@ -25,7 +25,8 @@ async fn create_upgrade_plan_returns_ready_plan() {
         "compatibilityChecks": [
             { "name": "storage_layout", "passed": true, "notes": null },
             { "name": "public_interface", "passed": true, "notes": null },
-            { "name": "authorization", "passed": true, "notes": null }
+            { "name": "authorization", "passed": true, "notes": null },
+            { "name": "host_function_compatibility", "passed": true, "notes": null }
         ]
     });
 
@@ -70,7 +71,8 @@ async fn create_upgrade_plan_rejects_invalid_version_order() {
         "compatibilityChecks": [
             { "name": "storage_layout", "passed": true, "notes": null },
             { "name": "public_interface", "passed": true, "notes": null },
-            { "name": "authorization", "passed": true, "notes": null }
+            { "name": "authorization", "passed": true, "notes": null },
+            { "name": "host_function_compatibility", "passed": true, "notes": null }
         ]
     });
 

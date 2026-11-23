@@ -1,3 +1,9 @@
+## [1.36.18](https://github.com/benelabs/crucible/compare/v1.36.17...v1.36.18) (2026-11-23)
+
+### Bug Fixes
+
+* **contracts:** replace mock ZK verifier with real BN254 Groth16 verification ([e3a6823](https://github.com/benelabs/crucible/commit/e3a6823f3cb2c324c3c856cd43dabeb06b206c56)), closes [#1486](https://github.com/benelabs/crucible/issues/1486)
+
 ## [1.36.17](https://github.com/benelabs/crucible/compare/v1.36.16...v1.36.17) (2026-11-23)
 
 ### Bug Fixes

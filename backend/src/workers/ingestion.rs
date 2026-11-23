@@ -234,11 +234,9 @@ impl LedgerCursorStore for PostgresCursorStore {
         events: &[IngestionEvent],
         tx_logs: &[IngestionTransactionLog],
     ) -> Result<(), IngestionError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| IngestionError::CursorStore(format!("failed to begin transaction: {e}")))?;
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            IngestionError::CursorStore(format!("failed to begin transaction: {e}"))
+        })?;
 
         // Write contract events within atomic transaction
         for event in events {
@@ -281,7 +279,9 @@ impl LedgerCursorStore for PostgresCursorStore {
             .bind(log.gas_used)
             .execute(&mut *tx)
             .await
-            .map_err(|e| IngestionError::CursorStore(format!("failed to insert transaction log: {e}")))?;
+            .map_err(|e| {
+                IngestionError::CursorStore(format!("failed to insert transaction log: {e}"))
+            })?;
         }
 
         // Advance ledger cursor within atomic transaction
@@ -301,9 +301,9 @@ impl LedgerCursorStore for PostgresCursorStore {
         .map_err(|e| IngestionError::CursorStore(format!("failed to update cursor: {e}")))?;
 
         // Atomically commit batch writes and cursor progression
-        tx.commit()
-            .await
-            .map_err(|e| IngestionError::CursorStore(format!("failed to commit ingestion transaction: {e}")))?;
+        tx.commit().await.map_err(|e| {
+            IngestionError::CursorStore(format!("failed to commit ingestion transaction: {e}"))
+        })?;
 
         Ok(())
     }
@@ -342,9 +342,9 @@ impl RateLimiter {
                     stamps.push_back(Instant::now());
                     None
                 } else {
-                    stamps
-                        .front()
-                        .map(|t| (*t + Duration::from_secs(60)).saturating_duration_since(Instant::now()))
+                    stamps.front().map(|t| {
+                        (*t + Duration::from_secs(60)).saturating_duration_since(Instant::now())
+                    })
                 }
             };
             match wait {
@@ -441,12 +441,23 @@ impl IngestionPipeline {
                 Ok(()) => enqueued += 1,
                 Err(mpsc::error::TrySendError::Full(batch)) => {
                     self.backpressure_waits.fetch_add(1, Ordering::SeqCst);
-                    debug!(seq = batch.sequence, "buffer full; applying backpressure with DLQ spillover");
-                    match tokio::time::timeout(self.config.enqueue_timeout, self.tx.send(batch.clone())).await {
+                    debug!(
+                        seq = batch.sequence,
+                        "buffer full; applying backpressure with DLQ spillover"
+                    );
+                    match tokio::time::timeout(
+                        self.config.enqueue_timeout,
+                        self.tx.send(batch.clone()),
+                    )
+                    .await
+                    {
                         Ok(Ok(())) => enqueued += 1,
                         Ok(Err(_)) => return Err(IngestionError::ShutDown),
                         Err(_) => {
-                            warn!(seq = batch.sequence, "buffer saturated; spillover to dead-letter queue (DLQ)");
+                            warn!(
+                                seq = batch.sequence,
+                                "buffer saturated; spillover to dead-letter queue (DLQ)"
+                            );
                             self.dlq.lock().expect("lock").push(batch);
                             enqueued += 1;
                         }
@@ -464,9 +475,7 @@ impl IngestionPipeline {
     pub async fn consume_available(&self) -> Result<usize, IngestionError> {
         let batches = {
             let mut rx_guard = self.rx.lock().expect("lock");
-            let rx = rx_guard
-                .as_mut()
-                .ok_or(IngestionError::ShutDown)?;
+            let rx = rx_guard.as_mut().ok_or(IngestionError::ShutDown)?;
 
             let mut collected = Vec::new();
             while let Ok(batch) = rx.try_recv() {
@@ -480,8 +489,7 @@ impl IngestionPipeline {
             self.cursor
                 .save_batch(batch.sequence, &batch.events, &batch.tx_logs)
                 .await?;
-            self.last_sequence
-                .store(batch.sequence, Ordering::SeqCst);
+            self.last_sequence.store(batch.sequence, Ordering::SeqCst);
             self.ingested.fetch_add(1, Ordering::SeqCst);
             processed += 1;
         }
@@ -646,9 +654,8 @@ mod tests {
     #[tokio::test]
     async fn rpc_backoff_recovers_from_transient_failures() {
         let cursor = Arc::new(InMemoryCursorStore::new());
-        let source: Arc<dyn LedgerSource> = Arc::new(
-            SyntheticLedgerSource::new(0, 3).with_transient_failures(2),
-        );
+        let source: Arc<dyn LedgerSource> =
+            Arc::new(SyntheticLedgerSource::new(0, 3).with_transient_failures(2));
         // First two RPC calls fail; produce_once backs off then succeeds.
         let pipeline = IngestionPipeline::new(
             IngestionConfig {
@@ -682,7 +689,6 @@ mod tests {
                 initial_backoff: Duration::from_millis(1),
                 max_backoff: Duration::from_millis(10),
                 enqueue_timeout: Duration::from_secs(1),
-                ..IngestionConfig::default()
             },
             source,
             cursor.clone(),
@@ -698,8 +704,7 @@ mod tests {
         assert_eq!(cursor.current(), Some(metrics.last_sequence));
 
         // Extrapolate to ledgers/minute; require at least the production target.
-        let per_minute =
-            (metrics.ingested as f64) / elapsed.as_secs_f64().max(0.001) * 60.0;
+        let per_minute = (metrics.ingested as f64) / elapsed.as_secs_f64().max(0.001) * 60.0;
         assert!(
             per_minute >= TARGET_LEDGERS_PER_MINUTE as f64,
             "throughput {per_minute:.1} ledgers/min below target {}",
@@ -741,13 +746,7 @@ mod tests {
             status: "success".to_string(),
             gas_used: 1250.0,
         };
-        let batch = LedgerBatch::with_payload(
-            100,
-            1,
-            1_700_000_100,
-            vec![event],
-            vec![log],
-        );
+        let batch = LedgerBatch::with_payload(100, 1, 1_700_000_100, vec![event], vec![log]);
 
         cursor
             .save_batch(batch.sequence, &batch.events, &batch.tx_logs)

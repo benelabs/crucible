@@ -16,11 +16,11 @@
 //! unhealthy. Connection strings, hostnames, and credentials are never included
 //! in responses.
 
-use std::time::Duration;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use redis::aio::ConnectionManager;
 use serde::Serialize;
 use sqlx::PgPool;
+use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{debug, instrument, warn};
 
@@ -102,7 +102,8 @@ impl HealthChecker {
         let database = Self::check_database_with_timeout(&state.db).await;
         let redis = Self::check_cache_with_timeout(&state.cache).await;
         let queue = Self::check_queue_with_timeout(&state.queue).await;
-        let soroban_rpc = Self::check_soroban_rpc_with_timeout(state.soroban_rpc_url.as_deref()).await;
+        let soroban_rpc =
+            Self::check_soroban_rpc_with_timeout(state.soroban_rpc_url.as_deref()).await;
 
         let all_healthy = database.status == "up"
             && redis.status == "up"
@@ -375,7 +376,9 @@ async fn check_cache(conn: &ConnectionManager) -> CheckResult {
             warn!("Redis health check degraded: {:?}", report.details);
             CheckResult {
                 status: "down",
-                message: report.details.or_else(|| Some("node in loading or read-only state".into())),
+                message: report
+                    .details
+                    .or_else(|| Some("node in loading or read-only state".into())),
             }
         }
         Err(e) => {
@@ -397,7 +400,9 @@ async fn check_queue(conn: &ConnectionManager) -> CheckResult {
             warn!("Queue backend connection degraded: {:?}", report.details);
             return CheckResult {
                 status: "down",
-                message: report.details.or_else(|| Some("queue backend read-only or loading".into())),
+                message: report
+                    .details
+                    .or_else(|| Some("queue backend read-only or loading".into())),
             };
         }
         Err(e) => {
@@ -432,11 +437,7 @@ async fn has_registered_workers(conn: &mut ConnectionManager) -> bool {
     {
         Ok(keys) if !keys.is_empty() => {
             for key in &keys {
-                if let Ok(count) = redis::cmd("SCARD")
-                    .arg(key)
-                    .query_async::<i32>(conn)
-                    .await
-                {
+                if let Ok(count) = redis::cmd("SCARD").arg(key).query_async::<i32>(conn).await {
                     if count > 0 {
                         return true;
                     }
@@ -446,14 +447,13 @@ async fn has_registered_workers(conn: &mut ConnectionManager) -> bool {
         _ => {}
     }
 
-    match redis::cmd("KEYS")
-        .arg("worker:*:health")
-        .query_async::<Vec<String>>(conn)
-        .await
-    {
-        Ok(keys) if !keys.is_empty() => true,
-        _ => false,
-    }
+    matches!(
+        redis::cmd("KEYS")
+            .arg("worker:*:health")
+            .query_async::<Vec<String>>(conn)
+            .await,
+        Ok(keys) if !keys.is_empty()
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -579,20 +579,44 @@ mod tests {
         let healthy_report = HealthReport {
             status: "healthy".into(),
             checks: HealthChecks {
-                database: CheckResult { status: "up", message: None },
-                redis: CheckResult { status: "up", message: None },
-                queue: CheckResult { status: "up", message: None },
-                soroban_rpc: CheckResult { status: "up", message: None },
+                database: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+                redis: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+                queue: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+                soroban_rpc: CheckResult {
+                    status: "up",
+                    message: None,
+                },
             },
             version: "0.1.0".into(),
         };
         let degraded_report = HealthReport {
             status: "degraded".into(),
             checks: HealthChecks {
-                database: CheckResult { status: "down", message: Some("err".into()) },
-                redis: CheckResult { status: "up", message: None },
-                queue: CheckResult { status: "up", message: None },
-                soroban_rpc: CheckResult { status: "up", message: None },
+                database: CheckResult {
+                    status: "down",
+                    message: Some("err".into()),
+                },
+                redis: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+                queue: CheckResult {
+                    status: "up",
+                    message: None,
+                },
+                soroban_rpc: CheckResult {
+                    status: "up",
+                    message: None,
+                },
             },
             version: "0.1.0".into(),
         };
@@ -642,16 +666,16 @@ mod tests {
     #[test]
     fn mark_startup_complete_sets_flag() {
         use super::reset_startup_flag;
-        
+
         // Reset to initial state
         reset_startup_flag();
-        
+
         // Mark complete
         super::mark_startup_complete();
-        
+
         // Verify flag is set
-        assert_eq!(super::STARTUP_COMPLETE.load(std::sync::atomic::Ordering::Relaxed), true);
-        
+        assert!(super::STARTUP_COMPLETE.load(std::sync::atomic::Ordering::Relaxed));
+
         // Clean up
         reset_startup_flag();
     }

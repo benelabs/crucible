@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 /// # Example
 ///
 /// ```
+/// use backend::utils::json_schema::generate_json_schema;
 /// use serde::{Deserialize, Serialize};
 /// use schemars::JsonSchema;
 ///

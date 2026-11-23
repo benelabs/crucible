@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -101,18 +101,26 @@ impl ContractDeploymentService {
         request: MultiNetworkDeploymentRequest,
     ) -> Result<MultiNetworkDeploymentSummary, AppError> {
         if request.contract_id.trim().is_empty() {
-            return Err(AppError::ValidationError("contractId is required".to_string()));
+            return Err(AppError::ValidationError(
+                "contractId is required".to_string(),
+            ));
         }
         if request.version.trim().is_empty() {
             return Err(AppError::ValidationError("version is required".to_string()));
         }
         if request.networks.is_empty() {
-            return Err(AppError::ValidationError("at least one target network is required".to_string()));
+            return Err(AppError::ValidationError(
+                "at least one target network is required".to_string(),
+            ));
         }
         if request.deployer.trim().is_empty() {
-            return Err(AppError::ValidationError("deployer is required".to_string()));
+            return Err(AppError::ValidationError(
+                "deployer is required".to_string(),
+            ));
         }
-        if request.wasm_hash.len() != 64 || !request.wasm_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        if request.wasm_hash.len() != 64
+            || !request.wasm_hash.chars().all(|c| c.is_ascii_hexdigit())
+        {
             return Err(AppError::ValidationError(
                 "wasmHash must be a 64-character SHA-256 hex digest".to_string(),
             ));
@@ -120,13 +128,18 @@ impl ContractDeploymentService {
 
         let deployment_id = Uuid::new_v4().to_string();
         let mut results = Vec::new();
-        
+
         // Start a transaction for the entire multi-network deployment
-        let mut tx = self.db.begin().await
-            .map_err(|e| AppError::ValidationError(format!("Transaction start failed: {}", e)))?;
+        let mut tx =
+            self.db.begin().await.map_err(|e| {
+                AppError::ValidationError(format!("Transaction start failed: {}", e))
+            })?;
 
         for network in &request.networks {
-            if !matches!(network.as_str(), "mainnet" | "testnet" | "futurenet" | "sandbox") {
+            if !matches!(
+                network.as_str(),
+                "mainnet" | "testnet" | "futurenet" | "sandbox"
+            ) {
                 // Rollback on invalid network
                 let _ = tx.rollback().await;
                 return Err(AppError::ValidationError(format!(
@@ -153,11 +166,16 @@ impl ContractDeploymentService {
                 "broadcasted".to_string()
             };
 
-            let contract_id_deployed = format!("C{}-{}", network.to_uppercase(), &request.contract_id);
+            let contract_id_deployed =
+                format!("C{}-{}", network.to_uppercase(), request.contract_id);
             let transaction_hash = if request.dry_run {
                 "dry-run-simulated".to_string()
             } else {
-                format!("tx-{}-{}", network, Uuid::new_v4().to_string().replace('-', ""))
+                format!(
+                    "tx-{}-{}",
+                    network,
+                    Uuid::new_v4().to_string().replace('-', "")
+                )
             };
 
             // Attempt to persist deployment record in transaction
@@ -384,7 +402,10 @@ mod tests {
         assert_eq!(dry_run_summary.overall_status, "planned");
         assert_eq!(dry_run_summary.results.len(), 2);
         assert_eq!(dry_run_summary.results[0].status, "planned");
-        assert_eq!(dry_run_summary.results[0].transaction_hash, "dry-run-simulated");
+        assert_eq!(
+            dry_run_summary.results[0].transaction_hash,
+            "dry-run-simulated"
+        );
 
         // Test broadcast path
         let broadcast_summary = service
@@ -403,6 +424,8 @@ mod tests {
         assert_eq!(broadcast_summary.overall_status, "completed");
         assert_eq!(broadcast_summary.results.len(), 2);
         assert_eq!(broadcast_summary.results[0].status, "broadcasted");
-        assert!(broadcast_summary.results[0].transaction_hash.starts_with("tx-mainnet-"));
+        assert!(broadcast_summary.results[0]
+            .transaction_hash
+            .starts_with("tx-mainnet-"));
     }
 }

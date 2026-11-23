@@ -41,7 +41,7 @@ fn default_max_body_size() -> usize {
 }
 
 fn default_compile_max_size() -> usize {
-    1 * 1024 * 1024 // 1MB
+    1024 * 1024 // 1MB
 }
 
 fn default_sandbox_max_size() -> usize {
@@ -128,7 +128,7 @@ mod tests {
         let config: ServerConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.worker_grace_period_secs, 30);
         assert_eq!(config.max_body_size, 10 * 1024 * 1024);
-        assert_eq!(config.compile_max_size, 1 * 1024 * 1024);
+        assert_eq!(config.compile_max_size, 1024 * 1024);
         assert_eq!(config.sandbox_max_size, 5 * 1024 * 1024);
     }
 
@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(config.http2_max_concurrent_streams, 100);
         assert_eq!(config.http2_max_concurrent_streams_bound(), Some(100));
         assert_eq!(config.max_body_size, 10 * 1024 * 1024);
-        assert_eq!(config.compile_max_size, 1 * 1024 * 1024);
+        assert_eq!(config.compile_max_size, 1024 * 1024);
         assert_eq!(config.sandbox_max_size, 5 * 1024 * 1024);
     }
 

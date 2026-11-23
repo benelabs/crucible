@@ -10,8 +10,10 @@ use uuid::Uuid;
 /// Status of a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SessionStatus {
     /// Session is active.
+    #[default]
     Active,
     /// Session has expired.
     Expired,
@@ -19,17 +21,13 @@ pub enum SessionStatus {
     Revoked,
 }
 
-impl Default for SessionStatus {
-    fn default() -> Self {
-        SessionStatus::Active
-    }
-}
-
 /// Type of session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum SessionType {
     /// Regular user login session.
+    #[default]
     Login,
     /// API token session.
     Api,
@@ -37,12 +35,6 @@ pub enum SessionType {
     PasswordReset,
     /// Email verification session.
     EmailVerification,
-}
-
-impl Default for SessionType {
-    fn default() -> Self {
-        SessionType::Login
-    }
 }
 
 /// Session domain model.

@@ -35,8 +35,6 @@ pub use redis::RedisConfig;
 pub use sanitize::{sanitize, SanitizedConfig};
 pub use server::ServerConfig;
 
-
-
 /// The execution environment of the application.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Environment {
@@ -104,10 +102,12 @@ pub struct AppConfig {
     pub cors: CorsConfig,
 }
 
-// Temporary fallback for testing/reloading if missing in main.rs
+// Deterministic fallback for tests and tooling. Production code loads config
+// explicitly through `load`, which honours environment overrides.
 impl Default for AppConfig {
     fn default() -> Self {
-        Self::load(Environment::Development).expect("Failed to load default configuration")
+        Self::load_with_environment_source(Environment::Development, Some(Map::new()))
+            .expect("Failed to load default configuration")
     }
 }
 

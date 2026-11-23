@@ -49,7 +49,7 @@ async fn test_stellar_toml_headers() {
 
 #[tokio::test]
 async fn test_get_status_endpoint() {
-    let state = Arc::new(AppState {
+    let _state = Arc::new(AppState {
         db: None,
         metrics_exporter: Arc::new(MetricsExporter::new()),
         error_manager: Arc::new(ErrorManager::new()),

@@ -242,11 +242,9 @@ pub async fn get_dashboard(
     }
 
     let lock_token = uuid::Uuid::new_v4().to_string();
-    let is_leader = match try_acquire_redis_lock(&state.redis, lock_key, &lock_token, 10_000).await
-    {
-        Ok(acquired) => acquired,
-        Err(_) => true,
-    };
+    let is_leader = try_acquire_redis_lock(&state.redis, lock_key, &lock_token, 10_000)
+        .await
+        .unwrap_or(true);
 
     if !is_leader {
         for _ in 0..20 {
@@ -379,11 +377,9 @@ pub async fn get_dashboard_metrics(
     }
 
     let lock_token = uuid::Uuid::new_v4().to_string();
-    let is_leader = match try_acquire_redis_lock(&state.redis, lock_key, &lock_token, 10_000).await
-    {
-        Ok(acquired) => acquired,
-        Err(_) => true,
-    };
+    let is_leader = try_acquire_redis_lock(&state.redis, lock_key, &lock_token, 10_000)
+        .await
+        .unwrap_or(true);
 
     if !is_leader {
         for _ in 0..20 {
@@ -493,7 +489,7 @@ pub async fn get_contract_stats(
         }
     }
 
-    let batch = fetch_batch_contract_stats(&state.db, &[contract_id.clone()]).await?;
+    let batch = fetch_batch_contract_stats(&state.db, std::slice::from_ref(&contract_id)).await?;
     let stats = batch
         .into_iter()
         .next()

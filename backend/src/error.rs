@@ -31,7 +31,7 @@ pub struct ErrorResponse {
 /// # Examples
 ///
 /// ```rust,no_run
-/// use crucible_backend::error::AppError;
+/// use backend::error::AppError;
 ///
 /// async fn handler() -> Result<String, AppError> {
 ///     Err(AppError::NotFound("Contract not found".into()))
@@ -279,7 +279,9 @@ impl IntoResponse for AppError {
                 "service_unavailable",
                 format!("Service temporarily unavailable. Retry after {retry_after} seconds."),
             ),
-            AppError::LengthRequired(msg) => (StatusCode::LENGTH_REQUIRED, "length_required", msg.clone()),
+            AppError::LengthRequired(msg) => {
+                (StatusCode::LENGTH_REQUIRED, "length_required", msg.clone())
+            }
             AppError::Csv(e) => {
                 error!("CSV error: {e:?}");
                 (
@@ -341,7 +343,10 @@ mod tests {
     #[test]
     fn test_length_required_error_display() {
         let err = AppError::LengthRequired("Content-Length header required".into());
-        assert_eq!(err.to_string(), "Length required: Content-Length header required");
+        assert_eq!(
+            err.to_string(),
+            "Length required: Content-Length header required"
+        );
     }
 
     #[test]
@@ -364,7 +369,9 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(resp.headers().get("retry-after").unwrap(), "5");
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["error"], "service temporarily unavailable");
         assert_eq!(json["retry_after_seconds"], 5);
@@ -377,7 +384,9 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(resp.headers().get("retry-after").unwrap(), "10");
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["error"], "service temporarily unavailable");
         assert_eq!(json["retry_after_seconds"], 10);

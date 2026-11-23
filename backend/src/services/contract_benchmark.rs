@@ -752,7 +752,7 @@ fn validate_identifier(field: &str, value: &str) -> Result<(), ContractBenchmark
 }
 
 fn validate_percentage(field: &str, value: f64) -> Result<(), ContractBenchmarkError> {
-    if !value.is_finite() || value < 0.0 || value > 1_000.0 {
+    if !value.is_finite() || !(0.0..=1_000.0).contains(&value) {
         return Err(ContractBenchmarkError::Validation(format!(
             "{field} must be a finite percentage between 0 and 1000"
         )));

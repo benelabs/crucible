@@ -3,10 +3,8 @@ use backend::api::handlers::profiling::{get_metrics, AppState};
 use backend::config::reload::ConfigManager;
 use backend::config::AppConfig;
 use backend::services::{
-    contract_benchmark::ContractBenchmarkService,
-    error_recovery::ErrorManager,
-    log_aggregator::LogAggregator,
-    sys_metrics::MetricsExporter,
+    contract_benchmark::ContractBenchmarkService, error_recovery::ErrorManager,
+    log_aggregator::LogAggregator, sys_metrics::MetricsExporter,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
 use redis::Client as RedisClient;

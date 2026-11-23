@@ -38,10 +38,7 @@ impl Default for ValidationConfig {
     fn default() -> Self {
         Self {
             max_size: DEFAULT_MAX_SIZE,
-            allowed_mime_types: ALLOWED_MIME_TYPES
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            allowed_mime_types: ALLOWED_MIME_TYPES.iter().map(|s| s.to_string()).collect(),
         }
     }
 }
@@ -49,7 +46,10 @@ impl Default for ValidationConfig {
 impl ValidationConfig {
     /// Create a config with a custom size limit and the default MIME allow-list.
     pub fn with_max_size(max_size: u64) -> Self {
-        Self { max_size, ..Default::default() }
+        Self {
+            max_size,
+            ..Default::default()
+        }
     }
 
     /// Add an extra allowed MIME type.
@@ -97,14 +97,22 @@ pub fn validate_upload(
     // 1. Size check
     if size > config.max_size {
         warn!(size, limit = config.max_size, "File exceeds size limit");
-        return Err(FileError::TooLarge { size, limit: config.max_size });
+        return Err(FileError::TooLarge {
+            size,
+            limit: config.max_size,
+        });
     }
 
     // 2. File name safety
     let safe_name = sanitize_file_name(file_name)?;
 
     // 3. MIME type check (declared)
-    let normalized_mime = declared_mime.split(';').next().unwrap_or("").trim().to_lowercase();
+    let normalized_mime = declared_mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
     if !config.allowed_mime_types.contains(&normalized_mime) {
         warn!(mime = %normalized_mime, "Unsupported MIME type");
         return Err(FileError::UnsupportedMimeType(normalized_mime));
@@ -113,8 +121,7 @@ pub fn validate_upload(
     // 4. Magic-byte verification
     let detected = detect_mime(&bytes);
     if let Some(detected_mime) = detected {
-        if detected_mime != normalized_mime
-            && !is_compatible_mime(&normalized_mime, detected_mime)
+        if detected_mime != normalized_mime && !is_compatible_mime(&normalized_mime, detected_mime)
         {
             warn!(
                 declared = %normalized_mime,
@@ -147,19 +154,22 @@ fn sanitize_file_name(name: &str) -> Result<String, FileError> {
         return Err(FileError::InvalidFileName("file name is empty".into()));
     }
     if name.contains('\0') {
-        return Err(FileError::InvalidFileName("file name contains null byte".into()));
+        return Err(FileError::InvalidFileName(
+            "file name contains null byte".into(),
+        ));
     }
     // Strip any directory component — keep only the final segment.
     let base = name
         .replace('\\', "/")
         .split('/')
-        .filter(|s| !s.is_empty() && *s != "..")
-        .last()
+        .rfind(|s| !s.is_empty() && *s != "..")
         .unwrap_or("")
         .to_string();
 
     if base.is_empty() || base == ".." {
-        return Err(FileError::InvalidFileName(format!("unsafe file name: {name}")));
+        return Err(FileError::InvalidFileName(format!(
+            "unsafe file name: {name}"
+        )));
     }
     Ok(base)
 }
@@ -195,9 +205,9 @@ fn detect_mime(bytes: &[u8]) -> Option<&'static str> {
 
 fn is_valid_text(bytes: &[u8]) -> bool {
     match std::str::from_utf8(bytes) {
-        Ok(text) => text.chars().all(|c| {
-            c == '\n' || c == '\r' || c == '\t' || !c.is_control()
-        }),
+        Ok(text) => text
+            .chars()
+            .all(|c| c == '\n' || c == '\r' || c == '\t' || !c.is_control()),
         Err(_) => false,
     }
 }

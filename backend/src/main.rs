@@ -1,25 +1,21 @@
+// Match the backend library's documented lint baseline.
+#![allow(
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::should_implement_trait
+)]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use apalis::prelude::*;
 use apalis_redis::RedisStorage;
-use axum::{
-    middleware,
-    routing::{get, post},
-    Router,
-};
-use backend::api::handlers::dashboard::get_dashboard;
-use backend::api::handlers::ws::ws_dashboard_handler;
 use utoipa::OpenApi;
 
 use backend::{
-    api::handlers::{contracts, dashboard, errors, profiling, sandbox, stellar},
-    api::middleware::logging::logging_middleware,
-    app_state::{build_application_states, ApplicationStates, SharedServices},
-    config::{
-        reload::{handle_get_config, handle_reload, ConfigManager},
-        AppConfig, Environment,
-    },
+    api::handlers::{dashboard, profiling},
+    app_state::{build_application_states, SharedServices},
+    config::{reload::ConfigManager, AppConfig, Environment},
     jobs::{monitor_transaction, TransactionMonitorJob},
     router::build_router,
     services::audit,
@@ -33,16 +29,9 @@ use backend::{
         tracing::{TracingConfig, TracingService},
     },
 };
-use redis::aio::ConnectionManager;
 use redis::Client as RedisClient;
-use sqlx::PgPool;
 use tokio::signal;
-use tokio_util::sync::CancellationToken;
 
-use tower_http::{
-    cors::{AllowOrigin, Any, CorsLayer},
-    trace::TraceLayer,
-};
 use tracing::info_span;
 
 /// OpenAPI document served at `/swagger-ui`.
@@ -72,6 +61,7 @@ use tracing::info_span;
         (name = "dashboard", description = "Dashboard metrics and analytics endpoints")
     )
 )]
+#[allow(dead_code)]
 struct ApiDoc;
 
 #[tokio::main]
@@ -143,7 +133,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let health_cache = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
     let health_queue = backend::db::redis::connect_with_retry(&redis_client, &config.redis).await?;
 
-    let health_state = backend::api::handlers::health::HealthState {
+    let _health_state = backend::api::handlers::health::HealthState {
         db: db_pool.clone(),
         cache: health_cache,
         queue: health_queue,
@@ -174,13 +164,18 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::info!("Crucible backend listening on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    let res = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await;
-    let worker_grace_period = std::time::Duration::from_secs(config.server.worker_grace_period_secs);
+    let res = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+    let worker_grace_period =
+        std::time::Duration::from_secs(config.server.worker_grace_period_secs);
     tracing::info!(
         "Server stopping; waiting for background workers to drain (grace period: {}s)...",
         config.server.worker_grace_period_secs
     );
-    shutdown_coordinator.shutdown_with_grace(worker_grace_period).await;
+    shutdown_coordinator
+        .shutdown_with_grace(worker_grace_period)
+        .await;
     tracing::info!("Closing database connection pool");
     db_pool.close().await;
 

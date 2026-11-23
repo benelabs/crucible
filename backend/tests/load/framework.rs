@@ -547,7 +547,7 @@ mod tests {
             let c = counter_clone.clone();
             async move {
                 let n = c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let status = if n % 2 == 0 {
+                let status = if n.is_multiple_of(2) {
                     StatusCode::OK
                 } else {
                     StatusCode::INTERNAL_SERVER_ERROR

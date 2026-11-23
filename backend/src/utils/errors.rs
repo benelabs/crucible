@@ -3,7 +3,11 @@
 //! Provides domain-specific error types that compose into [`AppError`] for
 //! HTTP responses, while preserving rich context for logging and tracing.
 
-use axum::{http::StatusCode, response::{IntoResponse, Response}, Json};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
@@ -212,9 +216,9 @@ impl AppError {
                 }
             },
             AppError::Auth(e) => match e {
-                AuthError::MissingCredentials | AuthError::InvalidToken | AuthError::TokenExpired => {
-                    (StatusCode::UNAUTHORIZED, "auth_error")
-                }
+                AuthError::MissingCredentials
+                | AuthError::InvalidToken
+                | AuthError::TokenExpired => (StatusCode::UNAUTHORIZED, "auth_error"),
                 AuthError::InsufficientPermissions { .. } => (StatusCode::FORBIDDEN, "forbidden"),
             },
             AppError::Cache(e) => {
@@ -233,11 +237,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code) = self.status_and_code();
         let message = self.to_string();
-        (
-            status,
-            Json(json!({ "code": code, "message": message })),
-        )
-            .into_response()
+        (status, Json(json!({ "code": code, "message": message }))).into_response()
     }
 }
 
@@ -260,8 +260,6 @@ impl From<DatabaseError> for AppError {
     }
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -272,7 +270,10 @@ mod tests {
 
     #[test]
     fn file_error_too_large_display() {
-        let e = FileError::TooLarge { size: 20_000_000, limit: 10_000_000 };
+        let e = FileError::TooLarge {
+            size: 20_000_000,
+            limit: 10_000_000,
+        };
         assert!(e.to_string().contains("20000000"));
     }
 

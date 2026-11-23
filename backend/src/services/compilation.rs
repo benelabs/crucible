@@ -75,7 +75,11 @@ impl CompilationService {
             let stripped_len = wasm_bytes.len().saturating_sub(simulated_reduction).max(64);
             return (
                 wasm_bytes[..stripped_len.min(wasm_bytes.len())].to_vec(),
-                vec!["name".to_string(), "producers".to_string(), ".debug_info".to_string()],
+                vec![
+                    "name".to_string(),
+                    "producers".to_string(),
+                    ".debug_info".to_string(),
+                ],
             );
         }
 
@@ -121,11 +125,14 @@ impl CompilationService {
                     name_shift += 7;
                 }
 
-                let name_bytes = &section_data[name_offset..(name_offset + name_len).min(section_data.len())];
+                let name_bytes =
+                    &section_data[name_offset..(name_offset + name_len).min(section_data.len())];
                 let custom_name = String::from_utf8_lossy(name_bytes).to_string();
 
                 // Preserve Soroban contract spec and env meta
-                if custom_name.starts_with("contractspec") || custom_name.starts_with("contractenvmeta") {
+                if custom_name.starts_with("contractspec")
+                    || custom_name.starts_with("contractenvmeta")
+                {
                     // Re-encode section into output
                     output.push(section_id);
                     Self::encode_leb128(&mut output, section_size);
@@ -290,68 +297,92 @@ impl CompilationService {
             start.elapsed().as_millis() as i64 + 120
         };
 
-        let (wasm_hash, wasm_size_bytes, unoptimized_size_bytes, optimization, verification, logs) = if status == "success" {
-            use sha2::{Digest, Sha256};
-            let export_name = if source_code.contains("fn increment") {
-                "increment"
-            } else if source_code.contains("fn transfer") {
-                "transfer"
-            } else if source_code.contains("fn initialize") {
-                "initialize"
-            } else {
-                "contract_entry"
-            };
+        let (wasm_hash, wasm_size_bytes, unoptimized_size_bytes, optimization, verification, logs) =
+            if status == "success" {
+                use sha2::{Digest, Sha256};
+                let export_name = if source_code.contains("fn increment") {
+                    "increment"
+                } else if source_code.contains("fn transfer") {
+                    "transfer"
+                } else if source_code.contains("fn initialize") {
+                    "initialize"
+                } else {
+                    "contract_entry"
+                };
 
-            let contract_wasm = Self::build_canonical_wasm_module(
-                vec![(vec![0x7e, 0x7e], vec![0x7e])],
-                export_name,
-                0,
-            );
-            let opt_res = Self::optimize_bytecode(&contract_wasm, "-Oz");
-            // `optimize_bytecode` only simulates the size win of `wasm-opt`, so the export
-            // signatures are verified on the structurally intact module.
-            let verifiable_wasm = Self::strip_custom_sections(&contract_wasm).0;
-            let verif = SorobanWasmVerifier::verify(&verifiable_wasm);
+                let contract_wasm = Self::build_canonical_wasm_module(
+                    vec![(vec![0x7e, 0x7e], vec![0x7e])],
+                    export_name,
+                    0,
+                );
+                let opt_res = Self::optimize_bytecode(&contract_wasm, "-Oz");
+                // `optimize_bytecode` only simulates the size win of `wasm-opt`, so the export
+                // signatures are verified on the structurally intact module.
+                let verifiable_wasm = Self::strip_custom_sections(&contract_wasm).0;
+                let verif = SorobanWasmVerifier::verify(&verifiable_wasm);
 
-            let mut hasher = Sha256::new();
-            hasher.update(&opt_res.optimized_wasm);
-            let hash = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+                let mut hasher = Sha256::new();
+                hasher.update(&opt_res.optimized_wasm);
+                let hash = hasher
+                    .finalize()
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>();
 
-            let log_msg = format!(
+                let log_msg = format!(
                 "   Compiling soroban-sdk v25.0.0\n   Compiling {} v0.1.0\n    Finished release [optimized] target(s) in {}ms\n   Running wasm-opt -Oz (saved {} bytes, -{}%)\n   Stripped unused custom sections: {:?}\n   Verified Soroban export signatures: {} valid exported symbols\n",
                 project_name, compile_time_ms, opt_res.metrics.bytes_saved, opt_res.metrics.reduction_percentage, opt_res.metrics.custom_sections_stripped, verif.exported_functions.len()
             );
 
-            (hash, opt_res.metrics.optimized_size_bytes, opt_res.metrics.unoptimized_size_bytes, Some(opt_res.metrics), Some(verif), log_msg)
-        } else if has_invalid_export {
-            let invalid_wasm = if source_code.contains("MULTI_RETURN") {
-                Self::build_canonical_wasm_module(vec![(vec![0x7e], vec![0x7e, 0x7e])], "pair", 0)
-            } else if source_code.contains("FLOAT") {
-                Self::build_canonical_wasm_module(vec![(vec![0x7d], vec![0x7e])], "float_func", 0)
-            } else if source_code.contains("BAD_PREFIX") {
-                Self::build_canonical_wasm_module(vec![(vec![], vec![0x7e])], "__bad_prefix", 0)
-            } else {
-                Self::build_canonical_wasm_module(vec![(vec![0x7e], vec![0x7e, 0x7e])], "invalid_func", 0)
-            };
-            let verif = SorobanWasmVerifier::verify(&invalid_wasm);
-            let error_details = verif.errors.join("\n --> ");
-            let log_msg = format!(
+                (
+                    hash,
+                    opt_res.metrics.optimized_size_bytes,
+                    opt_res.metrics.unoptimized_size_bytes,
+                    Some(opt_res.metrics),
+                    Some(verif),
+                    log_msg,
+                )
+            } else if has_invalid_export {
+                let invalid_wasm = if source_code.contains("MULTI_RETURN") {
+                    Self::build_canonical_wasm_module(
+                        vec![(vec![0x7e], vec![0x7e, 0x7e])],
+                        "pair",
+                        0,
+                    )
+                } else if source_code.contains("FLOAT") {
+                    Self::build_canonical_wasm_module(
+                        vec![(vec![0x7d], vec![0x7e])],
+                        "float_func",
+                        0,
+                    )
+                } else if source_code.contains("BAD_PREFIX") {
+                    Self::build_canonical_wasm_module(vec![(vec![], vec![0x7e])], "__bad_prefix", 0)
+                } else {
+                    Self::build_canonical_wasm_module(
+                        vec![(vec![0x7e], vec![0x7e, 0x7e])],
+                        "invalid_func",
+                        0,
+                    )
+                };
+                let verif = SorobanWasmVerifier::verify(&invalid_wasm);
+                let error_details = verif.errors.join("\n --> ");
+                let log_msg = format!(
                 "   Compiling {} v0.1.0\nerror[E0700]: invalid Soroban contract export signature:\n --> {}\n",
                 project_name, error_details
             );
-            ("".to_string(), 0, 0, None, Some(verif), log_msg)
-        } else {
-            let log_msg = format!(
+                ("".to_string(), 0, 0, None, Some(verif), log_msg)
+            } else {
+                let log_msg = format!(
                 "   Compiling {} v0.1.0\nerror: expected semicolon, found `}}`\n --> src/lib.rs:12:2\n  |\n11 |     let val = 42\n  |                 ^\n",
                 project_name
             );
-            ("".to_string(), 0, 0, None, None, log_msg)
-        };
+                ("".to_string(), 0, 0, None, None, log_msg)
+            };
 
         let cpu_usage = rust_decimal::Decimal::new(185, 1); // 18.5
         let cache_hit_rate = rust_decimal::Decimal::new(852, 1); // 85.2
-        let memory_usage_mb = 412 as i64;
-        let dependency_count = 12 as i32;
+        let memory_usage_mb = 412_i64;
+        let dependency_count = 12_i32;
 
         let _ = sqlx::query(
             "INSERT INTO build_metrics (
@@ -398,10 +429,12 @@ impl CompilationService {
         use regex::Regex;
         // Strip absolute host paths (/Users/..., /home/..., /app/..., ...) so build logs
         // never leak the host filesystem layout, keeping the project-relative tail.
-        let re = match Regex::new(r"(?:/Users|/home|/app|/tmp|/var|/private|/workspace|/build)/[^\s:]*") {
-            Ok(re) => re,
-            Err(_) => return output.to_string(),
-        };
+        let re =
+            match Regex::new(r"(?:/Users|/home|/app|/tmp|/var|/private|/workspace|/build)/[^\s:]*")
+            {
+                Ok(re) => re,
+                Err(_) => return output.to_string(),
+            };
         re.replace_all(output, |caps: &regex::Captures| {
             let path = &caps[0];
             for root in ["src/", "contracts/", "examples/", "tests/", "benches/"] {
@@ -429,7 +462,8 @@ impl SorobanWasmVerifier {
 
         // 1. Check magic header: \0asm\x01\0\0\0
         if wasm_bytes.len() < 8 {
-            errors.push("Bytecode too small to contain valid WebAssembly binary header".to_string());
+            errors
+                .push("Bytecode too small to contain valid WebAssembly binary header".to_string());
             return WasmVerificationResult {
                 is_valid: false,
                 exported_functions,
@@ -439,7 +473,9 @@ impl SorobanWasmVerifier {
         }
 
         if !wasm_bytes.starts_with(&[0x00, 0x61, 0x73, 0x6d]) {
-            errors.push("Invalid WebAssembly magic bytes; expected [0x00, 0x61, 0x73, 0x6d]".to_string());
+            errors.push(
+                "Invalid WebAssembly magic bytes; expected [0x00, 0x61, 0x73, 0x6d]".to_string(),
+            );
             return WasmVerificationResult {
                 is_valid: false,
                 exported_functions,
@@ -448,9 +484,13 @@ impl SorobanWasmVerifier {
             };
         }
 
-        let version = u32::from_le_bytes([wasm_bytes[4], wasm_bytes[5], wasm_bytes[6], wasm_bytes[7]]);
+        let version =
+            u32::from_le_bytes([wasm_bytes[4], wasm_bytes[5], wasm_bytes[6], wasm_bytes[7]]);
         if version != 1 {
-            errors.push(format!("Unsupported WebAssembly binary version {}; expected 1", version));
+            errors.push(format!(
+                "Unsupported WebAssembly binary version {}; expected 1",
+                version
+            ));
             return WasmVerificationResult {
                 is_valid: false,
                 exported_functions,
@@ -473,14 +513,12 @@ impl SorobanWasmVerifier {
                         match rec_group {
                             Ok(rg) => {
                                 for sub_type in rg.types() {
-                                    match &sub_type.composite_type {
-                                        CompositeType::Func(func_type) => {
-                                            func_types.push((
-                                                func_type.params().to_vec(),
-                                                func_type.results().to_vec(),
-                                            ));
-                                        }
-                                        _ => {}
+                                    if let CompositeType::Func(func_type) = &sub_type.composite_type
+                                    {
+                                        func_types.push((
+                                            func_type.params().to_vec(),
+                                            func_type.results().to_vec(),
+                                        ));
                                     }
                                 }
                             }
@@ -537,7 +575,8 @@ impl SorobanWasmVerifier {
         }
 
         // Map all function indices to their type indices
-        let mut all_functions = Vec::with_capacity(imported_func_type_indices.len() + defined_func_type_indices.len());
+        let mut all_functions =
+            Vec::with_capacity(imported_func_type_indices.len() + defined_func_type_indices.len());
         all_functions.extend_from_slice(&imported_func_type_indices);
         all_functions.extend_from_slice(&defined_func_type_indices);
 
@@ -554,12 +593,18 @@ impl SorobanWasmVerifier {
             }
 
             if name.bytes().any(|b| b == 0) {
-                errors.push(format!("Exported function symbol '{}' contains forbidden null bytes", name));
+                errors.push(format!(
+                    "Exported function symbol '{}' contains forbidden null bytes",
+                    name
+                ));
                 continue;
             }
 
             if name.chars().any(|c| c.is_control()) {
-                errors.push(format!("Exported function symbol '{}' contains forbidden control characters", name));
+                errors.push(format!(
+                    "Exported function symbol '{}' contains forbidden control characters",
+                    name
+                ));
                 continue;
             }
 
@@ -573,7 +618,11 @@ impl SorobanWasmVerifier {
             if name.starts_with("__") {
                 let allowed_internal = matches!(
                     name.as_str(),
-                    "__constructor" | "__wasm_call_ctors" | "__rust_alloc" | "__rust_dealloc" | "__rust_realloc"
+                    "__constructor"
+                        | "__wasm_call_ctors"
+                        | "__rust_alloc"
+                        | "__rust_dealloc"
+                        | "__rust_realloc"
                 );
                 if !allowed_internal {
                     errors.push(format!(
@@ -634,8 +683,14 @@ impl SorobanWasmVerifier {
                 }
             }
 
-            let param_types = params.iter().map(|p| format!("{:?}", p).to_lowercase()).collect();
-            let return_types = results.iter().map(|r| format!("{:?}", r).to_lowercase()).collect();
+            let param_types = params
+                .iter()
+                .map(|p| format!("{:?}", p).to_lowercase())
+                .collect();
+            let return_types = results
+                .iter()
+                .map(|r| format!("{:?}", r).to_lowercase())
+                .collect();
 
             exported_functions.push(ExportedFunctionInfo {
                 name,
@@ -712,7 +767,9 @@ mod tests {
         assert!(res.verification.is_some());
         let verif = res.verification.unwrap();
         assert!(!verif.is_valid);
-        assert!(res.logs.contains("invalid Soroban contract export signature"));
+        assert!(res
+            .logs
+            .contains("invalid Soroban contract export signature"));
     }
 
     #[test]
@@ -738,7 +795,10 @@ mod tests {
         );
         let res = SorobanWasmVerifier::verify(&wasm);
         assert!(!res.is_valid);
-        assert!(res.errors.iter().any(|e| e.contains("invalid return count")));
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("invalid return count")));
     }
 
     #[test]
@@ -762,7 +822,10 @@ mod tests {
         );
         let res = SorobanWasmVerifier::verify(&wasm);
         assert!(!res.is_valid);
-        assert!(res.errors.iter().any(|e| e.contains("reserved double-underscore prefix")));
+        assert!(res
+            .errors
+            .iter()
+            .any(|e| e.contains("reserved double-underscore prefix")));
     }
 
     #[test]
@@ -784,12 +847,16 @@ mod tests {
 
         assert_eq!(opt_res.metrics.wasm_opt_level, "-Oz");
         assert!(opt_res.metrics.unoptimized_size_bytes >= opt_res.metrics.optimized_size_bytes);
-        assert_eq!(opt_res.metrics.bytes_saved, opt_res.metrics.unoptimized_size_bytes - opt_res.metrics.optimized_size_bytes);
+        assert_eq!(
+            opt_res.metrics.bytes_saved,
+            opt_res.metrics.unoptimized_size_bytes - opt_res.metrics.optimized_size_bytes
+        );
     }
 
     #[test]
     fn test_compiler_output_sanitization() {
-        let raw_log = "error: failed to compile --> /Users/mac/Documents/crucible/backend/src/lib.rs:12:5";
+        let raw_log =
+            "error: failed to compile --> /Users/mac/Documents/crucible/backend/src/lib.rs:12:5";
         let sanitized = CompilationService::sanitize_compiler_output(raw_log);
         assert!(!sanitized.contains("/Users/mac/Documents/crucible/backend/"));
         assert!(sanitized.contains("src/lib.rs:12:5"));

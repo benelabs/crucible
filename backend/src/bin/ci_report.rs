@@ -46,12 +46,18 @@ pub fn evaluate_report_status(report_val: &Value) -> bool {
     }
 
     // 3. Check regressions_detected or failures_detected flags
-    if let Some(reg_detected) = report_val.get("regressions_detected").and_then(|b| b.as_bool()) {
+    if let Some(reg_detected) = report_val
+        .get("regressions_detected")
+        .and_then(|b| b.as_bool())
+    {
         if reg_detected {
             return false;
         }
     }
-    if let Some(fail_detected) = report_val.get("failures_detected").and_then(|b| b.as_bool()) {
+    if let Some(fail_detected) = report_val
+        .get("failures_detected")
+        .and_then(|b| b.as_bool())
+    {
         if fail_detected {
             return false;
         }
@@ -195,7 +201,10 @@ mod tests {
                 }
             ]
         });
-        assert!(!evaluate_report_status(&payload), "Regressions must be detected and return false");
+        assert!(
+            !evaluate_report_status(&payload),
+            "Regressions must be detected and return false"
+        );
     }
 
     #[test]
@@ -204,6 +213,9 @@ mod tests {
             "status": "failed",
             "failed_tests": 3
         });
-        assert!(!evaluate_report_status(&payload), "Failed status must return false");
+        assert!(
+            !evaluate_report_status(&payload),
+            "Failed status must return false"
+        );
     }
 }

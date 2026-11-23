@@ -263,8 +263,6 @@ async fn test_status_load_200_requests_slo() {
 /// Verify that all responses under load have the correct JSON shape.
 #[tokio::test]
 async fn test_status_load_response_shape_under_load() {
-    use crate::load::framework::run_load;
-
     let cfg = LoadConfig::new(5, 4); // 20 total
     let outcomes: Vec<(StatusCode, Vec<u8>)> = {
         let mut join_set = tokio::task::JoinSet::new();
@@ -384,7 +382,9 @@ async fn test_status_reflects_recovery_tasks() {
 #[tokio::test]
 async fn test_status_reflects_updated_metrics() {
     let metrics_exporter = Arc::new(MetricsExporter::new());
-    metrics_exporter.update_metrics(55.0, 2048, 300, 1024, 512).await;
+    metrics_exporter
+        .update_metrics(55.0, 2048, 300, 1024, 512)
+        .await;
 
     let (log_aggregator, _rx) = backend::services::log_aggregator::LogAggregator::new();
     let state = Arc::new(AppState {

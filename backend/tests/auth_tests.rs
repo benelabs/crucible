@@ -19,8 +19,14 @@ fn generated_jwt_keys_are_valid_and_jwks_contains_rsa_components() {
     let jwk = &jwks.keys[0];
     assert_eq!(jwk.kty, "RSA");
     assert_eq!(jwk.alg, "RS256");
-    assert_eq!(URL_SAFE_NO_PAD.decode(&jwk.n).unwrap(), public_key.n().to_bytes_be());
-    assert_eq!(URL_SAFE_NO_PAD.decode(&jwk.e).unwrap(), public_key.e().to_bytes_be());
+    assert_eq!(
+        URL_SAFE_NO_PAD.decode(&jwk.n).unwrap(),
+        public_key.n().to_bytes_be()
+    );
+    assert_eq!(
+        URL_SAFE_NO_PAD.decode(&jwk.e).unwrap(),
+        public_key.e().to_bytes_be()
+    );
 
     let jwks_json = serde_json::to_value(&jwks).unwrap();
     assert_eq!(jwks_json["keys"][0]["use"], "sig");

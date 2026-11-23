@@ -578,53 +578,41 @@ pub async fn update_deployment_status(
 pub async fn readiness_probe(
     State(state): State<Arc<DeployHealthState>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut is_writable = false;
-    let mut error_message = String::new();
-
     // Attempt a lightweight write transaction to verify database is not in read-only mode
     let mut tx = match state.db.begin().await {
         Ok(t) => t,
         Err(e) => {
-            error_message = format!("Failed to begin transaction: {}", e);
             return Ok((
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(HealthProbeResult {
                     status: "unhealthy".to_string(),
                     timestamp: Utc::now(),
                     database_writable: false,
-                    message: error_message,
+                    message: format!("Failed to begin transaction: {e}"),
                 }),
             ));
         }
     };
 
     // Create a temporary table to verify write permissions
-    match sqlx::query("CREATE TEMPORARY TABLE IF NOT EXISTS health_check (id INT)")
+    if let Err(e) = sqlx::query("CREATE TEMPORARY TABLE IF NOT EXISTS health_check (id INT)")
         .execute(&mut *tx)
         .await
     {
-        Ok(_) => {
-            is_writable = true;
-            match tx.rollback().await {
-                Ok(_) => {}
-                Err(e) => {
-                    warn!("Failed to rollback health check transaction: {}", e);
-                }
-            }
-        }
-        Err(e) => {
-            error_message = format!("Database write check failed: {}", e);
-            let _ = tx.rollback().await;
-            return Ok((
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(HealthProbeResult {
-                    status: "unhealthy".to_string(),
-                    timestamp: Utc::now(),
-                    database_writable: false,
-                    message: error_message,
-                }),
-            ));
-        }
+        let _ = tx.rollback().await;
+        return Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(HealthProbeResult {
+                status: "unhealthy".to_string(),
+                timestamp: Utc::now(),
+                database_writable: false,
+                message: format!("Database write check failed: {e}"),
+            }),
+        ));
+    }
+
+    if let Err(e) = tx.rollback().await {
+        warn!("Failed to rollback health check transaction: {e}");
     }
 
     Ok((
@@ -632,7 +620,7 @@ pub async fn readiness_probe(
         Json(HealthProbeResult {
             status: "healthy".to_string(),
             timestamp: Utc::now(),
-            database_writable: is_writable,
+            database_writable: true,
             message: "Database is writable and operational".to_string(),
         }),
     ))

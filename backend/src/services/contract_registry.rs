@@ -76,7 +76,9 @@ impl ContractRegistry {
             return Ok(());
         }
 
-        if let (Some(caller_org), Some(contract_org)) = (&auth.organization_id, &entry.organization_id) {
+        if let (Some(caller_org), Some(contract_org)) =
+            (&auth.organization_id, &entry.organization_id)
+        {
             if caller_org == contract_org && !caller_org.is_empty() {
                 return Ok(());
             }
@@ -211,7 +213,7 @@ impl ContractRegistry {
         let store = self.entries.read().await;
         Ok(store
             .values()
-            .filter(|e| network.map_or(true, |n| e.network == n))
+            .filter(|e| network.is_none_or(|n| e.network == n))
             .cloned()
             .collect())
     }
@@ -330,7 +332,9 @@ mod tests {
         }
 
         // Attempting to deregister as attacker also fails
-        let dereg_err = registry.deregister_with_auth(&attacker_auth, &entry.id).await;
+        let dereg_err = registry
+            .deregister_with_auth(&attacker_auth, &entry.id)
+            .await;
         assert!(dereg_err.is_err());
 
         // Admin can update
@@ -341,7 +345,13 @@ mod tests {
             signature: None,
         };
         let admin_update = registry
-            .update_metadata(&admin_auth, &entry.id, Some("Vault_AdminUpdated"), None, None)
+            .update_metadata(
+                &admin_auth,
+                &entry.id,
+                Some("Vault_AdminUpdated"),
+                None,
+                None,
+            )
             .await;
         assert!(admin_update.is_ok());
     }

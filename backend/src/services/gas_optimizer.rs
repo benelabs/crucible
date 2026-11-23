@@ -321,7 +321,10 @@ impl GasOptimizer {
     ///
     /// A formatted report string
     /// Estimates Soroban ledger storage byte footprints based on bytecode size and storage opcodes.
-    pub fn estimate_storage_footprint_from_bytecode(&self, bytecode: &[u8]) -> StorageFootprintEstimate {
+    pub fn estimate_storage_footprint_from_bytecode(
+        &self,
+        bytecode: &[u8],
+    ) -> StorageFootprintEstimate {
         let instance_storage_bytes = 64u64;
         let persistent_storage_bytes = if self.has_storage_ops(bytecode) {
             512u64 + (bytecode.len() as u64 / 4)
@@ -333,7 +336,8 @@ impl GasOptimizer {
         } else {
             64u64
         };
-        let total_read_bytes = persistent_storage_bytes + temporary_storage_bytes + instance_storage_bytes;
+        let total_read_bytes =
+            persistent_storage_bytes + temporary_storage_bytes + instance_storage_bytes;
         let total_write_bytes = if self.has_storage_ops(bytecode) {
             persistent_storage_bytes + temporary_storage_bytes
         } else {
@@ -350,15 +354,22 @@ impl GasOptimizer {
     }
 
     /// Estimates Soroban ledger storage byte footprints based on contract source code patterns.
-    pub fn estimate_storage_footprint_from_source(&self, source_code: &str) -> StorageFootprintEstimate {
+    pub fn estimate_storage_footprint_from_source(
+        &self,
+        source_code: &str,
+    ) -> StorageFootprintEstimate {
         let instance_storage_bytes = 64u64;
         let persistent_count = source_code.matches("persistent").count() as u64;
         let temporary_count = source_code.matches("temporary").count() as u64;
 
         let persistent_storage_bytes = 128u64 + (persistent_count * 256u64);
         let temporary_storage_bytes = temporary_count * 128u64;
-        let total_read_bytes = persistent_storage_bytes + temporary_storage_bytes + instance_storage_bytes;
-        let total_write_bytes = if source_code.contains(".set(") || source_code.contains(".set_") || source_code.contains("put(") {
+        let total_read_bytes =
+            persistent_storage_bytes + temporary_storage_bytes + instance_storage_bytes;
+        let total_write_bytes = if source_code.contains(".set(")
+            || source_code.contains(".set_")
+            || source_code.contains("put(")
+        {
             persistent_storage_bytes + temporary_storage_bytes
         } else {
             64u64
@@ -375,7 +386,9 @@ impl GasOptimizer {
 
     /// Calculates projected rent balance requirements and duration based on storage footprint estimates.
     pub fn project_rent_balance(&self, footprint: &StorageFootprintEstimate) -> RentProjection {
-        let projected_rent_per_ledger = ((footprint.persistent_storage_bytes * 2 + footprint.temporary_storage_bytes) / 100).max(1);
+        let projected_rent_per_ledger =
+            ((footprint.persistent_storage_bytes * 2 + footprint.temporary_storage_bytes) / 100)
+                .max(1);
         let monthly_ledgers = 518_400u64;
         let daily_ledgers = 17_280u64;
 
@@ -394,13 +407,15 @@ impl GasOptimizer {
     }
 
     /// Generates structured gas and storage optimization report.
-    pub fn generate_optimization_report(&self, result: &OptimizationResult) -> GasOptimizationReport {
-        let footprint = result.storage_footprint.clone().unwrap_or_else(|| {
-            StorageFootprintEstimate::default()
-        });
-        let rent = result.rent_projection.clone().unwrap_or_else(|| {
-            self.project_rent_balance(&footprint)
-        });
+    pub fn generate_optimization_report(
+        &self,
+        result: &OptimizationResult,
+    ) -> GasOptimizationReport {
+        let footprint = result.storage_footprint.clone().unwrap_or_default();
+        let rent = result
+            .rent_projection
+            .clone()
+            .unwrap_or_else(|| self.project_rent_balance(&footprint));
         let report_text = self.generate_report(result);
 
         GasOptimizationReport {
@@ -415,12 +430,11 @@ impl GasOptimizer {
     }
 
     pub fn generate_report(&self, result: &OptimizationResult) -> String {
-        let footprint = result.storage_footprint.clone().unwrap_or_else(|| {
-            StorageFootprintEstimate::default()
-        });
-        let rent = result.rent_projection.clone().unwrap_or_else(|| {
-            self.project_rent_balance(&footprint)
-        });
+        let footprint = result.storage_footprint.clone().unwrap_or_default();
+        let rent = result
+            .rent_projection
+            .clone()
+            .unwrap_or_else(|| self.project_rent_balance(&footprint));
 
         let mut report = format!(
             "=== Gas Optimization Report ===\n            Contract: {}\n            Total Opportunities: {}\n            Estimated Total Savings: {} gas\n\n            === Storage Footprint Estimates ===\n            Persistent Storage: {} bytes\n            Temporary Storage: {} bytes\n            Instance Storage: {} bytes\n            Total Read Footprint: {} bytes\n            Total Write Footprint: {} bytes\n\n            === Rent Balance Projections ===\n            Projected Rent Per Ledger: {} stroops\n            Estimated Monthly Rent: {} stroops\n            Recommended Rent Reserve: {} stroops\n            Projected Ledgers Supported: {}\n\n            Opportunities:\n",
@@ -440,9 +454,9 @@ impl GasOptimizer {
 
         for (idx, opp) in result.opportunities.iter().enumerate() {
             report.push_str(&format!(
-                "{}. [{}] {} - {} gas\n   {}\n",
+                "{}. [{:?}] {} - {} gas\n   {}\n",
                 idx + 1,
-                format!("{:?}", opp.severity),
+                opp.severity,
                 opp.optimization_type,
                 opp.estimated_gas_savings,
                 opp.description
@@ -460,7 +474,12 @@ impl GasOptimizer {
 
     fn has_redundant_checks(&self, bytecode: &[u8]) -> bool {
         // Check for repeated validation patterns
-        bytecode.len() > 500 && bytecode.windows(4).filter(|w| *w == [0x50, 0x50, 0x50, 0x50]).count() > 1
+        bytecode.len() > 500
+            && bytecode
+                .windows(4)
+                .filter(|w| *w == [0x50, 0x50, 0x50, 0x50])
+                .count()
+                > 1
     }
 
     fn has_inefficient_loops(&self, bytecode: &[u8]) -> bool {
@@ -487,7 +506,9 @@ mod tests {
     #[test]
     fn test_gas_optimizer_creation() {
         let optimizer = GasOptimizer::new();
-        assert!(optimizer.analyze_bytecode("0x123".to_string(), vec![]).is_err());
+        assert!(optimizer
+            .analyze_bytecode("0x123".to_string(), vec![])
+            .is_err());
     }
 
     #[test]
@@ -526,7 +547,7 @@ mod tests {
         let optimizer = GasOptimizer::new();
         let source = "fn process() { loop { break; } }";
         let result = optimizer.analyze_source_code("0x456".to_string(), source);
-        
+
         assert!(result.is_ok());
         let analysis = result.unwrap();
         assert!(analysis.total_opportunities > 0);
@@ -537,7 +558,7 @@ mod tests {
         let optimizer = GasOptimizer::new();
         let source = "let a = data.clone(); let b = a.clone();";
         let result = optimizer.analyze_source_code("0x789".to_string(), source);
-        
+
         assert!(result.is_ok());
         let analysis = result.unwrap();
         assert!(analysis.total_opportunities > 0);

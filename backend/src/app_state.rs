@@ -115,8 +115,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn application_states_construction_succeeds() {
+    #[tokio::test]
+    async fn application_states_construction_succeeds() {
         let services = test_services();
         let states = build_application_states(test_db_pool(), test_redis_client(), &services);
 
@@ -128,8 +128,8 @@ mod tests {
         assert!(states.profiling.db.is_some());
     }
 
-    #[test]
-    fn profiling_and_websocket_share_metrics_exporter() {
+    #[tokio::test]
+    async fn profiling_and_websocket_share_metrics_exporter() {
         let services = test_services();
         let states = build_application_states(test_db_pool(), test_redis_client(), &services);
 

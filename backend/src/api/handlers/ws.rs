@@ -121,12 +121,11 @@ impl WsState {
             }
         }
         if let Ok(secret) = std::env::var("JWT_SECRET") {
-            if !secret.trim().is_empty() {
-                if crate::api::middleware::auth::verify_hs256_jwt(token, secret.trim(), None, None)
+            if !secret.trim().is_empty()
+                && crate::api::middleware::auth::verify_hs256_jwt(token, secret.trim(), None, None)
                     .is_some()
-                {
-                    return true;
-                }
+            {
+                return true;
             }
         }
 
@@ -519,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_pong_timeout_configuration() {
-        assert!(PONG_TIMEOUT_SECS > PING_INTERVAL_SECS);
+        const { assert!(PONG_TIMEOUT_SECS > PING_INTERVAL_SECS) };
     }
 
     #[test]

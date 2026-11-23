@@ -2,31 +2,64 @@ use axum::{body::Body, http::Request, http::StatusCode};
 use backend::services::audit::{routes, AuditDomainEvent, AuditEventRequest, AuditService};
 use redis::AsyncCommands;
 use serde_json::json;
-use sqlx::{Executor, PgPool, Row};
+use sqlx::{PgPool, Row};
 use std::sync::Arc;
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, MutexGuard};
 use tower::ServiceExt;
 
-// Mock or test helpers for DB and Redis
-static DB_POOL: OnceCell<PgPool> = OnceCell::const_new();
-static REDIS_CLIENT: OnceCell<Arc<redis::Client>> = OnceCell::const_new();
+// All tests share one audit_logs table and Redis stream; serialize them.
+static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
-async fn setup() -> (AuditService, PgPool, Arc<redis::Client>) {
+type TestGuard = MutexGuard<'static, ()>;
+
+async fn setup() -> (AuditService, PgPool, Arc<redis::Client>, TestGuard) {
+    let guard = TEST_LOCK.lock().await;
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for tests");
     let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL must be set for tests");
     let db = PgPool::connect(&db_url).await.unwrap();
     let redis = Arc::new(redis::Client::open(redis_url).unwrap());
-    cleanup_audit_logs(&db).await;
-    (AuditService::new(db.clone(), redis.clone()), db, redis)
+    cleanup_audit_logs(&db, &redis).await;
+    (
+        AuditService::new(db.clone(), redis.clone()),
+        db,
+        redis,
+        guard,
+    )
 }
 
-async fn cleanup_audit_logs(db: &PgPool) {
+/// The audit service projects events onto the read table asynchronously.
+async fn wait_for_audit_events(db: &PgPool, expected: usize) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM audit_logs")
+                .fetch_one(db)
+                .await
+                .unwrap();
+            if count as usize >= expected {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("audit events were not projected to the read table");
+}
+
+async fn cleanup_audit_logs(db: &PgPool, redis: &redis::Client) {
     let _ = sqlx::query("DELETE FROM audit_logs").execute(db).await;
+    if let Ok(mut conn) = redis.get_multiplexed_async_connection().await {
+        let _: () = redis::cmd("DEL")
+            .arg("audit_event_stream")
+            .arg("audit:last_hash")
+            .query_async(&mut conn)
+            .await
+            .unwrap_or_default();
+    }
 }
 
 #[tokio::test]
 async fn test_log_event_success() {
-    let (service, db, redis) = setup().await;
+    let (service, db, redis, _guard) = setup().await;
     let event = AuditEventRequest {
         aggregate_id: None,
         event_type: "login_attempt".to_string(),
@@ -35,29 +68,24 @@ async fn test_log_event_success() {
     };
     let result = service.log_event(event.clone()).await;
     assert!(result.is_ok());
+    wait_for_audit_events(&db, 1).await;
     // Check DB
     let row = sqlx::query("SELECT event_type, user_id FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT 1")
         .bind(&event.event_type)
         .fetch_optional(&db)
         .await
         .unwrap();
-
-    let row = sqlx::query("SELECT event_type, user_id FROM audit_logs WHERE event_type = $1 ORDER BY timestamp DESC LIMIT 1")
-        .bind(&event.event_type)
-        .fetch_optional(&db)
-        .await
-        .unwrap();
-    let row = row.and_then(|row| {
+    let row = row.map(|row| {
         let event_type: String = row.get("event_type");
         let user_id: Option<String> = row.get("user_id");
-        Some((event_type, user_id))
+        (event_type, user_id)
     });
     assert_eq!(
         row.as_ref().map(|(_, user_id)| user_id.clone()),
         Some(Some("user123".to_string()))
     );
 
-    let mut conn = redis.get_async_connection().await.unwrap();
+    let mut conn = redis.get_multiplexed_async_connection().await.unwrap();
     let val: String = conn.lpop("audit_event_stream", None).await.unwrap();
     let parsed: AuditDomainEvent = serde_json::from_str(&val).unwrap();
     assert_eq!(parsed.event_type, "login_attempt");
@@ -65,7 +93,7 @@ async fn test_log_event_success() {
 
 #[tokio::test]
 async fn test_log_audit_event_handler() {
-    let (service, _, _) = setup().await;
+    let (service, _, _, _guard) = setup().await;
     let app = axum::Router::new().merge(routes(Arc::new(service)));
 
     let payload = AuditEventRequest {
@@ -94,7 +122,7 @@ async fn test_log_audit_event_handler() {
 
 #[tokio::test]
 async fn test_list_audit_reports() {
-    let (service, db, _) = setup().await;
+    let (service, db, _, _guard) = setup().await;
     let service = Arc::new(service);
     let app = axum::Router::new().merge(routes(service.clone()));
 
@@ -107,6 +135,7 @@ async fn test_list_audit_reports() {
         })
         .await
         .unwrap();
+    wait_for_audit_events(&db, 1).await;
 
     let response = app
         .oneshot(
@@ -124,12 +153,12 @@ async fn test_list_audit_reports() {
         .unwrap();
     let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(events.is_array());
-    assert!(events.as_array().unwrap().len() >= 1);
+    assert!(!events.as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn test_get_audit_report() {
-    let (service, db, _) = setup().await;
+    let (service, db, _, _guard) = setup().await;
     let service = Arc::new(service);
     let app = axum::Router::new().merge(routes(service.clone()));
 
@@ -142,6 +171,7 @@ async fn test_get_audit_report() {
         })
         .await
         .unwrap();
+    wait_for_audit_events(&db, 1).await;
 
     let row = sqlx::query("SELECT id, event_type FROM audit_logs ORDER BY timestamp DESC LIMIT 1")
         .fetch_optional(&db)
@@ -176,14 +206,26 @@ fn url_encode(s: &str) -> String {
 
 #[tokio::test]
 async fn test_audit_query_by_date_range() {
-    let (service, db, _) = setup().await;
+    let (service, db, _, _guard) = setup().await;
     let service = Arc::new(service);
     let app = axum::Router::new().merge(routes(service.clone()));
 
     let base_time = chrono::Utc::now();
 
-    insert_mock_audit_log(&db, "test_event_1", None, base_time - chrono::Duration::days(5)).await;
-    insert_mock_audit_log(&db, "test_event_2", None, base_time - chrono::Duration::days(2)).await;
+    insert_mock_audit_log(
+        &db,
+        "test_event_1",
+        None,
+        base_time - chrono::Duration::days(5),
+    )
+    .await;
+    insert_mock_audit_log(
+        &db,
+        "test_event_2",
+        None,
+        base_time - chrono::Duration::days(2),
+    )
+    .await;
     insert_mock_audit_log(&db, "test_event_3", None, base_time).await;
 
     let start_str = (base_time - chrono::Duration::days(4)).to_rfc3339();
@@ -201,7 +243,9 @@ async fn test_audit_query_by_date_range() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(events.as_array().unwrap().len(), 1);
     assert_eq!(events[0]["event_type"], "test_event_2");
@@ -209,19 +253,26 @@ async fn test_audit_query_by_date_range() {
     let uri_start_only = format!("/reports?start_date={}", url_encode(&start_str));
     let response = app
         .clone()
-        .oneshot(Request::builder().uri(uri_start_only).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri(uri_start_only)
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(events.as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]
 async fn test_audit_multi_tenant_isolation() {
-    let (service, db, _) = setup().await;
+    let (service, db, _, _guard) = setup().await;
     let service = Arc::new(service);
     let app = axum::Router::new().merge(routes(service.clone()));
 
@@ -253,7 +304,9 @@ async fn test_audit_multi_tenant_isolation() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(events.as_array().unwrap().len(), 1);
     assert_eq!(events[0]["event_type"], "tenant_a_event");
@@ -269,7 +322,9 @@ async fn test_audit_multi_tenant_isolation() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(events.as_array().unwrap().len(), 1);
     assert_eq!(events[0]["event_type"], "tenant_b_event");
@@ -277,7 +332,7 @@ async fn test_audit_multi_tenant_isolation() {
 
 #[tokio::test]
 async fn test_audit_pagination() {
-    let (service, db, _) = setup().await;
+    let (service, db, _, _guard) = setup().await;
     let service = Arc::new(service);
     let app = axum::Router::new().merge(routes(service.clone()));
 
@@ -294,10 +349,17 @@ async fn test_audit_pagination() {
 
     let response = app
         .clone()
-        .oneshot(Request::builder().uri("/reports?limit=2").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/reports?limit=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(events.as_array().unwrap().len(), 2);
     assert_eq!(events[0]["event_type"], "event_1");
@@ -313,7 +375,9 @@ async fn test_audit_pagination() {
         )
         .await
         .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let events: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(events.as_array().unwrap().len(), 2);
     assert_eq!(events[0]["event_type"], "event_3");

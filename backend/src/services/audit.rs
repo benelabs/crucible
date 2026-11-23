@@ -2,9 +2,11 @@
 //!
 //! Audit entries are cryptographically hash-chained using SHA-256 to provide
 //! tamper detection.  Each entry stores ``previous_hash`` (the hash of the
-//! preceding entry in the chain) and its own ``hash`` computed as::
+//! preceding entry in the chain) and its own ``hash`` computed as:
 //!
-//!     hash = SHA-256(previous_hash || serialized_entry)
+//! ```text
+//! hash = SHA-256(previous_hash || serialized_entry)
+//! ```
 //!
 //! Use :meth:`AuditService.verify_chain` to detect unauthorized insertion,
 //! deletion, or modification of any entry in the chain.
@@ -24,7 +26,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tracing::{instrument, info, error};
+use tracing::{error, info, instrument};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -171,16 +173,19 @@ impl AuditService {
     /// 4. Publishes the event (with hash fields) to the event stream.
     pub async fn log_event(&self, req: AuditEventRequest) -> Result<Uuid, AppError> {
         let event_id = Uuid::new_v4();
-        let aggregate_id = req.aggregate_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let aggregate_id = req
+            .aggregate_id
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = chrono::Utc::now();
 
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
 
         // Retrieve the previous hash from Redis (empty string for genesis).
-        let previous_hash: String = conn
-            .get("audit:last_hash")
-            .await
-            .unwrap_or_default();
+        let previous_hash: String = conn.get("audit:last_hash").await.unwrap_or_default();
 
         let mut domain_event = AuditDomainEvent {
             event_id,
@@ -259,7 +264,8 @@ impl AuditService {
         if let Some(ref et) = event_type {
             if et.len() > 100 {
                 return Err(AppError::ValidationError(
-                    "event_type filter parameter exceeds maximum allowed length of 100 characters".into(),
+                    "event_type filter parameter exceeds maximum allowed length of 100 characters"
+                        .into(),
                 ));
             }
             query_builder.push(" WHERE event_type = ");
@@ -270,7 +276,8 @@ impl AuditService {
         if let Some(ref t_id) = tenant_id {
             if t_id.len() > 100 {
                 return Err(AppError::ValidationError(
-                    "tenant_id filter parameter exceeds maximum allowed length of 100 characters".into(),
+                    "tenant_id filter parameter exceeds maximum allowed length of 100 characters"
+                        .into(),
                 ));
             }
             if has_where {
@@ -299,7 +306,6 @@ impl AuditService {
                 query_builder.push(" AND ");
             } else {
                 query_builder.push(" WHERE ");
-                has_where = true;
             }
             query_builder.push("timestamp <= ");
             query_builder.push_bind(end);
@@ -350,7 +356,11 @@ impl AuditService {
             let json = serde_json::to_string(&canonical).unwrap_or_default();
             let mut hasher = Sha256::new();
             hasher.update(json.as_bytes());
-            let computed: String = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect();
+            let computed: String = hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect();
 
             // Verify previous_hash link.
             if row.previous_hash != expected_prev || row.hash != computed {
@@ -426,7 +436,10 @@ pub async fn log_audit_event(
     Json(payload): Json<AuditEventRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let event_id = service.log_event(payload).await?;
-    Ok((axum::http::StatusCode::CREATED, Json(serde_json::json!({ "event_id": event_id }))))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(serde_json::json!({ "event_id": event_id })),
+    ))
 }
 
 #[utoipa::path(
@@ -535,11 +548,13 @@ pub async fn export_audit_logs(
     }
 
     let since = chrono::Utc::now() - chrono::Duration::days(service.max_export_days as i64);
-    let records = service.export_events(query.event_type, since, query.limit).await?;
+    let records = service
+        .export_events(query.event_type, since, query.limit)
+        .await?;
 
     if accept == "text/csv" {
         let mut wtr = csv::Writer::from_writer(Vec::new());
-        wtr.write_record(&[
+        wtr.write_record([
             "timestamp",
             "actor",
             "action",
@@ -571,7 +586,7 @@ pub async fn export_audit_logs(
             let metadata = record.details.to_string();
 
             let ts = record.timestamp.to_rfc3339();
-            wtr.write_record(&[
+            wtr.write_record([
                 ts.as_str(),
                 record.user_id.as_deref().unwrap_or(""),
                 &record.event_type,
@@ -583,11 +598,14 @@ pub async fn export_audit_logs(
             ])?;
         }
         wtr.flush()?;
-        let data = wtr.into_inner().map_err(|e| AppError::InternalError(e.to_string()))?;
+        let data = wtr
+            .into_inner()
+            .map_err(|e| AppError::InternalError(e.to_string()))?;
         Ok((
             [(axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8")],
             data,
-        ).into_response())
+        )
+            .into_response())
     } else {
         Ok(Json(records).into_response())
     }

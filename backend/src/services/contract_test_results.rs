@@ -89,8 +89,8 @@ impl StoreTestRunRequest {
         use sha2::Sha256;
 
         let checksum = self.compute_checksum();
-        let mut mac = Hmac::<Sha256>::new_from_slice(secret_key)
-            .expect("HMAC can take key of any size");
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(secret_key).expect("HMAC can take key of any size");
         mac.update(checksum.as_bytes());
         mac.update(b"|");
         let r_id = runner_id.into();
@@ -113,7 +113,10 @@ impl StoreTestRunRequest {
 
         // 1. If standalone checksum is provided, verify it
         if let Some(ref c) = self.checksum {
-            if !bool::from(subtle::ConstantTimeEq::ct_eq(c.as_bytes(), expected_checksum.as_bytes())) {
+            if !bool::from(subtle::ConstantTimeEq::ct_eq(
+                c.as_bytes(),
+                expected_checksum.as_bytes(),
+            )) {
                 return Err(AppError::ValidationError(
                     "cryptographic checksum mismatch for test run payload".to_string(),
                 ));
@@ -122,7 +125,10 @@ impl StoreTestRunRequest {
 
         // 2. If signed receipt is provided, verify checksum and signature
         if let Some(ref receipt) = self.receipt {
-            if !bool::from(subtle::ConstantTimeEq::ct_eq(receipt.checksum.as_bytes(), expected_checksum.as_bytes())) {
+            if !bool::from(subtle::ConstantTimeEq::ct_eq(
+                receipt.checksum.as_bytes(),
+                expected_checksum.as_bytes(),
+            )) {
                 return Err(AppError::ValidationError(
                     "receipt checksum does not match computed test run checksum".to_string(),
                 ));
@@ -139,12 +145,17 @@ impl StoreTestRunRequest {
                 mac.update(receipt.runner_id.as_bytes());
 
                 let expected_sig_bytes = mac.finalize().into_bytes();
-                let actual_sig_bytes = hex::decode(&receipt.signature)
-                    .map_err(|_| AppError::ValidationError("invalid hex signature format".to_string()))?;
+                let actual_sig_bytes = hex::decode(&receipt.signature).map_err(|_| {
+                    AppError::ValidationError("invalid hex signature format".to_string())
+                })?;
 
-                if !bool::from(subtle::ConstantTimeEq::ct_eq(actual_sig_bytes.as_slice(), expected_sig_bytes.as_slice())) {
+                if !bool::from(subtle::ConstantTimeEq::ct_eq(
+                    actual_sig_bytes.as_slice(),
+                    &expected_sig_bytes[..],
+                )) {
                     return Err(AppError::ValidationError(
-                        "cryptographic signature verification failed for test result witness".to_string(),
+                        "cryptographic signature verification failed for test result witness"
+                            .to_string(),
                     ));
                 }
             }
@@ -205,7 +216,10 @@ impl ContractTestResultStorageService {
         }
     }
 
-    pub async fn store_run(&self, mut request: StoreTestRunRequest) -> Result<StoredTestRun, AppError> {
+    pub async fn store_run(
+        &self,
+        mut request: StoreTestRunRequest,
+    ) -> Result<StoredTestRun, AppError> {
         validate_test_run(&request)?;
 
         if self.require_receipt && request.receipt.is_none() && request.checksum.is_none() {
@@ -224,12 +238,24 @@ impl ContractTestResultStorageService {
         let computed_checksum = request.compute_checksum();
 
         if let Some(obj) = request.metadata.as_object_mut() {
-            obj.insert("computedChecksum".to_string(), Value::String(computed_checksum.clone()));
+            obj.insert(
+                "computedChecksum".to_string(),
+                Value::String(computed_checksum.clone()),
+            );
             obj.insert("witnessVerified".to_string(), Value::Bool(is_verified));
             if let Some(ref receipt) = request.receipt {
-                obj.insert("runnerId".to_string(), Value::String(receipt.runner_id.clone()));
-                obj.insert("witnessSignature".to_string(), Value::String(receipt.signature.clone()));
-                obj.insert("signedAt".to_string(), Value::String(receipt.signed_at.to_rfc3339()));
+                obj.insert(
+                    "runnerId".to_string(),
+                    Value::String(receipt.runner_id.clone()),
+                );
+                obj.insert(
+                    "witnessSignature".to_string(),
+                    Value::String(receipt.signature.clone()),
+                );
+                obj.insert(
+                    "signedAt".to_string(),
+                    Value::String(receipt.signed_at.to_rfc3339()),
+                );
             }
         }
 
@@ -431,14 +457,17 @@ mod tests {
         // Rejected if payload was tampered after signing
         let mut tampered_signed_req = verified_req.clone();
         tampered_signed_req.contract_id = "malicious-contract".to_string();
-        let err = tampered_signed_req.verify_receipt(Some(secret)).unwrap_err();
+        let err = tampered_signed_req
+            .verify_receipt(Some(secret))
+            .unwrap_err();
         assert!(matches!(err, AppError::ValidationError(_)));
     }
 
     #[tokio::test]
     async fn test_enforced_receipt_mode() {
         let secret = b"runner-key";
-        let service = ContractTestResultStorageService::with_secret(pool(), Some(secret.to_vec()), true);
+        let service =
+            ContractTestResultStorageService::with_secret(pool(), Some(secret.to_vec()), true);
 
         // Missing receipt rejected when required
         let unsigned = sample_request();

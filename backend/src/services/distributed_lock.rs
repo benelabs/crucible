@@ -128,7 +128,10 @@ impl RedisNode for InMemoryRedisNode {
         }
         map.insert(
             key.to_string(),
-            (value.to_string(), Instant::now() + Duration::from_millis(ttl_ms)),
+            (
+                value.to_string(),
+                Instant::now() + Duration::from_millis(ttl_ms),
+            ),
         );
         true
     }
@@ -198,12 +201,13 @@ impl RedlockManager {
             }
 
             // Factor max clock drift: (ttl * drift_factor + network_variance) per Redlock spec
-            let drift = Duration::from_secs_f64(self.config.ttl.as_secs_f64() * self.config.drift_factor)
-                .saturating_add(self.config.network_variance);
+            let drift =
+                Duration::from_secs_f64(self.config.ttl.as_secs_f64() * self.config.drift_factor)
+                    .saturating_add(self.config.network_variance);
             let elapsed = start_time.elapsed();
             let validity = self.config.ttl.checked_sub(elapsed + drift);
 
-            if votes >= self.quorum() && validity.map_or(false, |v| v > Duration::ZERO) {
+            if votes >= self.quorum() && validity.is_some_and(|v| v > Duration::ZERO) {
                 debug!(%resource, votes, quorum = self.quorum(), "redlock acquired");
                 return Ok(LockGuard::spawn(
                     self.nodes.clone(),
@@ -483,7 +487,10 @@ mod tests {
             drift_factor: -0.01,
             ..RedlockConfig::default()
         };
-        assert!(matches!(config.validate(), Err(LockError::InvalidConfig(_))));
+        assert!(matches!(
+            config.validate(),
+            Err(LockError::InvalidConfig(_))
+        ));
     }
 
     #[tokio::test]

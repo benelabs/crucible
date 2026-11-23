@@ -3,7 +3,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, Request, StatusCode},
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::Response,
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -159,14 +159,14 @@ pub fn compute_hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
 
     // Inner hash: H((K' ^ ipad) || data)
     let mut inner_hasher = Sha256::new();
-    inner_hasher.update(&inner_pad);
+    inner_hasher.update(inner_pad);
     inner_hasher.update(data);
     let inner_hash = inner_hasher.finalize();
 
     // Outer hash: H((K' ^ opad) || inner_hash)
     let mut outer_hasher = Sha256::new();
-    outer_hasher.update(&outer_pad);
-    outer_hasher.update(&inner_hash);
+    outer_hasher.update(outer_pad);
+    outer_hasher.update(inner_hash);
     let outer_hash = outer_hasher.finalize();
 
     outer_hash.into()

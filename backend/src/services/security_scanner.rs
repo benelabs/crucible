@@ -52,7 +52,8 @@ impl SecurityScanner {
 
         let parser = wasmparser::Parser::new(0);
         for payload in parser.parse_all(wasm_bytes) {
-            payload.map_err(|e| format!("Malformed section header offset or payload length: {}", e))?;
+            payload
+                .map_err(|e| format!("Malformed section header offset or payload length: {}", e))?;
         }
 
         Ok(())
@@ -85,63 +86,62 @@ impl SecurityScanner {
                         id: Uuid::new_v4().to_string(),
                         severity: "critical".to_string(),
                         title: "Malformed WASM section header or truncated binary".to_string(),
-                        description: format!("Corrupted section boundary or payload offset detected: {}", err),
+                        description: format!(
+                            "Corrupted section boundary or payload offset detected: {}",
+                            err
+                        ),
                         line_number: None,
-                        recommendation: "Ensure WASM binary is compiled cleanly and not truncated.".to_string(),
+                        recommendation: "Ensure WASM binary is compiled cleanly and not truncated."
+                            .to_string(),
                     });
                     break;
                 }
             };
 
-            match payload {
-                wasmparser::Payload::CodeSectionEntry(body) => {
-                    let mut reader = match body.get_operators_reader() {
-                        Ok(r) => r,
+            if let wasmparser::Payload::CodeSectionEntry(body) = payload {
+                let mut reader = match body.get_operators_reader() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        findings.push(SecurityFinding {
+                            id: Uuid::new_v4().to_string(),
+                            severity: "high".to_string(),
+                            title: "Invalid code section operators reader".to_string(),
+                            description: format!("Failed to read code section operators: {}", e),
+                            line_number: None,
+                            recommendation: "Verify code section integrity.".to_string(),
+                        });
+                        continue;
+                    }
+                };
+
+                while !reader.eof() {
+                    match reader.read() {
+                        Ok(op) => {
+                            if let wasmparser::Operator::MemoryGrow { .. } = op {
+                                findings.push(SecurityFinding {
+                                    id: Uuid::new_v4().to_string(),
+                                    severity: "medium".to_string(),
+                                    title: "Dynamic memory growth instruction detected".to_string(),
+                                    description: "Contract executes memory.grow opcode which can lead to unpredictable heap memory expansion.".to_string(),
+                                    line_number: None,
+                                    recommendation: "Avoid unbounded dynamic memory growth in Soroban sandbox.".to_string(),
+                                });
+                            }
+                        }
                         Err(e) => {
                             findings.push(SecurityFinding {
                                 id: Uuid::new_v4().to_string(),
-                                severity: "high".to_string(),
-                                title: "Invalid code section operators reader".to_string(),
-                                description: format!("Failed to read code section operators: {}", e),
+                                severity: "critical".to_string(),
+                                title: "Truncated instruction sequence in function body"
+                                    .to_string(),
+                                description: format!("Operator read failed at offset: {}", e),
                                 line_number: None,
-                                recommendation: "Verify code section integrity.".to_string(),
+                                recommendation: "Reject corrupted WASM bytecode.".to_string(),
                             });
-                            continue;
-                        }
-                    };
-
-                    while !reader.eof() {
-                        match reader.read() {
-                            Ok(op) => {
-                                match op {
-                                    wasmparser::Operator::MemoryGrow { .. } => {
-                                        findings.push(SecurityFinding {
-                                            id: Uuid::new_v4().to_string(),
-                                            severity: "medium".to_string(),
-                                            title: "Dynamic memory growth instruction detected".to_string(),
-                                            description: "Contract executes memory.grow opcode which can lead to unpredictable heap memory expansion.".to_string(),
-                                            line_number: None,
-                                            recommendation: "Avoid unbounded dynamic memory growth in Soroban sandbox.".to_string(),
-                                        });
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            Err(e) => {
-                                findings.push(SecurityFinding {
-                                    id: Uuid::new_v4().to_string(),
-                                    severity: "critical".to_string(),
-                                    title: "Truncated instruction sequence in function body".to_string(),
-                                    description: format!("Operator read failed at offset: {}", e),
-                                    line_number: None,
-                                    recommendation: "Reject corrupted WASM bytecode.".to_string(),
-                                });
-                                break;
-                            }
+                            break;
                         }
                     }
                 }
-                _ => {}
             }
         }
 
@@ -268,9 +268,9 @@ mod tests {
     fn make_valid_wasm() -> Vec<u8> {
         vec![
             0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // \0asm v1
-            0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // Type sec
-            0x03, 0x02, 0x01, 0x00,                         // Func sec
-            0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,             // Code sec
+            0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // Type sec
+            0x03, 0x02, 0x01, 0x00, // Func sec
+            0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // Code sec
         ]
     }
 
@@ -293,7 +293,9 @@ mod tests {
         truncated.truncate(18); // Truncate file
 
         // Must NOT panic!
-        let report = scanner.scan_wasm_bytecode("TruncatedContract", &truncated).unwrap();
+        let report = scanner
+            .scan_wasm_bytecode("TruncatedContract", &truncated)
+            .unwrap();
         assert!(!report.passed);
         assert!(report.findings.iter().any(|f| f.severity == "critical"));
 
@@ -308,4 +310,3 @@ mod tests {
         assert!(SecurityScanner::validate_section_header_offsets(&invalid).is_err());
     }
 }
-

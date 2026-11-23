@@ -8,8 +8,6 @@
 
 use backend::services::tracing::{TracingConfig, TracingService};
 use tracing::{info_span, Instrument};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 #[cfg(test)]
 mod tests {

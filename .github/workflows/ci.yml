@@ -1,5 +1,8 @@
 name: CI
 
+# The backend is verified by .github/workflows/backend-ci.yml (tests, clippy,
+# formatting and SQLx offline/migrated-database builds); keep it excluded here.
+
 on:
   push:
     branches: [ "main" ]

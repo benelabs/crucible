@@ -277,7 +277,7 @@ pub async fn enqueue_backup(
     queue: &str,
     job: &BackupJob,
 ) -> Result<(), AppError> {
-    let mut conn = client.get_async_connection().await?;
+    let mut conn = client.get_multiplexed_async_connection().await?;
     let payload = serde_json::to_string(job).map_err(|e| AppError::Internal(e.to_string()))?;
     conn.rpush::<_, _, ()>(queue, payload).await?;
     Ok(())
@@ -289,7 +289,7 @@ pub async fn enqueue_restore(
     queue: &str,
     job: &RestoreJob,
 ) -> Result<(), AppError> {
-    let mut conn = client.get_async_connection().await?;
+    let mut conn = client.get_multiplexed_async_connection().await?;
     let payload = serde_json::to_string(job).map_err(|e| AppError::Internal(e.to_string()))?;
     conn.rpush::<_, _, ()>(queue, payload).await?;
     Ok(())
@@ -474,7 +474,10 @@ pub fn run_pg_restore(database_url: &str, input_path: &str) -> Result<(), AppErr
         .arg(&parts.database)
         .arg(input_path)
         .env_clear()
-        .env("PATH", std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into()))
+        .env(
+            "PATH",
+            std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into()),
+        )
         .env("PGPASSFILE", pgpass.path())
         .status()
         .map_err(|e| AppError::Internal(format!("failed to spawn pg_restore: {e}")))?;
@@ -507,17 +510,16 @@ pub fn encrypt_backup_stream_aes256(raw_bytes: &[u8], key: &[u8; 32]) -> Vec<u8>
 }
 
 /// Perform an automated daily verification test restoring a backup into a temporary database.
-pub async fn run_pitr_restore_drill(
-    backup_id: Uuid,
-    file_path: &str,
-) -> Result<bool, AppError> {
+pub async fn run_pitr_restore_drill(backup_id: Uuid, file_path: &str) -> Result<bool, AppError> {
     info!(
         backup_id = %backup_id,
         file_path = %file_path,
         "Initiating automated PITR restore verification drill"
     );
     if file_path.is_empty() {
-        return Err(AppError::Internal("Empty backup file path for restore drill".to_string()));
+        return Err(AppError::Internal(
+            "Empty backup file path for restore drill".to_string(),
+        ));
     }
     let now = Utc::now().timestamp();
     update_backup_prometheus_metrics(now);
@@ -527,7 +529,10 @@ pub async fn run_pitr_restore_drill(
 /// Update the Prometheus metric tracking the last successful backup timestamp.
 pub fn update_backup_prometheus_metrics(timestamp: i64) {
     BACKUP_LAST_SUCCESS_TIMESTAMP.store(timestamp, Ordering::SeqCst);
-    info!(timestamp = timestamp, "Updated BACKUP_LAST_SUCCESS_TIMESTAMP Prometheus metric");
+    info!(
+        timestamp = timestamp,
+        "Updated BACKUP_LAST_SUCCESS_TIMESTAMP Prometheus metric"
+    );
 }
 
 /// Retrieve the last successful backup epoch timestamp metric value.
@@ -937,7 +942,9 @@ mod tests {
         assert!(!contents.contains("DATABASE_URL"));
 
         drop(pgpass);
-        assert!(!path.exists(), "temporary pgpass must be wiped and removed on drop");
+        assert!(
+            !path.exists(),
+            "temporary pgpass must be wiped and removed on drop"
+        );
     }
 }
-

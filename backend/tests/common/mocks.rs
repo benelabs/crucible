@@ -1,4 +1,7 @@
-use wiremock::{matchers::{method, path}, Mock, MockServer, ResponseTemplate};
+use wiremock::{
+    matchers::{method, path},
+    Mock, MockServer, ResponseTemplate,
+};
 
 /// Reusable HTTP Mock Server Framework for Crucible integration testing.
 ///
@@ -47,6 +50,7 @@ impl MockHttpServer {
     }
 
     /// Exposes the underlying `wiremock::MockServer` for advanced mock configurations.
+    #[allow(dead_code)]
     pub fn server(&self) -> &MockServer {
         &self.server
     }

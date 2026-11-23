@@ -7,7 +7,7 @@ use axum::{
     extract::{Request, State},
     http::StatusCode,
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,9 @@ use std::sync::Arc;
 use tracing::{debug, error, warn};
 
 /// User role enumeration with granular enterprise capabilities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, sqlx::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, sqlx::Type,
+)]
 #[sqlx(type_name = "user_role", rename_all = "lowercase")]
 pub enum Role {
     Admin,
@@ -88,9 +90,7 @@ impl Role {
         match self {
             Role::Admin => PermissionBitmask::ALL,
             Role::Developer => {
-                PermissionBitmask::READ
-                    | PermissionBitmask::WRITE
-                    | PermissionBitmask::EXECUTE
+                PermissionBitmask::READ | PermissionBitmask::WRITE | PermissionBitmask::EXECUTE
             }
             Role::Auditor => PermissionBitmask::READ | PermissionBitmask::AUDIT,
             Role::Viewer => PermissionBitmask::READ,
@@ -184,7 +184,8 @@ impl AuthUser {
 
     /// Return effective permission bitmask (explicit permissions or fallback to role defaults).
     pub fn effective_permissions(&self) -> PermissionBitmask {
-        self.permissions.unwrap_or_else(|| self.role.default_permissions())
+        self.permissions
+            .unwrap_or_else(|| self.role.default_permissions())
     }
 
     /// Check if user belongs to the designated organization.
@@ -218,7 +219,10 @@ impl std::fmt::Display for PermissionCheckError {
                     required.0, actual.0
                 )
             }
-            Self::TenantIsolationViolation { user_org, target_org } => {
+            Self::TenantIsolationViolation {
+                user_org,
+                target_org,
+            } => {
                 write!(
                     f,
                     "Cross-tenant access forbidden: user organization {:?} cannot access organization {}",
@@ -250,10 +254,7 @@ pub fn action_to_bitmask(action: &str) -> PermissionBitmask {
 /// - Header `X-Organization-ID` or `X-Tenant-ID`
 /// - Path segments `/organizations/{id}/`, `/orgs/{id}/`, `/tenants/{id}/`, `/workspaces/{id}/`
 /// - Query string `?org_id={id}`, `?organization_id={id}`, `?tenant_id={id}`
-pub fn extract_target_tenant_id(
-    uri: &str,
-    headers: Option<&axum::http::HeaderMap>,
-) -> Option<i32> {
+pub fn extract_target_tenant_id(uri: &str, headers: Option<&axum::http::HeaderMap>) -> Option<i32> {
     // 1. Inspect HTTP headers for tenant context
     if let Some(headers) = headers {
         if let Some(val) = headers
@@ -383,7 +384,10 @@ impl PermissionChecker {
         user_id: i32,
         permission: &Permission,
     ) -> Result<bool, crate::error::AppError> {
-        let cache_key = format!("perm:{}:{}:{}", user_id, permission.resource, permission.action);
+        let cache_key = format!(
+            "perm:{}:{}:{}",
+            user_id, permission.resource, permission.action
+        );
 
         // Try cache first
         if let Ok(cached) = self.check_cache(&cache_key).await {
@@ -479,13 +483,13 @@ impl PermissionChecker {
     pub async fn invalidate_cache(&self, user_id: i32) -> Result<(), redis::RedisError> {
         let mut conn = self.redis.get_multiplexed_async_connection().await?;
         let pattern = format!("perm:{}:*", user_id);
-        
+
         // Delete all permission keys for this user
         let keys: Vec<String> = redis::cmd("KEYS")
             .arg(&pattern)
             .query_async(&mut conn)
             .await?;
-        
+
         if !keys.is_empty() {
             redis::cmd("DEL")
                 .arg(&keys)
@@ -505,13 +509,18 @@ impl PermissionChecker {
 pub fn require_permission(
     resource: impl Into<String>,
     action: impl Into<String>,
-) -> impl Fn(State<Arc<PermissionState>>, Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> + Clone {
+) -> impl Fn(
+    State<Arc<PermissionState>>,
+    Request,
+    Next,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
+       + Clone {
     let permission = Permission::new(resource, action);
-    
+
     move |State(state): State<Arc<PermissionState>>, request: Request, next: Next| {
         let permission = permission.clone();
         let state = state.clone();
-        
+
         Box::pin(async move {
             // Extract user from request extensions
             let user = match request.extensions().get::<AuthUser>() {
@@ -534,7 +543,12 @@ pub fn require_permission(
                 .map(|pq| pq.as_str())
                 .unwrap_or_else(|| request.uri().path());
 
-            if let Err(check_err) = check_permission(&user, required_bitmask, resource_uri, Some(request.headers())) {
+            if let Err(check_err) = check_permission(
+                &user,
+                required_bitmask,
+                resource_uri,
+                Some(request.headers()),
+            ) {
                 warn!(
                     user_id = user.id,
                     error = %check_err,
@@ -553,7 +567,10 @@ pub fn require_permission(
 
             match checker.has_permission(user.id, &permission).await {
                 Ok(true) => {
-                    debug!("Permission granted for user {} on {:?}", user.id, permission);
+                    debug!(
+                        "Permission granted for user {} on {:?}",
+                        user.id, permission
+                    );
                     next.run(request).await
                 }
                 Ok(false) => {
@@ -561,7 +578,10 @@ pub fn require_permission(
                     crate::api::errors::make_error_response(
                         StatusCode::FORBIDDEN,
                         "forbidden",
-                        &format!("Insufficient permissions: {} on {}", permission.action, permission.resource),
+                        &format!(
+                            "Insufficient permissions: {} on {}",
+                            permission.action, permission.resource
+                        ),
                     )
                 }
                 Err(e) => {
@@ -579,9 +599,9 @@ pub fn require_permission(
 
 /// Middleware to require specific role.
 pub async fn require_role(
-    State(state): State<Arc<PermissionState>>,
+    State(_state): State<Arc<PermissionState>>,
     required_role: Role,
-    mut request: Request,
+    request: Request,
     next: Next,
 ) -> Response {
     let user = match request.extensions().get::<AuthUser>() {
@@ -611,9 +631,10 @@ mod tests {
     use super::*;
     use sqlx::PgPool;
 
+    #[allow(dead_code)]
     async fn setup_test_db() -> PgPool {
         let pool = PgPool::connect_lazy("postgres://localhost/test").unwrap();
-        
+
         // Create test schema
         sqlx::query(
             r#"
@@ -693,28 +714,54 @@ mod tests {
 
     #[test]
     fn test_role_default_bitmask_permissions() {
-        assert!(Role::Admin.default_permissions().contains(PermissionBitmask::ALL));
-        assert!(Role::Developer.default_permissions().contains(PermissionBitmask::READ | PermissionBitmask::WRITE));
-        assert!(!Role::Viewer.default_permissions().contains(PermissionBitmask::WRITE));
-        assert!(Role::Auditor.default_permissions().contains(PermissionBitmask::AUDIT));
+        assert!(Role::Admin
+            .default_permissions()
+            .contains(PermissionBitmask::ALL));
+        assert!(Role::Developer
+            .default_permissions()
+            .contains(PermissionBitmask::READ | PermissionBitmask::WRITE));
+        assert!(!Role::Viewer
+            .default_permissions()
+            .contains(PermissionBitmask::WRITE));
+        assert!(Role::Auditor
+            .default_permissions()
+            .contains(PermissionBitmask::AUDIT));
     }
 
     #[test]
     fn test_extract_target_tenant_id() {
         // Path segment
-        assert_eq!(extract_target_tenant_id("/api/v1/organizations/42/contracts", None), Some(42));
-        assert_eq!(extract_target_tenant_id("/api/v1/orgs/101/workspaces", None), Some(101));
-        assert_eq!(extract_target_tenant_id("/tenants/77/dashboard", None), Some(77));
+        assert_eq!(
+            extract_target_tenant_id("/api/v1/organizations/42/contracts", None),
+            Some(42)
+        );
+        assert_eq!(
+            extract_target_tenant_id("/api/v1/orgs/101/workspaces", None),
+            Some(101)
+        );
+        assert_eq!(
+            extract_target_tenant_id("/tenants/77/dashboard", None),
+            Some(77)
+        );
         assert_eq!(extract_target_tenant_id("/contracts/analyze", None), None);
 
         // Query param
-        assert_eq!(extract_target_tenant_id("/api/v1/contracts?org_id=55", None), Some(55));
-        assert_eq!(extract_target_tenant_id("/api/v1/contracts?tenant_id=88", None), Some(88));
+        assert_eq!(
+            extract_target_tenant_id("/api/v1/contracts?org_id=55", None),
+            Some(55)
+        );
+        assert_eq!(
+            extract_target_tenant_id("/api/v1/contracts?tenant_id=88", None),
+            Some(88)
+        );
 
         // Header
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("x-organization-id", "99".parse().unwrap());
-        assert_eq!(extract_target_tenant_id("/api/v1/contracts", Some(&headers)), Some(99));
+        assert_eq!(
+            extract_target_tenant_id("/api/v1/contracts", Some(&headers)),
+            Some(99)
+        );
     }
 
     #[test]
@@ -770,12 +817,8 @@ mod tests {
         };
         let target_uri_org_a = "/api/v1/organizations/1/workspaces/42";
 
-        let allowed = check_permission(
-            &user_org_a,
-            PermissionBitmask::READ,
-            target_uri_org_a,
-            None,
-        );
+        let allowed =
+            check_permission(&user_org_a, PermissionBitmask::READ, target_uri_org_a, None);
         assert!(allowed.is_ok());
     }
 
@@ -785,12 +828,7 @@ mod tests {
         let target_uri_org_b = "/api/v1/organizations/999/workspaces/42";
 
         // Admin has superuser authority across all tenants
-        let admin_access = check_permission(
-            &admin,
-            PermissionBitmask::ALL,
-            target_uri_org_b,
-            None,
-        );
+        let admin_access = check_permission(&admin, PermissionBitmask::ALL, target_uri_org_b, None);
         assert!(admin_access.is_ok());
     }
 
@@ -800,12 +838,7 @@ mod tests {
         let uri = "/api/v1/organizations/1/contracts/deploy";
 
         // Viewer lacks WRITE/EXECUTE permissions
-        let result = check_permission(
-            &viewer,
-            PermissionBitmask::WRITE,
-            uri,
-            None,
-        );
+        let result = check_permission(&viewer, PermissionBitmask::WRITE, uri, None);
         assert!(matches!(
             result,
             Err(PermissionCheckError::InsufficientPermissions { .. })
@@ -818,12 +851,7 @@ mod tests {
         let uri = "/api/v1/health";
 
         // Unscoped global resource should succeed for authorized role
-        let result = check_permission(
-            &developer,
-            PermissionBitmask::READ,
-            uri,
-            None,
-        );
+        let result = check_permission(&developer, PermissionBitmask::READ, uri, None);
         assert!(result.is_ok());
     }
 
@@ -849,4 +877,3 @@ mod tests {
         );
     }
 }
-

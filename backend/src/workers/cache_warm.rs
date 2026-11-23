@@ -148,7 +148,10 @@ impl CacheWarmWorker {
             tokio::task::yield_now().await;
         }
 
-        info!("Pre-warmed {} contracts using keyset pagination", total_warmed);
+        info!(
+            "Pre-warmed {} contracts using keyset pagination",
+            total_warmed
+        );
         Ok(total_warmed)
     }
 
@@ -185,7 +188,9 @@ impl CacheWarmWorker {
     }
 
     /// Load dashboard metrics from database
-    async fn load_dashboard_metrics(&self) -> Result<DashboardMetrics, Box<dyn std::error::Error + Send + Sync>> {
+    async fn load_dashboard_metrics(
+        &self,
+    ) -> Result<DashboardMetrics, Box<dyn std::error::Error + Send + Sync>> {
         // This would be implemented with actual SQL queries
         // For now, returning a placeholder
         Ok(DashboardMetrics {
@@ -197,7 +202,9 @@ impl CacheWarmWorker {
     }
 
     /// Load popular builds from database
-    async fn load_popular_builds(&self) -> Result<Vec<BuildSummary>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn load_popular_builds(
+        &self,
+    ) -> Result<Vec<BuildSummary>, Box<dyn std::error::Error + Send + Sync>> {
         // This would be implemented with actual SQL queries
         // For now, returning a placeholder
         Ok(vec![
@@ -273,4 +280,3 @@ mod tests {
         assert_eq!(fallback.contract_batch_size(), 100);
     }
 }
-

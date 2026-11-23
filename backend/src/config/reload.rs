@@ -230,7 +230,11 @@ impl ConfigManager {
     pub async fn reload_from_redis(&self, redis: &RedisClient) -> Result<(), ConfigReloadError> {
         let mut conn = redis.get_multiplexed_async_connection().await?;
         let raw: Option<String> = conn.get("config:current").await?;
-        let json = raw.ok_or_else(|| ConfigReloadError::LoadError(ConfigError::LoadError("config:current missing".to_string())))?;
+        let json = raw.ok_or_else(|| {
+            ConfigReloadError::LoadError(ConfigError::LoadError(
+                "config:current missing".to_string(),
+            ))
+        })?;
         let mut new_config: BaseAppConfig = serde_json::from_str(&json)?;
 
         let active = self.active_connections();
@@ -298,20 +302,39 @@ impl ConfigManager {
         merge_json(&mut current_json, patch);
 
         // Re-inject sensitive fields skipped during serialization if not overridden by the patch
-        if let Some(db_obj) = current_json.get_mut("database").and_then(|v| v.as_object_mut()) {
+        if let Some(db_obj) = current_json
+            .get_mut("database")
+            .and_then(|v| v.as_object_mut())
+        {
             if !db_obj.contains_key("url") {
-                db_obj.insert("url".to_string(), serde_json::Value::String(current.database.url.clone()));
+                db_obj.insert(
+                    "url".to_string(),
+                    serde_json::Value::String(current.database.url.clone()),
+                );
             }
         }
-        if let Some(redis_obj) = current_json.get_mut("redis").and_then(|v| v.as_object_mut()) {
+        if let Some(redis_obj) = current_json
+            .get_mut("redis")
+            .and_then(|v| v.as_object_mut())
+        {
             if !redis_obj.contains_key("url") {
-                redis_obj.insert("url".to_string(), serde_json::Value::String(current.redis.url.clone()));
+                redis_obj.insert(
+                    "url".to_string(),
+                    serde_json::Value::String(current.redis.url.clone()),
+                );
             }
         }
         if let Some(tls) = &current.server.tls {
-            if let Some(tls_obj) = current_json.get_mut("server").and_then(|s| s.get_mut("tls")).and_then(|t| t.as_object_mut()) {
+            if let Some(tls_obj) = current_json
+                .get_mut("server")
+                .and_then(|s| s.get_mut("tls"))
+                .and_then(|t| t.as_object_mut())
+            {
                 if !tls_obj.contains_key("key_path") {
-                    tls_obj.insert("key_path".to_string(), serde_json::Value::String(tls.key_path.clone()));
+                    tls_obj.insert(
+                        "key_path".to_string(),
+                        serde_json::Value::String(tls.key_path.clone()),
+                    );
                 }
             }
         }

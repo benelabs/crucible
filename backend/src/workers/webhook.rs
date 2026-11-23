@@ -9,7 +9,7 @@ use sha2::Sha256;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use url::Url;
 use uuid::Uuid;
 

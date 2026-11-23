@@ -2,12 +2,7 @@
 
 use std::sync::Arc;
 
-use axum::{
-    extract::State,
-    http::header::CONTENT_TYPE,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::header::CONTENT_TYPE, response::IntoResponse, Json};
 use chrono::{DateTime, Utc};
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
@@ -64,7 +59,9 @@ pub struct HealthResponse {
     responses((status = 200, description = "Performance metrics", body = MetricsReport)),
     tag = "profiling"
 )]
-pub async fn get_metrics(State(state): State<Arc<AppState>>) -> Result<Json<MetricsReport>, AppError> {
+pub async fn get_metrics(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<MetricsReport>, AppError> {
     let _enter = tracing::Span::current();
     let _ = _enter.enter();
     info!("Collecting performance metrics");
@@ -84,7 +81,9 @@ pub async fn get_metrics(State(state): State<Arc<AppState>>) -> Result<Json<Metr
     responses((status = 200, description = "System health", body = HealthResponse)),
     tag = "profiling"
 )]
-pub async fn get_health(State(state): State<Arc<AppState>>) -> Result<Json<HealthResponse>, AppError> {
+pub async fn get_health(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<HealthResponse>, AppError> {
     let db_span = TracingService::db_query_span("SELECT 1", "postgres", "PING");
     let _db_enter = db_span.enter();
     let db_healthy = if let Some(ref pool) = state.db {
@@ -132,7 +131,10 @@ pub async fn get_prometheus_metrics(State(state): State<Arc<AppState>>) -> impl 
         metrics.uptime
     ));
 
-    ([(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], out)
+    (
+        [(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        out,
+    )
 }
 
 #[instrument(skip_all)]
@@ -154,9 +156,12 @@ pub async fn trigger_profile_collection(
 ) -> Result<ApiResponse<ProfileTriggerResponse>, AppError> {
     Ok(ApiResponse::new(ProfileTriggerResponse {
         profile_id: uuid::Uuid::new_v4(),
-        message: format!("Profiling collection triggered for label: {}", payload.label),
-        estimated_completion:
-            chrono::Utc::now() + chrono::Duration::seconds(payload.duration_secs as i64),
+        message: format!(
+            "Profiling collection triggered for label: {}",
+            payload.label
+        ),
+        estimated_completion: chrono::Utc::now()
+            + chrono::Duration::seconds(payload.duration_secs as i64),
     }))
 }
 

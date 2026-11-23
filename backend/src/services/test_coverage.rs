@@ -395,7 +395,8 @@ mod tests {
         assert_eq!(parsed.contract_id, None);
 
         let json_with_contract = r#"{"contractId":"c-456","projectName":"my-proj","branch":"main","commitSha":"123","coveragePercent":90.0,"totalLines":10,"coveredLines":9}"#;
-        let parsed_with_contract: NewTestCoverage = serde_json::from_str(json_with_contract).unwrap();
+        let parsed_with_contract: NewTestCoverage =
+            serde_json::from_str(json_with_contract).unwrap();
         assert_eq!(parsed_with_contract.contract_id.as_deref(), Some("c-456"));
     }
 
@@ -635,4 +636,3 @@ mod tests {
         assert_eq!(cov.coverage_percent, 5.0); // 1 / 20 * 100 = 5.0%
     }
 }
-

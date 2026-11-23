@@ -61,20 +61,18 @@ impl<T> Eq for PriorityJob<T> {}
 
 impl<T> PartialOrd for PriorityJob<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // Higher priority (lower enum value) is considered greater for priority scheduling
-        // If same priority, earlier enqueued jobs (smaller enqueued_at) come first
-        Some(
-            other
-                .priority
-                .cmp(&self.priority)
-                .then_with(|| other.enqueued_at.cmp(&self.enqueued_at)),
-        )
+        Some(self.cmp(other))
     }
 }
 
 impl<T> Ord for PriorityJob<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        // Higher priority (lower enum value) is considered greater for priority scheduling
+        // If same priority, earlier enqueued jobs (smaller enqueued_at) come first
+        other
+            .priority
+            .cmp(&self.priority)
+            .then_with(|| other.enqueued_at.cmp(&self.enqueued_at))
     }
 }
 
@@ -117,7 +115,11 @@ impl<T> QueueState<T> {
             high_queue: BinaryHeap::new(),
             medium_queue: BinaryHeap::new(),
             low_queue: BinaryHeap::new(),
-            quantum: [weights.high_weight, weights.medium_weight, weights.low_weight],
+            quantum: [
+                weights.high_weight,
+                weights.medium_weight,
+                weights.low_weight,
+            ],
             weights,
         }
     }

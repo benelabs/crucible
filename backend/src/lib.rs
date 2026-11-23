@@ -1,5 +1,13 @@
 //! Crucible backend library crate.
 
+// Pre-existing query row tuples, service constructors and inherent parsers are
+// intentionally kept stable; deny every other warning in backend CI.
+#![allow(
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::should_implement_trait
+)]
+
 pub mod api;
 pub mod app_state;
 pub mod config;

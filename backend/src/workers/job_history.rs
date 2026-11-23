@@ -261,8 +261,7 @@ mod tests {
     #[test]
     fn test_batch_constants() {
         assert_eq!(DEFAULT_PRUNE_BATCH_SIZE, 1_000);
-        assert!(DEFAULT_PRUNE_BATCH_SIZE > 0 && DEFAULT_PRUNE_BATCH_SIZE <= 5_000);
+        const { assert!(DEFAULT_PRUNE_BATCH_SIZE > 0 && DEFAULT_PRUNE_BATCH_SIZE <= 5_000) };
         assert_eq!(DEFAULT_PRUNE_BATCH_SLEEP_MS, 50);
     }
 }
-

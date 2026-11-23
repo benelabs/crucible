@@ -109,7 +109,7 @@ impl TracingConfig {
 
     /// Set custom sampling ratio (0.0 to 1.0)
     pub fn with_sampling_ratio(mut self, ratio: f64) -> Self {
-        self.sampling_ratio = ratio.max(0.0).min(1.0);
+        self.sampling_ratio = ratio.clamp(0.0, 1.0);
         self
     }
 
@@ -143,7 +143,10 @@ impl TracingService {
             .with_attributes(vec![
                 KeyValue::new(resource::SERVICE_NAME, config.service_name.clone()),
                 KeyValue::new(resource::SERVICE_VERSION, config.service_version.clone()),
-                KeyValue::new(resource::DEPLOYMENT_ENVIRONMENT_NAME, config.environment.clone()),
+                KeyValue::new(
+                    resource::DEPLOYMENT_ENVIRONMENT_NAME,
+                    config.environment.clone(),
+                ),
                 KeyValue::new("service.namespace", "crucible"),
             ])
             .build();
@@ -332,7 +335,7 @@ impl TracingService {
         }
         let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
         let parent_cx = propagator.extract(&carrier);
-        span.set_parent(parent_cx);
+        let _ = span.set_parent(parent_cx);
     }
 
     /// Spawn an asynchronous background task with current OpenTelemetry trace span context attached.
@@ -350,6 +353,7 @@ impl TracingService {
 #[derive(Debug, Clone)]
 pub struct DiskSpoolBuffer {
     spool_dir: std::path::PathBuf,
+    #[allow(dead_code)]
     max_spool_size_bytes: u64,
 }
 
@@ -422,9 +426,12 @@ mod tests {
 
     #[test]
     fn test_tracing_config_with_disk_spool() {
-        let config = TracingConfig::default()
-            .with_disk_spool("/tmp/telemetry_spool", 25 * 1024 * 1024);
-        assert_eq!(config.disk_spool_dir, Some(std::path::PathBuf::from("/tmp/telemetry_spool")));
+        let config =
+            TracingConfig::default().with_disk_spool("/tmp/telemetry_spool", 25 * 1024 * 1024);
+        assert_eq!(
+            config.disk_spool_dir,
+            Some(std::path::PathBuf::from("/tmp/telemetry_spool"))
+        );
         assert_eq!(config.max_spool_size_bytes, 25 * 1024 * 1024);
     }
 
@@ -463,11 +470,8 @@ mod tests {
 
     #[test]
     fn test_db_span_creation() {
-        let span = TracingService::db_query_span(
-            "SELECT * FROM users WHERE id = ",
-            "postgres",
-            "SELECT",
-        );
+        let span =
+            TracingService::db_query_span("SELECT * FROM users WHERE id = ", "postgres", "SELECT");
         drop(span);
     }
 
@@ -504,9 +508,8 @@ mod tests {
         let parent_span = TracingService::job_span("test_async_job", "job-1023");
         let _guard = parent_span.enter();
 
-        let handle = TracingService::spawn_instrumented(async {
-            tracing::Span::current().is_none()
-        });
+        let handle =
+            TracingService::spawn_instrumented(async { tracing::Span::current().is_none() });
 
         let is_span_none = handle.await.unwrap();
         assert!(!is_span_none);

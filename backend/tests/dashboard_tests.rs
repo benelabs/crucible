@@ -13,9 +13,19 @@ use backend::services::{
 };
 use redis::Client as RedisClient;
 use sqlx::postgres::PgPoolOptions;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::{Mutex, MutexGuard};
 use tower::ServiceExt;
 
+// These tests share one database and Redis instance, so serialise them to keep
+// cleanup and cache invalidation deterministic.
+static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+async fn test_lock() -> MutexGuard<'static, ()> {
+    TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await
+}
+
+#[allow(dead_code)]
 fn build_dashboard_state(pool: sqlx::PgPool, redis: RedisClient) -> Arc<DashboardState> {
     Arc::new(DashboardState {
         metrics_exporter: Arc::new(MetricsExporter::new()),
@@ -54,6 +64,7 @@ async fn setup_test_db() -> sqlx::PgPool {
         r#"
         CREATE TABLE IF NOT EXISTS transactions (
             id SERIAL PRIMARY KEY,
+            transaction_hash VARCHAR(255) UNIQUE NOT NULL,
             contract_id VARCHAR(255) NOT NULL,
             status VARCHAR(50) NOT NULL,
             processing_time_ms DOUBLE PRECISION,
@@ -87,11 +98,33 @@ async fn cleanup_test_data(pool: &sqlx::PgPool) {
         .ok();
 }
 
+async fn clear_dashboard_cache(redis: &RedisClient) {
+    let Ok(mut conn) = redis.get_multiplexed_async_connection().await else {
+        return;
+    };
+
+    for pattern in ["dashboard:*", "lock:dashboard:*"] {
+        let Ok(keys) = redis::cmd("KEYS")
+            .arg(pattern)
+            .query_async::<Vec<String>>(&mut conn)
+            .await
+        else {
+            continue;
+        };
+
+        for key in keys {
+            let _: Result<(), _> = redis::cmd("DEL").arg(key).query_async(&mut conn).await;
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_get_dashboard_metrics_empty_database() {
+    let _guard = test_lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     cleanup_test_data(&pool).await;
+    clear_dashboard_cache(&redis).await;
 
     let state = Arc::new(DashboardState {
         metrics_exporter: Arc::new(MetricsExporter::new()),
@@ -130,9 +163,11 @@ async fn test_get_dashboard_metrics_empty_database() {
 
 #[tokio::test]
 async fn test_get_dashboard_metrics_with_data() {
+    let _guard = test_lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     cleanup_test_data(&pool).await;
+    clear_dashboard_cache(&redis).await;
 
     // Insert test data
     sqlx::query("INSERT INTO contracts (contract_id) VALUES ('contract_1'), ('contract_2')")
@@ -141,10 +176,10 @@ async fn test_get_dashboard_metrics_with_data() {
         .unwrap();
 
     sqlx::query(
-        "INSERT INTO transactions (contract_id, status, processing_time_ms, gas_cost) 
-         VALUES ('contract_1', 'success', 100.0, 1500.0),
-                ('contract_1', 'success', 150.0, 1600.0),
-                ('contract_2', 'failed', 200.0, 1700.0)",
+        "INSERT INTO transactions (transaction_hash, contract_id, status, processing_time_ms, gas_cost)
+         VALUES ('tx_dashboard_1', 'contract_1', 'success', 100.0, 1500.0),
+                ('tx_dashboard_2', 'contract_1', 'success', 150.0, 1600.0),
+                ('tx_dashboard_3', 'contract_2', 'failed', 200.0, 1700.0)",
     )
     .execute(&pool)
     .await
@@ -188,9 +223,11 @@ async fn test_get_dashboard_metrics_with_data() {
 
 #[tokio::test]
 async fn test_get_contract_stats_not_found() {
+    let _guard = test_lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     cleanup_test_data(&pool).await;
+    clear_dashboard_cache(&redis).await;
 
     let state = Arc::new(DashboardState {
         metrics_exporter: Arc::new(MetricsExporter::new()),
@@ -221,9 +258,11 @@ async fn test_get_contract_stats_not_found() {
 
 #[tokio::test]
 async fn test_get_contract_stats_success() {
+    let _guard = test_lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     cleanup_test_data(&pool).await;
+    clear_dashboard_cache(&redis).await;
 
     // Insert test data
     sqlx::query("INSERT INTO contracts (contract_id) VALUES ('test_contract')")
@@ -232,9 +271,9 @@ async fn test_get_contract_stats_success() {
         .unwrap();
 
     sqlx::query(
-        "INSERT INTO transactions (contract_id, status, processing_time_ms, gas_cost) 
-         VALUES ('test_contract', 'success', 100.0, 1500.0),
-                ('test_contract', 'success', 150.0, 1600.0)",
+        "INSERT INTO transactions (transaction_hash, contract_id, status, processing_time_ms, gas_cost)
+         VALUES ('tx_contract_stats_1', 'test_contract', 'success', 100.0, 1500.0),
+                ('tx_contract_stats_2', 'test_contract', 'success', 150.0, 1600.0)",
     )
     .execute(&pool)
     .await
@@ -278,9 +317,11 @@ async fn test_get_contract_stats_success() {
 
 #[tokio::test]
 async fn test_redis_caching() {
+    let _guard = test_lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     cleanup_test_data(&pool).await;
+    clear_dashboard_cache(&redis).await;
 
     // Clear cache
     let mut conn = redis
@@ -342,9 +383,11 @@ async fn test_redis_caching() {
 
 #[tokio::test]
 async fn test_get_batch_contract_stats_success() {
+    let _guard = test_lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     cleanup_test_data(&pool).await;
+    clear_dashboard_cache(&redis).await;
 
     // Insert test data for multiple contracts
     sqlx::query("INSERT INTO contracts (contract_id) VALUES ('batch_c1'), ('batch_c2')")
@@ -353,10 +396,10 @@ async fn test_get_batch_contract_stats_success() {
         .unwrap();
 
     sqlx::query(
-        "INSERT INTO transactions (contract_id, status, processing_time_ms, gas_cost) 
-         VALUES ('batch_c1', 'success', 100.0, 1200.0),
-                ('batch_c1', 'success', 150.0, 1400.0),
-                ('batch_c2', 'failed', 200.0, 2000.0)",
+        "INSERT INTO transactions (transaction_hash, contract_id, status, processing_time_ms, gas_cost)
+         VALUES ('tx_batch_1', 'batch_c1', 'success', 100.0, 1200.0),
+                ('tx_batch_2', 'batch_c1', 'success', 150.0, 1400.0),
+                ('tx_batch_3', 'batch_c2', 'failed', 200.0, 2000.0)",
     )
     .execute(&pool)
     .await
@@ -371,14 +414,8 @@ async fn test_get_batch_contract_stats_success() {
     });
 
     let app = Router::new()
-        .route(
-            "/contracts/stats/batch",
-            post(get_batch_contract_stats),
-        )
-        .route(
-            "/contracts/stats",
-            get(get_batch_contract_stats_query),
-        )
+        .route("/contracts/stats/batch", post(get_batch_contract_stats))
+        .route("/contracts/stats", get(get_batch_contract_stats_query))
         .with_state(state);
 
     // Test POST batch

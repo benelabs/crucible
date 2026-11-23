@@ -178,7 +178,10 @@ impl RollbackManager {
             if let Some(state) = self.live_states.get(id) {
                 states.insert(id.clone(), state.clone());
             } else {
-                return Err(format!("Contract {} not found in live states for snapshot", id));
+                return Err(format!(
+                    "Contract {} not found in live states for snapshot",
+                    id
+                ));
             }
         }
         self.create_checkpoint(contract_ids.to_vec(), states)
@@ -204,7 +207,10 @@ impl RollbackManager {
 
     /// Rollback contracts to a specific checkpoint, restoring all storage tiers
     /// (instance, temporary, and persistent storage) as well as WASM bytecode.
-    pub fn rollback_to_checkpoint(&mut self, checkpoint_id: &str) -> Result<RollbackCheckpoint, String> {
+    pub fn rollback_to_checkpoint(
+        &mut self,
+        checkpoint_id: &str,
+    ) -> Result<RollbackCheckpoint, String> {
         let checkpoint = self
             .checkpoints
             .get(checkpoint_id)
@@ -216,7 +222,8 @@ impl RollbackManager {
             if let Some(live) = self.live_states.get_mut(contract_id) {
                 live.restore_from(saved_state);
             } else {
-                self.live_states.insert(contract_id.clone(), saved_state.clone());
+                self.live_states
+                    .insert(contract_id.clone(), saved_state.clone());
             }
         }
 
@@ -234,16 +241,18 @@ impl RollbackManager {
             .get(checkpoint_id)
             .ok_or_else(|| format!("Checkpoint {} not found", checkpoint_id))?;
 
-        let saved_state = checkpoint
-            .states
-            .get(contract_id)
-            .cloned()
-            .ok_or_else(|| format!("Contract {} not found in checkpoint {}", contract_id, checkpoint_id))?;
+        let saved_state = checkpoint.states.get(contract_id).cloned().ok_or_else(|| {
+            format!(
+                "Contract {} not found in checkpoint {}",
+                contract_id, checkpoint_id
+            )
+        })?;
 
         if let Some(live) = self.live_states.get_mut(contract_id) {
             live.restore_from(&saved_state);
         } else {
-            self.live_states.insert(contract_id.to_string(), saved_state.clone());
+            self.live_states
+                .insert(contract_id.to_string(), saved_state.clone());
         }
 
         Ok(saved_state)
@@ -387,7 +396,9 @@ mod tests {
     fn test_rollback_transaction_basic() {
         let mut manager = RollbackManager::new();
         manager.begin_transaction("tx1".to_string()).unwrap();
-        manager.record_state_change("tx1", "contract1".to_string()).unwrap();
+        manager
+            .record_state_change("tx1", "contract1".to_string())
+            .unwrap();
         let result = manager.rollback_transaction("tx1");
         assert!(result.is_ok());
     }
@@ -421,15 +432,18 @@ mod tests {
 
         // Snapshot prior to failed migration
         let checkpoint_id = manager
-            .snapshot_contracts(&[contract_id.clone()])
+            .snapshot_contracts(std::slice::from_ref(&contract_id))
             .expect("snapshot succeeds");
 
         // Simulate failed migration mutating temporary storage and persistent storage
         {
             let live = manager.get_live_state_mut(&contract_id).unwrap();
-            live.temporary_storage.insert("temp_session_key".to_string(), vec![0xFF, 0xFF]);
-            live.temporary_storage.insert("corrupted_temp_key".to_string(), vec![99]);
-            live.persistent_storage.insert("user_balance".to_string(), vec![0]);
+            live.temporary_storage
+                .insert("temp_session_key".to_string(), vec![0xFF, 0xFF]);
+            live.temporary_storage
+                .insert("corrupted_temp_key".to_string(), vec![99]);
+            live.persistent_storage
+                .insert("user_balance".to_string(), vec![0]);
             live.storage.insert("admin".to_string(), vec![0]);
         }
 
@@ -439,7 +453,9 @@ mod tests {
             corrupted.temporary_storage.get("temp_session_key").unwrap(),
             &vec![0xFF, 0xFF]
         );
-        assert!(corrupted.temporary_storage.contains_key("corrupted_temp_key"));
+        assert!(corrupted
+            .temporary_storage
+            .contains_key("corrupted_temp_key"));
 
         // Execute rollback to checkpoint
         let restored_cp = manager
@@ -460,7 +476,9 @@ mod tests {
             "Temporary storage nonce must be preserved"
         );
         assert!(
-            !restored.temporary_storage.contains_key("corrupted_temp_key"),
+            !restored
+                .temporary_storage
+                .contains_key("corrupted_temp_key"),
             "Mutated temporary keys added by failed migration must not exist"
         );
         assert_eq!(
@@ -499,7 +517,9 @@ mod tests {
         manager.register_live_state(state);
 
         // Begin transaction
-        manager.begin_transaction("migration_tx".to_string()).unwrap();
+        manager
+            .begin_transaction("migration_tx".to_string())
+            .unwrap();
 
         // Mutate temporary storage in transaction
         manager

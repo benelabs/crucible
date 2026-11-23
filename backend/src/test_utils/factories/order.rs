@@ -10,8 +10,10 @@ use uuid::Uuid;
 /// Status of an order in the system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum OrderStatus {
     /// Order has been created but not yet processed.
+    #[default]
     Pending,
     /// Order is being processed.
     Processing,
@@ -23,27 +25,17 @@ pub enum OrderStatus {
     Failed,
 }
 
-impl Default for OrderStatus {
-    fn default() -> Self {
-        OrderStatus::Pending
-    }
-}
-
 /// Payment method for an order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum PaymentMethod {
+    #[default]
     CreditCard,
     DebitCard,
     PayPal,
     BankTransfer,
     Crypto,
-}
-
-impl Default for PaymentMethod {
-    fn default() -> Self {
-        PaymentMethod::CreditCard
-    }
 }
 
 /// Order item representing a product in an order.

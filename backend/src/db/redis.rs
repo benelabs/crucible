@@ -1,7 +1,7 @@
 //! Redis connection manager setup with timeout and retry strategy.
 
-use redis::Client;
 use crate::config::redis::RedisConfig;
+use redis::Client;
 
 /// Establish a connection manager with exponential backoff and timeout logic.
 pub async fn connect_with_retry(
@@ -62,10 +62,7 @@ pub fn parse_redis_info(info_str: &str) -> (bool, RedisNodeRole, bool) {
 }
 
 /// Evaluates node health report based on parsed info flags and readiness requirements.
-pub fn evaluate_redis_readiness(
-    info_str: &str,
-    require_write: bool,
-) -> RedisHealthReport {
+pub fn evaluate_redis_readiness(info_str: &str, require_write: bool) -> RedisHealthReport {
     let (is_loading, role, is_read_only) = parse_redis_info(info_str);
 
     if is_loading {
@@ -84,7 +81,9 @@ pub fn evaluate_redis_readiness(
             is_loading: false,
             role,
             is_read_only: true,
-            details: Some("Redis node is in read-only replica mode; write operations unavailable".to_string()),
+            details: Some(
+                "Redis node is in read-only replica mode; write operations unavailable".to_string(),
+            ),
         };
     }
 
@@ -109,10 +108,10 @@ pub async fn check_redis_readiness(
 ) -> Result<RedisHealthReport, redis::RedisError> {
     let _: String = redis::cmd("PING").query_async(conn).await?;
 
-    let info_str: String = match redis::cmd("INFO").query_async(conn).await {
-        Ok(info) => info,
-        Err(_) => String::new(),
-    };
+    let info_str: String = redis::cmd("INFO")
+        .query_async(conn)
+        .await
+        .unwrap_or_default();
 
     let report = evaluate_redis_readiness(&info_str, require_write);
     Ok(report)

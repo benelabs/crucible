@@ -1,12 +1,12 @@
 //! Redis-backed JWT Token Revocation and Blocklist Service.
 
+use super::jwt::JwtKeyManager;
+use crate::error::AppError;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
-use crate::error::AppError;
-use super::jwt::JwtKeyManager;
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 
 /// Request payload to revoke a JWT token.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -46,7 +46,11 @@ fn verified_token_claims(
     }
 
     let now = u64::try_from(chrono::Utc::now().timestamp()).map_err(|_| invalid_token())?;
-    let ttl = claims.exp.checked_sub(now).filter(|ttl| *ttl > 0).ok_or_else(invalid_token)?;
+    let ttl = claims
+        .exp
+        .checked_sub(now)
+        .filter(|ttl| *ttl > 0)
+        .ok_or_else(invalid_token)?;
 
     Ok((claims.jti, ttl))
 }
@@ -80,15 +84,24 @@ impl TokenBlocklistService {
         let entry = RevokedTokenEntry {
             jti: jti.clone(),
             revoked_at: chrono::Utc::now(),
-            reason: req.reason.unwrap_or_else(|| "User logout or administrative revocation".to_string()),
+            reason: req
+                .reason
+                .unwrap_or_else(|| "User logout or administrative revocation".to_string()),
         };
 
         let key = format!("token_blocklist:{jti}");
         let value = serde_json::to_string(&entry).map_err(AppError::Serialization)?;
 
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
 
-        let _: () = conn.set_ex(key, value, ttl).await.map_err(AppError::Redis)?;
+        let _: () = conn
+            .set_ex(key, value, ttl)
+            .await
+            .map_err(AppError::Redis)?;
 
         Ok(())
     }
@@ -96,7 +109,11 @@ impl TokenBlocklistService {
     /// Checks if a JWT token identifier (`jti`) is present in the revocation blocklist.
     pub async fn is_token_revoked(&self, jti: &str) -> Result<bool, AppError> {
         let key = format!("token_blocklist:{jti}");
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
 
         let exists: bool = conn.exists(key).await.map_err(AppError::Redis)?;
         Ok(exists)
@@ -105,7 +122,11 @@ impl TokenBlocklistService {
     /// Checks if a user is marked suspended in the Redis blocklist.
     pub async fn is_user_suspended(&self, user_id: i32) -> Result<bool, AppError> {
         let key = format!("user_suspended:{user_id}");
-        let mut conn = self.redis.get_multiplexed_async_connection().await.map_err(AppError::Redis)?;
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
 
         let exists: bool = conn.exists(key).await.map_err(AppError::Redis)?;
         Ok(exists)
@@ -150,10 +171,8 @@ mod tests {
         let header = segments.next().unwrap();
         let payload = segments.next().unwrap();
         let signature = segments.next().unwrap();
-        let mut claims: serde_json::Value = serde_json::from_slice(
-            &URL_SAFE_NO_PAD.decode(payload).unwrap(),
-        )
-        .unwrap();
+        let mut claims: serde_json::Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).unwrap()).unwrap();
         claims["exp"] = serde_json::json!(chrono::Utc::now().timestamp() as u64 + 1);
         let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap());
         let tampered_token = format!("{header}.{payload}.{signature}");

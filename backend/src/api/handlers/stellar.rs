@@ -29,7 +29,7 @@ pub fn validate_stellar_memo(
 ) -> Result<(), (StatusCode, String)> {
     match memo_type {
         Some(StellarMemoType::Text) | None => {
-            let byte_len = memo.as_bytes().len();
+            let byte_len = memo.len();
             if byte_len > 28 {
                 return Err((
                     StatusCode::BAD_REQUEST,

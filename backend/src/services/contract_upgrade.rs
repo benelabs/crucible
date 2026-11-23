@@ -469,9 +469,10 @@ impl ContractUpgradeManager {
         validate_required_fields(&request)?;
         validate_strategy(&request)?;
 
-        if let (Some(protocol), Some(wasm_bytes)) =
-            (request.target_protocol, request.target_wasm_bytes.as_deref())
-        {
+        if let (Some(protocol), Some(wasm_bytes)) = (
+            request.target_protocol,
+            request.target_wasm_bytes.as_deref(),
+        ) {
             let check = self.verify_upgrade_compatibility(wasm_bytes, protocol)?;
             if let Some(existing) = request
                 .compatibility_checks
@@ -728,7 +729,10 @@ fn plan_id(request: &ContractUpgradeRequest) -> String {
     hasher.update(request.current_wasm_hash.as_bytes());
     hasher.update(request.target_wasm_hash.as_bytes());
     let digest = hasher.finalize();
-    let hex_digest = digest.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+    let hex_digest = digest
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
     format!("upg-{}", hex_digest)[..20].to_string()
 }
 

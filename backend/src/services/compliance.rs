@@ -85,7 +85,11 @@ impl ComplianceService {
         }
     }
 
-    pub fn with_endpoint_and_timeout(db: sqlx::PgPool, endpoint: String, timeout: Duration) -> Self {
+    pub fn with_endpoint_and_timeout(
+        db: sqlx::PgPool,
+        endpoint: String,
+        timeout: Duration,
+    ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(timeout)
             .build()
@@ -173,7 +177,8 @@ impl ComplianceService {
                         return Ok(SanctionCheckResult {
                             entity_id: req.entity_id,
                             status: SanctionStatus::Sanctioned,
-                            details: "Address flagged on OFAC Specially Designated Nationals list".to_string(),
+                            details: "Address flagged on OFAC Specially Designated Nationals list"
+                                .to_string(),
                             checked_at: now,
                             queued_for_manual_review: false,
                         });
@@ -191,13 +196,7 @@ impl ComplianceService {
         };
 
         // Strict timeout wrapper around external HTTP request
-        let check_future = async {
-            self.client
-                .post(&endpoint)
-                .json(&req)
-                .send()
-                .await
-        };
+        let check_future = async { self.client.post(&endpoint).json(&req).send().await };
 
         match tokio::time::timeout(self.timeout, check_future).await {
             Ok(Ok(response)) => {
@@ -210,7 +209,8 @@ impl ComplianceService {
                                 req.entity_id.clone(),
                                 req.address.clone(),
                                 "Malformed response from compliance API".to_string(),
-                            ).await;
+                            )
+                            .await;
 
                             Ok(SanctionCheckResult {
                                 entity_id: req.entity_id,
@@ -233,13 +233,18 @@ impl ComplianceService {
                     self.enqueue_manual_review(
                         req.entity_id.clone(),
                         req.address.clone(),
-                        format!("Upstream compliance service returned HTTP status {}", response.status()),
-                    ).await;
+                        format!(
+                            "Upstream compliance service returned HTTP status {}",
+                            response.status()
+                        ),
+                    )
+                    .await;
 
                     Ok(SanctionCheckResult {
                         entity_id: req.entity_id,
                         status: SanctionStatus::ManualReviewRequired,
-                        details: "Compliance service error; fallback to temporary manual review".to_string(),
+                        details: "Compliance service error; fallback to temporary manual review"
+                            .to_string(),
                         checked_at: now,
                         queued_for_manual_review: true,
                     })
@@ -251,12 +256,15 @@ impl ComplianceService {
                     req.entity_id.clone(),
                     req.address.clone(),
                     format!("Compliance request network error: {}", req_err),
-                ).await;
+                )
+                .await;
 
                 Ok(SanctionCheckResult {
                     entity_id: req.entity_id,
                     status: SanctionStatus::ManualReviewRequired,
-                    details: "Network failure calling compliance provider; enqueued for manual review".to_string(),
+                    details:
+                        "Network failure calling compliance provider; enqueued for manual review"
+                            .to_string(),
                     checked_at: now,
                     queued_for_manual_review: true,
                 })
@@ -266,13 +274,20 @@ impl ComplianceService {
                 self.enqueue_manual_review(
                     req.entity_id.clone(),
                     req.address.clone(),
-                    format!("External OFAC verification timed out after {:?}", self.timeout),
-                ).await;
+                    format!(
+                        "External OFAC verification timed out after {:?}",
+                        self.timeout
+                    ),
+                )
+                .await;
 
                 Ok(SanctionCheckResult {
                     entity_id: req.entity_id,
                     status: SanctionStatus::ManualReviewRequired,
-                    details: format!("Verification timed out after {:?}; enqueued for manual review", self.timeout),
+                    details: format!(
+                        "Verification timed out after {:?}; enqueued for manual review",
+                        self.timeout
+                    ),
                     checked_at: now,
                     queued_for_manual_review: true,
                 })
@@ -280,7 +295,12 @@ impl ComplianceService {
         }
     }
 
-    async fn enqueue_manual_review(&self, entity_id: String, address: Option<String>, reason: String) {
+    async fn enqueue_manual_review(
+        &self,
+        entity_id: String,
+        address: Option<String>,
+        reason: String,
+    ) {
         let mut queue = self.manual_review_queue.write().await;
         queue.push(ManualReviewItem {
             review_id: Uuid::new_v4().to_string(),
@@ -297,7 +317,11 @@ impl ComplianceService {
         queue.clone()
     }
 
-    pub async fn resolve_manual_review(&self, review_id: &str, _is_compliant: bool) -> Result<bool, AppError> {
+    pub async fn resolve_manual_review(
+        &self,
+        review_id: &str,
+        _is_compliant: bool,
+    ) -> Result<bool, AppError> {
         let mut queue = self.manual_review_queue.write().await;
         if let Some(item) = queue.iter_mut().find(|i| i.review_id == review_id) {
             item.resolved = true;
@@ -316,7 +340,8 @@ mod tests {
     async fn test_check_compliance_source() {
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
         let service = ComplianceService::new(pool);
-        let valid_code = "// SPDX-License-Identifier: MIT\nuse soroban_sdk::contract;\npub fn run() {}";
+        let valid_code =
+            "// SPDX-License-Identifier: MIT\nuse soroban_sdk::contract;\npub fn run() {}";
         let report = service.check_compliance(valid_code).await.unwrap();
         assert!(report.is_compliant);
 
@@ -349,13 +374,16 @@ mod tests {
             if let Ok((mut socket, _)) = listener.accept().await {
                 tokio::time::sleep(Duration::from_millis(300)).await;
                 use tokio::io::AsyncWriteExt;
-                let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").await;
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                    .await;
             }
         });
 
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
         let endpoint = format!("http://{}", addr);
-        let service = ComplianceService::with_endpoint_and_timeout(pool, endpoint, Duration::from_millis(50));
+        let service =
+            ComplianceService::with_endpoint_and_timeout(pool, endpoint, Duration::from_millis(50));
 
         let req = SanctionCheckRequest {
             entity_id: "entity_slow_api".to_string(),
@@ -372,7 +400,10 @@ mod tests {
         assert_eq!(queue[0].entity_id, "entity_slow_api");
         assert!(!queue[0].resolved);
 
-        let resolved = service.resolve_manual_review(&queue[0].review_id, true).await.unwrap();
+        let resolved = service
+            .resolve_manual_review(&queue[0].review_id, true)
+            .await
+            .unwrap();
         assert!(resolved);
     }
 }

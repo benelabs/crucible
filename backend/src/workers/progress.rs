@@ -16,6 +16,7 @@ pub struct PhaseTransitionEvent {
 /// Job progress tracker that monitors and reports job execution status
 #[derive(Debug, Clone)]
 pub struct JobProgressTracker {
+    #[allow(dead_code)]
     db_pool: PgPool,
     redis_client: Client,
     update_interval: Duration,
@@ -131,7 +132,10 @@ impl JobProgressTracker {
         let key = format!("job:{}:progress", job_id);
 
         let current = self.get_job_progress(job_id).await?;
-        let started_at = current.as_ref().map(|p| p.started_at).unwrap_or_else(Instant::now);
+        let started_at = current
+            .as_ref()
+            .map(|p| p.started_at)
+            .unwrap_or_else(Instant::now);
         let current_phase = current.as_ref().and_then(|p| p.current_phase.clone());
         let previous_phase = current.as_ref().and_then(|p| p.previous_phase.clone());
 
@@ -179,7 +183,10 @@ impl JobProgressTracker {
         let key = format!("job:{}:progress", job_id);
 
         let current = self.get_job_progress(job_id).await?;
-        let started_at = current.as_ref().map(|p| p.started_at).unwrap_or_else(Instant::now);
+        let started_at = current
+            .as_ref()
+            .map(|p| p.started_at)
+            .unwrap_or_else(Instant::now);
         let previous_phase = current.as_ref().and_then(|p| p.current_phase.clone());
 
         let transition_event = if previous_phase.as_deref() != Some(new_phase) {
@@ -226,11 +233,7 @@ impl JobProgressTracker {
         };
 
         redis_conn
-            .set_ex::<_, _, ()>(
-                &key,
-                serde_json::to_string(&progress)?,
-                3600_u64,
-            )
+            .set_ex::<_, _, ()>(&key, serde_json::to_string(&progress)?, 3600_u64)
             .await?;
 
         Ok(transition_event)

@@ -433,8 +433,8 @@ impl CacheMetricsService {
             "#,
         )
         .bind(query.namespace.as_deref())
-        .bind(query.from.clone())
-        .bind(query.to.clone())
+        .bind(query.from)
+        .bind(query.to)
         .bind(query.bounded_limit()?)
         .bind(query.offset())
         .fetch_all(&self.db)
@@ -476,8 +476,8 @@ impl CacheMetricsService {
             "#,
         )
         .bind(query.namespace.as_deref())
-        .bind(query.from.clone())
-        .bind(query.to.clone())
+        .bind(query.from)
+        .bind(query.to)
         .fetch_one(&self.db)
         .await?;
 
@@ -492,8 +492,8 @@ impl CacheMetricsService {
             "#,
         )
         .bind(query.namespace.as_deref())
-        .bind(query.from.clone())
-        .bind(query.to.clone())
+        .bind(query.from)
+        .bind(query.to)
         .fetch_all(&self.db)
         .await?;
 

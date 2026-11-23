@@ -165,7 +165,8 @@ async fn run_job_loop(
 
         // Wait until the next tick using an interval with MissedTickBehavior::Skip
         // to prevent rapid burst executions if Tokio runtime is starved
-        let mut interval_ticker = tokio::time::interval(duration_until_next.max(Duration::from_millis(1)));
+        let mut interval_ticker =
+            tokio::time::interval(duration_until_next.max(Duration::from_millis(1)));
         interval_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval_ticker.tick().await; // consume initial tick
 
@@ -310,7 +311,7 @@ async fn execute_job_with_retries(job: &JobDefinition, ctx: JobContext) {
 
         // Spawn a blocking task to handle panics safely.
         // Or rather, we spawn a standard tokio task to catch unwinds.
-        let job_name = job.name.clone();
+        let _job_name = job.name.clone();
         let handler = handler_clone.clone();
 
         let task = tokio::spawn(async move { handler.run(ctx_clone).await });

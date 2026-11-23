@@ -83,7 +83,6 @@ jobs:
     name: cargo-audit (RUSTSEC CVEs)
     runs-on: ubuntu-latest
     # Run in parallel with cargo-deny; collect both results before blocking PR.
-    needs: []
 
     steps:
       - name: Checkout repository

@@ -106,7 +106,7 @@ mod tests {
     fn test_default_cors_config_is_valid() {
         let default_config = CorsConfig::default();
         assert_eq!(default_config.allowed_origins, vec!["*".to_string()]);
-        assert_eq!(default_config.allow_credentials, false);
+        assert!(!default_config.allow_credentials);
         assert!(default_config.validate().is_ok());
     }
 }

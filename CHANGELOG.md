@@ -1,3 +1,9 @@
+## [1.36.17](https://github.com/benelabs/crucible/compare/v1.36.16...v1.36.17) (2026-11-23)
+
+### Bug Fixes
+
+* **ci:** make backend CI verify tests, lints, and SQLx drift ([e92759e](https://github.com/benelabs/crucible/commit/e92759e1b0bdf106bcd0ec2f63da0acad839b623)), closes [#1490](https://github.com/benelabs/crucible/issues/1490)
+
 ## [1.36.16](https://github.com/benelabs/crucible/compare/v1.36.15...v1.36.16) (2026-11-21)
 
 ### Bug Fixes

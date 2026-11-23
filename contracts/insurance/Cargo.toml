@@ -1,5 +1,5 @@
 [package]
-license.workspace = true
+license = "MIT"
 name = "insurance"
 version = "0.1.0"
 edition = "2021"
@@ -11,9 +11,14 @@ crate-type = ["cdylib"]
 [dependencies]
 soroban-sdk = { version = "21.0.0", features = ["alloc"] }
 
+[dev-dependencies]
+soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+
 [profile.release]
 opt-level = "z"
 overflow-checks = false
 lto = true
 codegen-units = 1
 strip = true
+
+[workspace]

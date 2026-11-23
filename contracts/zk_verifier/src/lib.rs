@@ -1,19 +1,40 @@
 #![no_std]
+
+//! Groth16 proof verification on BN254, using Soroban's audited host pairing
+//! primitives. Proof points are Ethereum-compatible uncompressed encodings:
+//! G1 is `be(X) || be(Y)` (64 bytes), G2 is
+//! `be(X.c1) || be(X.c0) || be(Y.c1) || be(Y.c0)` (128 bytes), and public
+//! inputs are canonical big-endian BN254 scalar-field elements (32 bytes).
+//!
+//! The verification equation is
+//! `e(A, B) = e(α, β) · e(L, γ) · e(C, δ)` with
+//! `L = IC[0] + Σ input_i · IC[i+1]`, checked as a single multi-pairing:
+//! `e(A, B) · e(-α, β) · e(-L, γ) · e(-C, δ) = 1`.
+
+use core::convert::TryInto;
+
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
-    Bytes, Env, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype,
+    crypto::{
+        bn254::{Bn254Fr, Bn254G1Affine, Bn254G2Affine},
+        Hash,
+    },
+    panic_with_error, vec, Address, Bytes, BytesN, Env, Vec, U256,
 };
 
-/// Groth16 / Plonk Zero-Knowledge Proof parameters
+/// Groth16 proof over BN254.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Proof {
-    pub a: Bytes, // G1 point (compressed 64 bytes)
-    pub b: Bytes, // G2 point (compressed 128 bytes)
-    pub c: Bytes, // G1 point (compressed 64 bytes)
+    /// Uncompressed G1 point, 64 bytes.
+    pub a: Bytes,
+    /// Uncompressed G2 point, 128 bytes.
+    pub b: Bytes,
+    /// Uncompressed G1 point, 64 bytes.
+    pub c: Bytes,
 }
 
-/// Verification Key for a Zero-Knowledge circuit
+/// Verification key for a Groth16 circuit over BN254.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerificationKey {
@@ -21,7 +42,7 @@ pub struct VerificationKey {
     pub beta_g2: Bytes,
     pub gamma_g2: Bytes,
     pub delta_g2: Bytes,
-    pub ic: Vec<Bytes>, // IC vector for public inputs
+    pub ic: Vec<Bytes>, // IC vector: one point per public input, plus IC[0]
 }
 
 #[contracttype]
@@ -43,26 +64,75 @@ pub enum ZkError {
     AlreadyInitialized = 6,
     /// Point is the curve identity (infinity) — rejected before pairing.
     PointAtInfinity = 7,
-    /// Coordinates do not satisfy the BN254 / BLS12-381 curve equation.
+    /// Coordinates do not satisfy the BN254 curve equation.
     PointNotOnCurve = 8,
-    /// Point is on the curve but not in the prime-order subgroup.
+    /// Reserved for future use by a verifier with a non-cofactor-free group.
     PointNotInSubgroup = 9,
+    /// Public input is not a canonical BN254 scalar (`>= r`).
+    InvalidScalar = 10,
 }
 
-/// Compressed G1 point length used by the Crucible harness.
-const G1_LEN: u32 = 64;
-/// Compressed G2 point length used by the Crucible harness.
-const G2_LEN: u32 = 128;
-/// BN254 / BLS12-381 G1 short-Weierstrass `b` coefficient (y² = x³ + b).
-const CURVE_B: u64 = 3;
-/// Mock prime-order subgroup modulus used for containment checks in the harness.
-/// Real BN254/BLS12-381 use the curve group order; this stands in for r-torsion.
-const SUBGROUP_ORDER: u64 = 0x30644e72e131a029u64; // low limb of BN254 r
+/// Uncompressed BN254 G1 point length.
+const G1_LEN: usize = 64;
+/// Uncompressed BN254 G2 point length.
+const G2_LEN: usize = 128;
+/// BN254 scalar-field element length.
+const SCALAR_LEN: usize = 32;
+/// Maximum number of public inputs accepted by a single proof.
+const MAX_PUBLIC_INPUTS: u32 = 32;
+/// Domain separator for the public-input commitment hash.
+const INPUT_DOMAIN: &[u8; 21] = b"crucible.zk.inputs.v1";
 
-/// Zero-Knowledge Proof Verifier Contract
+/// BN254 base-field modulus p, big-endian (matches soroban-sdk's bn254 module).
+const BN254_FP_MODULUS_BE: [u8; 32] = [
+    0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
+    0x97, 0x81, 0x6a, 0x91, 0x68, 0x71, 0xca, 0x8d, 0x3c, 0x20, 0x8c, 0x16, 0xd8, 0x7c, 0xfd, 0x47,
+];
+
+/// BN254 scalar-field modulus r, big-endian (matches soroban-sdk's bn254 module).
+const BN254_FR_MODULUS_BE: [u8; 32] = [
+    0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
+    0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93, 0xf0, 0x00, 0x00, 0x01,
+];
+
+/// Zero-Knowledge Proof Verifier Contract (BN254 / Groth16).
 #[contract]
 #[derive(Default)]
 pub struct ZkVerifier;
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VkRegistered {
+    #[topic]
+    pub circuit_id: u64,
+    pub ic_len: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofRejected {
+    #[topic]
+    pub circuit_id: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofVerified {
+    #[topic]
+    pub circuit_id: u64,
+    pub count: u64,
+}
+
+/// Domain-separated SHA-256 commitment over the public inputs of a verified
+/// proof. This is emitted for callers that need to bind a proof to its
+/// statement; it is never used as a substitute for pairing verification.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublicInputsCommitted {
+    #[topic]
+    pub circuit_id: u64,
+    pub digest: Bytes,
+}
 
 #[contractimpl]
 impl ZkVerifier {
@@ -75,7 +145,7 @@ impl ZkVerifier {
         env.storage().instance().set(&DataKey::ProofCounter, &0u64);
     }
 
-    /// Register a new verification key for a given circuit ID.
+    /// Register a Groth16 verification key for a circuit ID. Admin only.
     pub fn register_vk(env: Env, circuit_id: u64, vk: VerificationKey) -> Result<(), ZkError> {
         let admin: Address = env
             .storage()
@@ -84,30 +154,36 @@ impl ZkVerifier {
             .ok_or(ZkError::NotAdmin)?;
         admin.require_auth();
 
-        if vk.ic.is_empty() {
+        if vk.ic.is_empty() || vk.ic.len() > MAX_PUBLIC_INPUTS + 1 {
             return Err(ZkError::InvalidPublicInputs);
         }
 
-        // Reject malformed VK points before they can poison later pairings.
-        validate_g1_point(&vk.alpha_g1)?;
-        validate_g2_point(&vk.beta_g2)?;
-        validate_g2_point(&vk.gamma_g2)?;
-        validate_g2_point(&vk.delta_g2)?;
+        // Reject malformed VK points before they can reach a pairing call.
+        validate_g1(&env, &vk.alpha_g1)?;
+        validate_g2(&vk.beta_g2)?;
+        validate_g2(&vk.gamma_g2)?;
+        validate_g2(&vk.delta_g2)?;
         for ic in vk.ic.iter() {
-            validate_g1_point(&ic)?;
+            validate_g1(&env, &ic)?;
         }
 
         env.storage()
             .instance()
             .set(&DataKey::VerificationKey(circuit_id), &vk);
 
-        env.events()
-            .publish((symbol_short!("vk_reg"), circuit_id), vk.ic.len());
+        VkRegistered {
+            circuit_id,
+            ic_len: vk.ic.len(),
+        }
+        .publish(&env);
 
         Ok(())
     }
 
-    /// Verify a zero-knowledge proof on-chain against stored verification key and public inputs.
+    /// Verify a Groth16 proof against a stored verification key and public inputs.
+    ///
+    /// Returns `Ok(false)` when the proof is well-formed but the pairing
+    /// equation does not hold. Malformed encodings return an error instead.
     pub fn verify_proof(
         env: Env,
         circuit_id: u64,
@@ -120,45 +196,44 @@ impl ZkVerifier {
             .get(&DataKey::VerificationKey(circuit_id))
             .ok_or(ZkError::CircuitNotFound)?;
 
-        // Validate structure lengths
-        if proof.a.len() < 32 || proof.b.len() < 32 || proof.c.len() < 32 {
-            return Err(ZkError::InvalidProofFormat);
-        }
-
-        const MAX_PUBLIC_INPUTS: u32 = 32;
-        if public_inputs.len() > MAX_PUBLIC_INPUTS {
+        if public_inputs.len() > MAX_PUBLIC_INPUTS || vk.ic.len() != public_inputs.len() + 1 {
             return Err(ZkError::InvalidPublicInputs);
         }
 
-        // IC length must equal public inputs length + 1 (for 1 + sum(input_i * IC_i))
-        if vk.ic.len() != public_inputs.len() + 1 {
-            return Err(ZkError::InvalidPublicInputs);
+        let a = to_g1(&env, &proof.a)?;
+        let b = to_g2(&env, &proof.b)?;
+        let c = to_g1(&env, &proof.c)?;
+        let alpha = to_g1(&env, &vk.alpha_g1)?;
+        let beta = to_g2(&env, &vk.beta_g2)?;
+        let gamma = to_g2(&env, &vk.gamma_g2)?;
+        let delta = to_g2(&env, &vk.delta_g2)?;
+
+        // L = IC[0] + Σ input_i · IC[i+1], computed with host MSM so all
+        // arithmetic is the real BN254 group law (no wrapping-u64 shortcuts).
+        let mut points = Vec::new(&env);
+        let mut scalars = Vec::new(&env);
+        points.push_back(to_g1(&env, &vk.ic.get(0).unwrap())?);
+        scalars.push_back(Bn254Fr::from_u256(U256::from_u32(&env, 1)));
+        for i in 0..public_inputs.len() {
+            points.push_back(to_g1(&env, &vk.ic.get(i + 1).unwrap())?);
+            scalars.push_back(to_scalar(&env, &public_inputs.get(i).unwrap())?);
         }
 
-        // Sub-group membership + non-infinity checks BEFORE any pairing work.
-        // Prevents subgroup-containment / small-order attacks on BN254 / BLS12-381.
-        validate_g1_point(&proof.a)?;
-        validate_g2_point(&proof.b)?;
-        validate_g1_point(&proof.c)?;
-        for input in public_inputs.iter() {
-            validate_public_input_scalar(&input)?;
-        }
-        for ic in vk.ic.iter() {
-            validate_g1_point(&ic)?;
-        }
+        let bn = env.crypto().bn254();
+        let l = bn.g1_msm(points, scalars);
 
-        // Groth16 pairing equation (mock BN254 / BLS12-381 host arithmetic):
-        // e(A, B) = e(α, β) · e(L, γ) · e(C, δ)
-        // with L = IC[0] + Σ public_input_i · IC[i+1]
-        let valid = groth16_pairing_check(&proof, &vk, &public_inputs);
+        // e(A,B) · e(-α,β) · e(-L,γ) · e(-C,δ) == 1. The host validates every
+        // G2 curve point (on-curve and prime-order subgroup) during this call.
+        let valid = bn.pairing_check(
+            vec![&env, a, -alpha, -l, -c],
+            vec![&env, b, beta, gamma, delta],
+        );
 
         if !valid {
-            env.events()
-                .publish((symbol_short!("zk_fail"), circuit_id), 0u32);
+            ProofRejected { circuit_id }.publish(&env);
             return Ok(false);
         }
 
-        // Increment verified proof counter
         let mut counter: u64 = env
             .storage()
             .instance()
@@ -169,8 +244,18 @@ impl ZkVerifier {
             .instance()
             .set(&DataKey::ProofCounter, &counter);
 
-        env.events()
-            .publish((symbol_short!("zk_pass"), circuit_id), counter);
+        ProofVerified {
+            circuit_id,
+            count: counter,
+        }
+        .publish(&env);
+
+        let digest = public_inputs_commitment(&env, circuit_id, &public_inputs);
+        PublicInputsCommitted {
+            circuit_id,
+            digest: Bytes::from_array(&env, &digest.to_array()),
+        }
+        .publish(&env);
 
         Ok(true)
     }
@@ -184,143 +269,128 @@ impl ZkVerifier {
     }
 }
 
-fn read_u64_le(bytes: &Bytes, offset: u32) -> u64 {
-    let mut out = [0u8; 8];
-    for i in 0..8u32 {
-        out[i as usize] = bytes.get(offset + i).unwrap_or(0);
+/// SHA-256(domain || circuit_id_be || input_count_be || inputs...).
+///
+/// Domain separation prevents a commitment from being reinterpreted as a hash
+/// produced by another protocol. This is a real cryptographic hash; it is used
+/// only for the emitted public-input binding, never to "verify" a proof.
+fn public_inputs_commitment(env: &Env, circuit_id: u64, public_inputs: &Vec<Bytes>) -> Hash<32> {
+    let mut material = Bytes::new(env);
+    material.extend_from_array(INPUT_DOMAIN);
+    material.extend_from_array(&circuit_id.to_be_bytes());
+    material.extend_from_array(&public_inputs.len().to_be_bytes());
+    for input in public_inputs.iter() {
+        material.append(&input);
     }
-    u64::from_le_bytes(out)
+    env.crypto().sha256(&material)
 }
 
-fn is_all_zero(bytes: &Bytes, len: u32) -> bool {
-    let n = core::cmp::min(bytes.len(), len);
-    for i in 0..n {
-        if bytes.get(i).unwrap_or(0) != 0 {
-            return false;
+/// Copies exactly `N` bytes or rejects the encoding.
+fn read_exact<const N: usize>(bytes: &Bytes, error: ZkError) -> Result<[u8; N], ZkError> {
+    if bytes.len() != N as u32 {
+        return Err(error);
+    }
+    let mut out = [0u8; N];
+    bytes.copy_into_slice(&mut out);
+    Ok(out)
+}
+
+/// Lexicographic big-endian comparison: `a < b`.
+fn be_lt(a: &[u8], b: &[u8; 32]) -> bool {
+    for i in 0..32 {
+        if a[i] != b[i] {
+            return a[i] < b[i];
         }
     }
-    true
+    false
 }
 
-/// Reject the point-at-infinity encoding and enforce the short-Weierstrass
-/// equation `y² = x³ + b` plus a prime-order subgroup membership heuristic.
-fn validate_g1_point(bytes: &Bytes) -> Result<(), ZkError> {
-    if bytes.len() < G1_LEN {
+/// Canonical BN254 field element: the two high flag bits are unset and the
+/// value is strictly below the modulus.
+fn valid_field_element(chunk: &[u8]) -> bool {
+    chunk[0] & 0xc0 == 0 && be_lt(chunk, &BN254_FP_MODULUS_BE)
+}
+
+fn is_zero(raw: &[u8]) -> bool {
+    raw.iter().all(|b| *b == 0)
+}
+
+fn to_g1(env: &Env, bytes: &Bytes) -> Result<Bn254G1Affine, ZkError> {
+    validate_g1(env, bytes)?;
+    let raw = read_exact::<G1_LEN>(bytes, ZkError::InvalidProofFormat)?;
+    Ok(Bn254G1Affine::from_bytes(BytesN::from_array(env, &raw)))
+}
+
+fn to_g2(env: &Env, bytes: &Bytes) -> Result<Bn254G2Affine, ZkError> {
+    validate_g2(bytes)?;
+    let raw = read_exact::<G2_LEN>(bytes, ZkError::InvalidProofFormat)?;
+    Ok(Bn254G2Affine::from_bytes(BytesN::from_array(env, &raw)))
+}
+
+fn to_scalar(env: &Env, bytes: &Bytes) -> Result<Bn254Fr, ZkError> {
+    let raw = read_exact::<SCALAR_LEN>(bytes, ZkError::InvalidPublicInputs)?;
+    if !be_lt(&raw, &BN254_FR_MODULUS_BE) {
+        return Err(ZkError::InvalidScalar);
+    }
+    Ok(Bn254Fr::from_bytes(BytesN::from_array(env, &raw)))
+}
+
+/// Validate an uncompressed G1 encoding and its curve membership.
+fn validate_g1(env: &Env, bytes: &Bytes) -> Result<(), ZkError> {
+    let raw = read_exact::<G1_LEN>(bytes, ZkError::InvalidProofFormat)?;
+    if is_zero(&raw) {
+        return Err(ZkError::PointAtInfinity);
+    }
+    let x: [u8; 32] = raw[..32].try_into().unwrap();
+    let y: [u8; 32] = raw[32..].try_into().unwrap();
+    if !valid_field_element(&x) || !valid_field_element(&y) {
         return Err(ZkError::InvalidProofFormat);
     }
-    if is_all_zero(bytes, G1_LEN) {
-        return Err(ZkError::PointAtInfinity);
-    }
-    let x = read_u64_le(bytes, 0);
-    let y = read_u64_le(bytes, 8);
-    if x == 0 && y == 0 {
-        return Err(ZkError::PointAtInfinity);
-    }
-    // BN254 / BLS12-381 G1: y² = x³ + 3 (harness uses wrapping u64 arithmetic).
-    let y2 = y.wrapping_mul(y);
-    let x3 = x.wrapping_mul(x).wrapping_mul(x);
-    let rhs = x3.wrapping_add(CURVE_B);
-    if y2 != rhs {
+    let point = Bn254G1Affine::from_bytes(BytesN::from_array(env, &raw));
+    if !env.crypto().bn254().g1_is_on_curve(&point) {
         return Err(ZkError::PointNotOnCurve);
     }
-    // Subgroup containment: [r]P must be infinity. With cofactor-1 BN254 G1 this
-    // is implied by the curve check; for BLS12-381-style cofactors we also reject
-    // obvious small-order residues via a modular order probe.
-    if !in_prime_subgroup(x, y) {
-        return Err(ZkError::PointNotInSubgroup);
-    }
     Ok(())
 }
 
-fn validate_g2_point(bytes: &Bytes) -> Result<(), ZkError> {
-    if bytes.len() < G2_LEN {
-        return Err(ZkError::InvalidProofFormat);
-    }
-    if is_all_zero(bytes, G2_LEN) {
+/// Validate an uncompressed G2 encoding. Full on-curve and subgroup checks are
+/// performed by the Soroban host when the point enters `pairing_check`; that
+/// is fail-closed (the host traps on invalid G2 points). Rejecting obvious bad
+/// encodings here keeps normal failures as typed errors.
+fn validate_g2(bytes: &Bytes) -> Result<(), ZkError> {
+    let raw = read_exact::<G2_LEN>(bytes, ZkError::InvalidProofFormat)?;
+    if is_zero(&raw) {
         return Err(ZkError::PointAtInfinity);
     }
-    let x0 = read_u64_le(bytes, 0);
-    let x1 = read_u64_le(bytes, 8);
-    let y0 = read_u64_le(bytes, 16);
-    let y1 = read_u64_le(bytes, 24);
-    if x0 == 0 && x1 == 0 && y0 == 0 && y1 == 0 {
-        return Err(ZkError::PointAtInfinity);
-    }
-    // G2 membership in the harness: reject the identity and obvious torsion
-    // residues. Full Fp2 curve arithmetic is deferred to the host pairing op;
-    // we still refuse points that would enable classic subgroup attacks.
-    let limb = x0.wrapping_add(x1).wrapping_add(y0).wrapping_add(y1);
-    if limb == 0 || !in_prime_subgroup(x0 | 1, y0 | 1) {
-        return Err(ZkError::PointNotInSubgroup);
-    }
-    Ok(())
-}
-
-/// Public inputs are field scalars — reject the zero/infinity encoding and
-/// require they lie in the scalar field subgroup (non-zero mod order).
-fn validate_public_input_scalar(bytes: &Bytes) -> Result<(), ZkError> {
-    if bytes.is_empty() {
-        return Err(ZkError::InvalidPublicInputs);
-    }
-    if is_all_zero(bytes, bytes.len()) {
-        return Err(ZkError::PointAtInfinity);
-    }
-    let s = read_u64_le(bytes, 0);
-    if s == 0 {
-        return Err(ZkError::PointAtInfinity);
-    }
-    if s % SUBGROUP_ORDER == 0 {
-        return Err(ZkError::PointNotInSubgroup);
-    }
-    Ok(())
-}
-
-/// Mock `[r]P = O` probe: reject coordinates that are 0 mod a small factor of r
-/// (classic small-order / subgroup-containment residue).
-fn in_prime_subgroup(x: u64, y: u64) -> bool {
-    if x == 0 || y == 0 {
-        return false;
-    }
-    // Points with both limbs divisible by a tiny cofactor factor are rejected.
-    const SMALL_FACTOR: u64 = 13;
-    !(x % SMALL_FACTOR == 0 && y % SMALL_FACTOR == 0)
-}
-
-/// Mock pairing product using wrapping-u64 exponents, matching the Crucible
-/// BN254 / BLS12-381 verifier harness encoding.
-fn groth16_pairing_check(proof: &Proof, vk: &VerificationKey, public_inputs: &Vec<Bytes>) -> bool {
-    if proof.a.is_empty() || proof.b.is_empty() || proof.c.is_empty() {
-        return false;
-    }
-    for input in public_inputs.iter() {
-        if input.is_empty() {
-            return false;
+    for chunk in raw.chunks(32) {
+        if !valid_field_element(chunk) {
+            return Err(ZkError::InvalidProofFormat);
         }
     }
+    Ok(())
+}
 
-    let a_x = read_u64_le(&proof.a, 0);
-    let b_x0 = read_u64_le(&proof.b, 0);
-    let c_x = read_u64_le(&proof.c, 0);
-    let alpha_x = read_u64_le(&vk.alpha_g1, 0);
-    let beta_x0 = read_u64_le(&vk.beta_g2, 0);
-    let gamma_x0 = read_u64_le(&vk.gamma_g2, 0);
-    let delta_x0 = read_u64_le(&vk.delta_g2, 0);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let mut l_x = read_u64_le(&vk.ic.get(0).unwrap(), 0);
-    let limit = public_inputs.len();
-    if limit > 32 {
-        return false;
+    /// SHA-256("crucible.zk.inputs.v1" || u64BE(101) || u32BE(1) || scalar(5)).
+    #[test]
+    fn public_inputs_commitment_matches_known_sha256_vector() {
+        let env = Env::default();
+        let mut input = [0u8; SCALAR_LEN];
+        input[SCALAR_LEN - 1] = 5;
+        let mut inputs = Vec::new(&env);
+        inputs.push_back(Bytes::from_array(&env, &input));
+
+        let digest = public_inputs_commitment(&env, 101, &inputs).to_array();
+        assert_eq!(
+            digest,
+            [
+                0x0e, 0xf4, 0xa7, 0x34, 0xff, 0xc1, 0x1b, 0x06, 0xf7, 0x5f, 0x21, 0x5e, 0x4c, 0x6b,
+                0x8e, 0x2d, 0x47, 0xf7, 0xfc, 0x98, 0x90, 0x7f, 0x37, 0xb3, 0x3f, 0x7c, 0x3e, 0x3a,
+                0x8c, 0x39, 0x4a, 0xc2,
+            ]
+        );
     }
-    for i in 0..limit {
-        let input = read_u64_le(&public_inputs.get(i).unwrap(), 0);
-        let ic_x = read_u64_le(&vk.ic.get(i + 1).unwrap(), 0);
-        l_x = l_x.wrapping_add(input.wrapping_mul(ic_x));
-    }
-
-    let lhs = a_x.wrapping_mul(b_x0);
-    let rhs = alpha_x
-        .wrapping_mul(beta_x0)
-        .wrapping_add(l_x.wrapping_mul(gamma_x0))
-        .wrapping_add(c_x.wrapping_mul(delta_x0));
-    lhs == rhs
 }

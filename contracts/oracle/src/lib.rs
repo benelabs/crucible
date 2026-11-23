@@ -1,5 +1,19 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec};
+
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OracleError {
+    PriceDataIsStale = 1,
+    PriceDeviationExceedsMaximumThresholdOf15percent = 2,
+    PriceMustBePositive = 3,
+    PriceNotFound = 4,
+    SourceIsDeactivated = 5,
+    SourceNotFound = 6,
+    SourceNotWhitelisted = 7,
+    NumSourcesMustBePositive = 8,
+}
+
 
 /// Maximum age of a price observation before it is considered stale (1 hour).
 const MAX_STALENESS_SECONDS: u64 = 3_600;
@@ -47,16 +61,16 @@ pub struct Oracle;
 #[contractimpl]
 impl Oracle {
     /// Load price data for `symbol` and verify it is fresher than [`MAX_STALENESS_SECONDS`].
-    fn load_fresh_price(env: &Env, symbol: String) -> Result<PriceData, &'static str> {
+    fn load_fresh_price(env: &Env, symbol: String) -> Result<PriceData, OracleError> {
         let storage = env.storage().instance();
         let price_data: PriceData = storage
             .get(&DataKey::Price(symbol))
-            .ok_or("Price not found")?;
+            .ok_or(OracleError::PriceNotFound)?;
 
         let current_time = env.ledger().timestamp();
         let age = current_time.saturating_sub(price_data.timestamp);
         if age > MAX_STALENESS_SECONDS {
-            return Err("Price data is stale");
+            return Err(OracleError::PriceDataIsStale);
         }
 
         Ok(price_data)
@@ -91,7 +105,7 @@ impl Oracle {
     }
 
     /// Register a new data source
-    pub fn register_source(env: Env, address: Address, name: String) -> Result<u64, &'static str> {
+    pub fn register_source(env: Env, address: Address, name: String) -> Result<u64, OracleError> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
 
@@ -125,7 +139,7 @@ impl Oracle {
         symbol: String,
         price: i128,
         source_name: String,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), OracleError> {
         source.require_auth();
 
         let storage = env.storage().instance();
@@ -136,18 +150,18 @@ impl Oracle {
             .unwrap_or(false);
 
         if !is_whitelisted {
-            return Err("Source not whitelisted");
+            return Err(OracleError::SourceNotWhitelisted);
         }
 
         // Verify the associated DataSource entity exists and is active (#1080)
         let data_source =
-            Self::find_source_by_address(&env, &source).ok_or("Source not found")?;
+            Self::find_source_by_address(&env, &source).ok_or(OracleError::SourceNotFound)?;
         if !data_source.active {
-            return Err("Source is deactivated");
+            return Err(OracleError::SourceIsDeactivated);
         }
 
         if price <= 0 {
-            return Err("Price must be positive");
+            return Err(OracleError::PriceMustBePositive);
         }
 
         // Check price deviation against previous price
@@ -159,7 +173,7 @@ impl Oracle {
                 let deviation_bps = (price_diff * 10000) / prev_price;
 
                 if deviation_bps > MAX_PRICE_DEVIATION_BPS {
-                    return Err("Price deviation exceeds maximum threshold of 15%");
+                    return Err(OracleError::PriceDeviationExceedsMaximumThresholdOf15percent);
                 }
             }
         }
@@ -209,21 +223,21 @@ impl Oracle {
 
     /// Get latest price for a symbol.
     /// Reverts if the observation is older than [`MAX_STALENESS_SECONDS`].
-    pub fn get_price(env: Env, symbol: String) -> Result<i128, &'static str> {
+    pub fn get_price(env: Env, symbol: String) -> Result<i128, OracleError> {
         let data = Self::load_fresh_price(&env, symbol)?;
         Ok(data.price)
     }
 
     /// Get price data with source info.
     /// Reverts if the observation is older than [`MAX_STALENESS_SECONDS`].
-    pub fn get_price_data(env: Env, symbol: String) -> Result<PriceData, &'static str> {
+    pub fn get_price_data(env: Env, symbol: String) -> Result<PriceData, OracleError> {
         Self::load_fresh_price(&env, symbol)
     }
 
     /// Aggregate prices from multiple sources using median
-    pub fn aggregate_price(env: Env, symbol: String, num_sources: u64) -> Result<i128, &'static str> {
+    pub fn aggregate_price(env: Env, symbol: String, num_sources: u64) -> Result<i128, OracleError> {
         if num_sources == 0 {
-            return Err("num_sources must be positive");
+            return Err(OracleError::NumSourcesMustBePositive);
         }
 
         let storage = env.storage().instance();
@@ -320,15 +334,15 @@ impl Oracle {
     }
 
     /// Get data source details
-    pub fn get_source(env: Env, source_id: u64) -> Result<DataSource, &'static str> {
+    pub fn get_source(env: Env, source_id: u64) -> Result<DataSource, OracleError> {
         env.storage()
             .instance()
             .get(&DataKey::DataSource(source_id))
-            .ok_or("Source not found")
+            .ok_or(OracleError::SourceNotFound)
     }
 
     /// Deactivate a data source
-    pub fn deactivate_source(env: Env, source_id: u64) -> Result<(), &'static str> {
+    pub fn deactivate_source(env: Env, source_id: u64) -> Result<(), OracleError> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
 
@@ -336,7 +350,7 @@ impl Oracle {
 
         let mut source: DataSource = storage
             .get(&DataKey::DataSource(source_id))
-            .ok_or("Source not found")?;
+            .ok_or(OracleError::SourceNotFound)?;
 
         source.active = false;
         storage.set(&DataKey::DataSource(source_id), &source);
@@ -371,7 +385,7 @@ impl Oracle {
     }
 
     /// Activate a data source
-    pub fn activate_source(env: Env, source_id: u64) -> Result<(), &'static str> {
+    pub fn activate_source(env: Env, source_id: u64) -> Result<(), OracleError> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
 
@@ -379,7 +393,7 @@ impl Oracle {
 
         let mut source: DataSource = storage
             .get(&DataKey::DataSource(source_id))
-            .ok_or("Source not found")?;
+            .ok_or(OracleError::SourceNotFound)?;
 
         source.active = true;
         source.last_update = env.ledger().timestamp();
@@ -399,12 +413,12 @@ impl Oracle {
         env: Env,
         symbol: String,
         max_age_seconds: u64,
-    ) -> Result<bool, &'static str> {
+    ) -> Result<bool, OracleError> {
         let storage = env.storage().instance();
 
         let price_data: PriceData = storage
             .get(&DataKey::Price(symbol))
-            .ok_or("Price not found")?;
+            .ok_or(OracleError::PriceNotFound)?;
 
         // Use saturating subtraction to prevent underflow if clock drifts backward
         let current_time = env.ledger().timestamp();

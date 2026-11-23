@@ -5,6 +5,9 @@ members = [
     "contracts/treasury",
     "contracts/proxy",
     "contracts/zk_verifier",
+    "contracts/governance",
+    "contracts/insurance",
+    "contracts/oracle",
     "crucible-macros",
     "examples/counter",
     "examples/token",
@@ -37,6 +40,7 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+overflow-checks = true
 
 [workspace.dependencies]
 soroban-sdk = { version = "28", features = ["testutils"] }

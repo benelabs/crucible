@@ -9,11 +9,11 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-soroban-sdk = { version = "21.0.0", features = ["alloc"] }
+soroban-sdk = { workspace = true }
 
 [profile.release]
 opt-level = "z"
-overflow-checks = false
+overflow-checks = true
 lto = true
 codegen-units = 1
 strip = true

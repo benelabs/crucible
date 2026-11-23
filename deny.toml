@@ -77,8 +77,8 @@ ignore = true
 # crates outright (e.g. known-bad or unwanted transitive dependencies).
 # ----------------------------------------------------------------------------
 [bans]
-multiple-versions = "warn"
-wildcards = "warn"
+multiple-versions = "deny"
+wildcards = "deny"
 # Crates that must never be linked. Add an entry to block an unsafe or
 # unwanted dependency from entering the tree.
 deny = []

@@ -13,14 +13,12 @@ use crate::checkpoint::{CheckpointId, CheckpointStack, CheckpointStats};
 use crate::cost::CostReport;
 use crate::sim::{PreparedTx, SimulatedTx};
 use crate::token::MockToken;
+use crate::zk::{self, Groth16Proof, Groth16VerifyingKey, PairingCurve, PlonkProof, G1, G2};
 use ed25519_dalek::{Signer as _, SigningKey as Ed25519SigningKey};
 use k256::ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey};
 use p256::ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey};
 use rand::SeedableRng as _;
 use rand_chacha::ChaCha8Rng;
-use crate::zk::{
-    self, G1, G2, Groth16Proof, Groth16VerifyingKey, PairingCurve, PlonkProof,
-};
 use soroban_sdk::{
     testutils::{ContractEvents, Events, Ledger, Register},
     Address, Env, FromVal, IntoVal, Val, Vec as SorobanVec,
@@ -171,48 +169,71 @@ impl Stroops {
     pub fn from_xlm_str(s: &str) -> Self {
         let s = s.trim();
         assert!(!s.is_empty(), "XLM amount string cannot be empty");
+        assert!(s.is_ascii(), "XLM amount must be ASCII: '{}'", s);
 
-        let (whole, frac_str) = if let Some((w, f)) = s.split_once('.') {
-            (w, f)
+        let is_negative = s.starts_with('-');
+        let unsigned = if is_negative || s.starts_with('+') {
+            &s[1..]
         } else {
-            (s, "")
+            s
+        };
+        assert!(!is_negative, "XLM amount cannot be negative: '{}'", s);
+        assert!(!unsigned.is_empty(), "Invalid XLM amount: '{}'", s);
+
+        let (whole, frac_str, has_decimal) = if let Some((w, f)) = unsigned.split_once('.') {
+            (w, f, true)
+        } else {
+            (unsigned, "", false)
         };
 
-        let xlm: i128 = whole
-            .parse()
-            .expect(&format!("Invalid XLM amount: '{}'", s));
-        assert!(xlm >= 0, "XLM amount cannot be negative: {}", s);
-
-        let mut frac: i128 = 0;
-        let mut divisor: i128 = 1;
-        for c in frac_str.chars().take(7) {
-            assert!(
-                c.is_ascii_digit(),
-                "Invalid character in fractional part: '{}'",
-                s
-            );
-            frac = frac * 10 + (c as i128 - '0' as i128);
-            divisor *= 10;
-        }
-        // Pad with zeros if fewer than 7 digits
-        for _ in frac_str.len()..7 {
-            frac *= 10;
-            divisor *= 10;
-        }
-        // Ensure we have exactly 7 digits of precision
         assert!(
-            frac_str.len() <= 7,
+            !whole.is_empty() || !frac_str.is_empty(),
+            "Invalid XLM amount: '{}'",
+            s
+        );
+        assert!(
+            whole.chars().all(|c| c.is_ascii_digit()),
+            "Invalid XLM amount: '{}'",
+            s
+        );
+        assert!(
+            frac_str.chars().all(|c| c.is_ascii_digit()),
+            "Invalid XLM amount: '{}'",
+            s
+        );
+        assert!(
+            !has_decimal || !frac_str.is_empty(),
+            "XLM amount cannot have an empty fractional part: '{}'",
+            s
+        );
+        assert!(
+            frac_str.chars().count() <= 7,
             "XLM amount has too many decimal places (max 7): '{}'",
             s
         );
 
+        let xlm: i128 = if whole.is_empty() {
+            0
+        } else {
+            whole
+                .parse()
+                .unwrap_or_else(|_| panic!("Invalid XLM amount: '{}'", s))
+        };
+
+        let mut frac: i128 = 0;
+        for c in frac_str.chars() {
+            frac = frac * 10 + (c as i128 - '0' as i128);
+        }
+        for _ in 0..(7 - frac_str.chars().count()) {
+            frac *= 10;
+        }
+
         let xlm_stroops = xlm
             .checked_mul(10_000_000)
-            .expect("XLM amount overflowed when converting to stroops");
-        let frac_stroops = frac * 10_000_000 / divisor;
+            .unwrap_or_else(|| panic!("XLM amount overflowed when converting to stroops: '{}'", s));
         let amount = xlm_stroops
-            .checked_add(frac_stroops)
-            .expect("Total stroops amount overflowed");
+            .checked_add(frac)
+            .unwrap_or_else(|| panic!("Total stroops amount overflowed: '{}'", s));
 
         Self { amount }
     }
@@ -224,19 +245,21 @@ impl Stroops {
     /// Use `from_parts` or `from_xlm_str` instead.
     ///
     /// # Panics
-    /// Panics if the result is negative or overflows.
+    /// Panics if the result is non-finite, negative, out of i128 range, or overflows.
     #[deprecated(
         since = "0.2.0",
         note = "Use `from_parts` or `from_xlm_str` to avoid lossy f64 conversion"
     )]
     pub fn xlm_frac(xlm: f64) -> Self {
+        assert!(xlm.is_finite(), "XLM amount must be finite: {}", xlm);
         assert!(xlm >= 0.0, "XLM amount cannot be negative: {}", xlm);
-        let amount = (xlm * 10_000_000.0).round() as i128;
+        let scaled = (xlm * 10_000_000.0).round();
         assert!(
-            amount >= 0,
-            "Converted stroops amount is negative, input may have been too small: {}",
+            scaled >= 0.0 && scaled <= i128::MAX as f64,
+            "XLM amount out of i128 range: {}",
             xlm
         );
+        let amount = scaled as i128;
         Self { amount }
     }
 
@@ -304,8 +327,12 @@ impl ProtocolVersion {
 
     /// Returns an iterator over all supported protocol versions.
     pub fn all() -> impl Iterator<Item = ProtocolVersion> {
-        [ProtocolVersion::Protocol20, ProtocolVersion::Protocol21, ProtocolVersion::Protocol22]
-            .into_iter()
+        [
+            ProtocolVersion::Protocol20,
+            ProtocolVersion::Protocol21,
+            ProtocolVersion::Protocol22,
+        ]
+        .into_iter()
     }
 }
 
@@ -572,7 +599,10 @@ impl EventMatches {
     }
 
     /// Filter matching events by topic pattern supporting wildcards (the `_` symbol).
-    pub fn filter_by_topic_pattern<T: IntoVal<Env, SorobanVec<Val>>>(&self, pattern: T) -> EventMatches {
+    pub fn filter_by_topic_pattern<T: IntoVal<Env, SorobanVec<Val>>>(
+        &self,
+        pattern: T,
+    ) -> EventMatches {
         let pattern_vec = pattern.into_val(&self.env);
         let mut filtered = SorobanVec::new(&self.env);
         for item in self.items.iter() {
@@ -785,9 +815,7 @@ impl MockEnv {
 
     /// Registers a [`MockToken`] by symbol into this environment's token registry.
     pub fn register_token(&self, symbol: &str, token: MockToken) {
-        self.tokens
-            .borrow_mut()
-            .insert(symbol.to_string(), token);
+        self.tokens.borrow_mut().insert(symbol.to_string(), token);
     }
 
     /// Get a contract ID by type.
@@ -1055,8 +1083,8 @@ impl MockEnv {
 
         // Round up so the clock never stops short of the requested duration.
         let ledgers = seconds.div_ceil(seconds_per_ledger);
-        let ledgers = u32::try_from(ledgers)
-            .expect("advance_ledger_time requires at most u32::MAX ledgers");
+        let ledgers =
+            u32::try_from(ledgers).expect("advance_ledger_time requires at most u32::MAX ledgers");
         self.advance_ledger(ledgers, seconds_per_ledger);
     }
 
@@ -2353,7 +2381,17 @@ impl MockEnvBuilder {
     }
 
     /// Add a named mock token with decimals.
+    ///
+    /// # Panics
+    /// Panics if `symbol` is `"XLM"` (case-insensitive) and `decimals != 7`.
     pub fn with_token(mut self, symbol: &str, decimals: u32) -> Self {
+        if symbol.eq_ignore_ascii_case("XLM") {
+            assert_eq!(
+                decimals, 7,
+                "XLM token must use 7 decimals, got {}",
+                decimals
+            );
+        }
         self.token_configs.push((symbol.to_string(), decimals));
         self
     }
@@ -2402,9 +2440,11 @@ impl MockEnvBuilder {
     /// }
     /// ```
     pub fn without_snapshots(mut self) -> Self {
-        self.env.inner.set_config(soroban_sdk::testutils::EnvTestConfig {
-            capture_snapshot_at_drop: false,
-        });
+        self.env
+            .inner
+            .set_config(soroban_sdk::testutils::EnvTestConfig {
+                capture_snapshot_at_drop: false,
+            });
         self
     }
 
@@ -2444,9 +2484,18 @@ mod builder_tests {
             .with_tokens([("USDC", 6), ("EURC", 6), ("BTC", 8)])
             .build();
 
-        assert_eq!(env.token("USDC").decimals(), 6);
-        assert_eq!(env.token("EURC").decimals(), 6);
-        assert_eq!(env.token("BTC").decimals(), 8);
+        assert_eq!(
+            env.token("USDC").decimals(),
+            env.token("USDC").token_client().decimals()
+        );
+        assert_eq!(
+            env.token("EURC").decimals(),
+            env.token("EURC").token_client().decimals()
+        );
+        assert_eq!(
+            env.token("BTC").decimals(),
+            env.token("BTC").token_client().decimals()
+        );
     }
 
     #[test]
@@ -2467,6 +2516,12 @@ mod builder_tests {
             via_with_tokens.token("BTC").decimals(),
             via_with_token.token("BTC").decimals()
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "XLM token must use 7 decimals")]
+    fn with_token_rejects_invalid_xlm_decimals() {
+        let _ = MockEnv::builder().with_token("XLM", 6).build();
     }
 }
 
@@ -2992,19 +3047,17 @@ mod time_advance_tests {
 
     #[test]
     fn advance_time_zero_duration_is_noop() {
-        let env = MockEnv::builder()
-            .at_timestamp(1_700_000_000)
-            .build();
-        
+        let env = MockEnv::builder().at_timestamp(1_700_000_000).build();
+
         // Verify initial state
         assert_eq!(env.timestamp(), 1_700_000_000);
-        
+
         // Advance by zero using Duration::ZERO equivalent
         env.advance_time(Duration::days(0));
-        
+
         // Timestamp should remain unchanged
         assert_eq!(env.timestamp(), 1_700_000_000);
-        
+
         // Also test with Duration::seconds(0)
         env.advance_time(Duration::seconds(0));
         assert_eq!(env.timestamp(), 1_700_000_000);
@@ -3014,9 +3067,9 @@ mod time_advance_tests {
     fn advance_sequence_zero_is_noop() {
         let env = MockEnv::builder().build();
         let initial_seq = env.ledger_sequence();
-        
+
         env.advance_sequence(0);
-        
+
         assert_eq!(env.ledger_sequence(), initial_seq);
     }
 
@@ -3201,6 +3254,23 @@ mod missing_lookup_tests {
     }
 
     #[test]
+    fn test_from_xlm_str_rejects_invalid_inputs() {
+        assert!(std::panic::catch_unwind(|| Stroops::from_xlm_str("")).is_err());
+        assert!(std::panic::catch_unwind(|| Stroops::from_xlm_str("1.")).is_err());
+        assert!(std::panic::catch_unwind(|| Stroops::from_xlm_str(".")).is_err());
+        assert!(std::panic::catch_unwind(|| Stroops::from_xlm_str("1.23456789")).is_err());
+        assert!(std::panic::catch_unwind(|| Stroops::from_xlm_str("1e3")).is_err());
+        assert!(std::panic::catch_unwind(|| Stroops::from_xlm_str("١.2")).is_err());
+    }
+
+    #[test]
+    fn test_xlm_frac_rejects_extreme_inputs() {
+        assert!(std::panic::catch_unwind(|| Stroops::xlm_frac(f64::NAN)).is_err());
+        assert!(std::panic::catch_unwind(|| Stroops::xlm_frac(f64::INFINITY)).is_err());
+        assert!(std::panic::catch_unwind(|| Stroops::xlm_frac(f64::MAX)).is_err());
+    }
+
+    #[test]
     fn test_with_token_and_token_accessors() {
         let env = MockEnv::builder()
             .with_token("USDC", 6)
@@ -3208,11 +3278,12 @@ mod missing_lookup_tests {
             .build();
 
         let usdc = env.token("USDC");
-        assert_eq!(usdc.decimals(), 6);
+        assert_eq!(usdc.decimals(), usdc.token_client().decimals());
 
         let usdc_opt = env.token_opt("USDC");
         assert!(usdc_opt.is_some());
-        assert_eq!(usdc_opt.unwrap().decimals(), 6);
+        let usdc_opt = usdc_opt.unwrap();
+        assert_eq!(usdc_opt.decimals(), usdc_opt.token_client().decimals());
 
         assert!(env.token_opt("UNKNOWN").is_none());
 
@@ -3221,7 +3292,10 @@ mod missing_lookup_tests {
 
         // Manually created MockToken works alongside registered tokens
         let manual_usdc = MockToken::new(&env, "USDC_MANUAL", 6);
-        assert_eq!(manual_usdc.decimals(), 6);
+        assert_eq!(
+            manual_usdc.decimals(),
+            manual_usdc.token_client().decimals()
+        );
     }
 
     #[test]
@@ -3249,9 +3323,7 @@ mod protocol_version_tests {
 
     #[test]
     fn test_with_protocol_version_sets_ledger() {
-        let env = MockEnv::builder()
-            .with_protocol_version(28)
-            .build();
+        let env = MockEnv::builder().with_protocol_version(28).build();
         assert_eq!(env.protocol_version(), 28);
     }
 
@@ -3326,7 +3398,7 @@ mod protocol_version_tests {
 #[cfg(test)]
 mod zk_pairing_harness_tests {
     use super::*;
-    use crate::zk::{self, encode_scalar, G1, G2, PairingCurve};
+    use crate::zk::{self, encode_scalar, PairingCurve, G1, G2};
     use soroban_sdk::{contract, contractimpl, Bytes};
 
     #[test]
@@ -3377,11 +3449,7 @@ mod zk_pairing_harness_tests {
         let env = MockEnv::default();
         let proof = env.generate_plonk_proof(PairingCurve::Bn254, 7);
         assert!(env.verify_plonk(PairingCurve::Bn254, &proof, 7));
-        assert!(!env.verify_plonk(
-            PairingCurve::Bn254,
-            &zk::tamper_plonk_proof(proof),
-            7
-        ));
+        assert!(!env.verify_plonk(PairingCurve::Bn254, &zk::tamper_plonk_proof(proof), 7));
     }
 
     /// On-chain Groth16 verifier that consumes harness-encoded proof bytes

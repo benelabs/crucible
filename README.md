@@ -84,6 +84,7 @@ crucible wraps the official `soroban-sdk` test utilities and builds a fluent, er
 - **Ledger time control** — jump forward in time, set arbitrary sequence numbers, or simulate a full epoch change with one call.
 - **Fixtures** — re-usable test setup structs with derive support for common patterns.
 - **Snapshot testing** — serialize contract state and diff it across test runs.
+- **Groth16 verification contract** — `contracts/zk_verifier` performs real BN254 pairing checks via Soroban host crypto (see its README).
 
 ---
 

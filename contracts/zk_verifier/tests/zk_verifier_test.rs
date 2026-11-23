@@ -1,193 +1,305 @@
 #![cfg(test)]
 
-use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, Vec};
-use zk_verifier::{Proof, VerificationKey, ZkVerifier, ZkVerifierClient};
+// Cryptographically meaningful vectors generated with arkworks BN254. Each G1
+// point is `be(X) || be(Y)`, each G2 point is
+// `be(X.c1) || be(X.c0) || be(Y.c1) || be(Y.c0)`, and the public input is a
+// canonical big-endian Fr element. The proof satisfies the Groth16 pairing
+// equation for the verification key below and the public input `5`.
+//
+// Test exponents (toxic waste, test-only): alpha=11, beta=13, gamma=17,
+// delta=19, IC=[23, 29], A=37, B=41, C=(37*41 - 11*13 - (23+5*29)*17)/19.
 
-fn setup_verifier(env: &Env) -> (Address, Address, ZkVerifierClient) {
+use soroban_sdk::{
+    testutils::Address as _, Address, Bytes, ConversionError, Env, InvokeError, Vec,
+};
+use zk_verifier::{Proof, VerificationKey, ZkError, ZkVerifier, ZkVerifierClient};
+
+/// BN254 scalar-field modulus r, big-endian.
+const BN254_R_BE: [u8; 32] = [
+    0x30, 0x64, 0x4e, 0x72, 0xe1, 0x31, 0xa0, 0x29, 0xb8, 0x50, 0x45, 0xb6, 0x81, 0x81, 0x58, 0x5d,
+    0x28, 0x33, 0xe8, 0x48, 0x79, 0xb9, 0x70, 0x91, 0x43, 0xe1, 0xf5, 0x93, 0xf0, 0x00, 0x00, 0x01,
+];
+
+const VK_ALPHA_G1: [u8; 64] = [
+    0x2a, 0x14, 0x70, 0x55, 0x37, 0xb0, 0x09, 0x18, 0x9d, 0xa8, 0x80, 0x86, 0x51, 0xee, 0xcd, 0xb8,
+    0x24, 0x82, 0x47, 0x7f, 0xe9, 0x2a, 0xc1, 0x2c, 0xa8, 0xb7, 0x1f, 0x80, 0xfc, 0x3d, 0x49, 0xef,
+    0x2d, 0xf7, 0xee, 0x7f, 0x24, 0x3e, 0xa8, 0xb3, 0x8e, 0x1d, 0xdf, 0x14, 0x02, 0x92, 0x58, 0x87,
+    0x7a, 0x61, 0x8c, 0x77, 0x9f, 0xd4, 0x71, 0x7d, 0xb6, 0x17, 0x7e, 0x19, 0xea, 0x67, 0xec, 0x38,
+];
+const VK_BETA_G2: [u8; 128] = [
+    0x00, 0x9e, 0xda, 0xf0, 0x69, 0x8a, 0x8c, 0x56, 0xf5, 0x11, 0x39, 0x58, 0x8a, 0xcc, 0x09, 0x4c,
+    0xee, 0x3c, 0x37, 0xd4, 0x27, 0xbb, 0x6d, 0x2e, 0xab, 0x83, 0x0a, 0xae, 0x52, 0x90, 0x97, 0xd1,
+    0x23, 0xad, 0x66, 0xf3, 0xa7, 0xcc, 0xa9, 0xdc, 0x75, 0x04, 0x96, 0x35, 0xfa, 0xeb, 0xd1, 0x24,
+    0x31, 0x62, 0x44, 0xb9, 0x1d, 0xe5, 0xfb, 0x27, 0x64, 0xcd, 0x15, 0x15, 0x72, 0xa9, 0x05, 0xf7,
+    0x27, 0x00, 0xe8, 0xa2, 0x9b, 0x7b, 0xb4, 0x5f, 0x30, 0x22, 0xa1, 0x8a, 0x07, 0xbd, 0xc6, 0x6d,
+    0x02, 0x54, 0x55, 0x9e, 0x17, 0xcc, 0xe6, 0x4e, 0x3b, 0x4a, 0xd2, 0x15, 0x78, 0xfc, 0xf4, 0x10,
+    0x1a, 0xd4, 0xf8, 0x7d, 0x3b, 0x43, 0x75, 0xa3, 0x99, 0x88, 0xac, 0x09, 0x9b, 0x04, 0x2b, 0x1e,
+    0x7c, 0x0c, 0x71, 0x56, 0x78, 0xe4, 0xc2, 0xbe, 0xa8, 0x90, 0x5f, 0x60, 0x7c, 0xf9, 0x50, 0xf8,
+];
+const VK_GAMMA_G2: [u8; 128] = [
+    0x22, 0x70, 0x71, 0xbb, 0xa5, 0xff, 0x3b, 0x47, 0xed, 0x8b, 0x50, 0x4b, 0xb5, 0xb2, 0x15, 0xbc,
+    0x70, 0x1d, 0x7a, 0x32, 0x59, 0xb9, 0x33, 0xbf, 0xf1, 0xa4, 0x16, 0x4e, 0xae, 0x49, 0x9c, 0x2c,
+    0x0c, 0x51, 0xa3, 0x67, 0xb6, 0x1d, 0x31, 0x19, 0x67, 0x7b, 0x29, 0x73, 0x9d, 0xdc, 0xcb, 0xb7,
+    0x80, 0x02, 0xb5, 0x55, 0x8d, 0x8f, 0x49, 0xff, 0x16, 0xe2, 0x99, 0xc1, 0xb4, 0x1f, 0x80, 0x98,
+    0x08, 0xbb, 0x18, 0x8b, 0x2a, 0x61, 0x87, 0xbb, 0x1e, 0x87, 0x83, 0x4c, 0x85, 0xa6, 0xa9, 0x17,
+    0x76, 0x3d, 0x65, 0xb9, 0x8f, 0xeb, 0xf2, 0xc4, 0x5e, 0xa3, 0x39, 0xdd, 0x77, 0xfa, 0xc4, 0x15,
+    0x18, 0xfd, 0x2f, 0xd1, 0x3b, 0xe8, 0x49, 0x4c, 0x39, 0xe8, 0xa9, 0x13, 0x25, 0xd1, 0xef, 0x3b,
+    0xa7, 0xd1, 0xa2, 0x05, 0xd1, 0x07, 0x88, 0xe3, 0x8b, 0xc9, 0xe0, 0x9d, 0x9b, 0xe8, 0x77, 0x69,
+];
+const VK_DELTA_G2: [u8; 128] = [
+    0x25, 0x40, 0x7b, 0xe3, 0x5f, 0x18, 0xc6, 0x59, 0x41, 0x74, 0x37, 0x48, 0x41, 0x31, 0x14, 0x66,
+    0xc0, 0xe6, 0x6f, 0xf0, 0x03, 0x76, 0x24, 0x48, 0xc0, 0x6b, 0xca, 0x4f, 0xa5, 0xe9, 0xc5, 0x4e,
+    0x15, 0xcb, 0xba, 0x9a, 0xb7, 0x3b, 0xc7, 0x3d, 0x0b, 0xa4, 0xad, 0x13, 0x2a, 0x15, 0xcb, 0x0c,
+    0x73, 0x10, 0x7a, 0x9c, 0x19, 0xb0, 0x40, 0xc4, 0xc7, 0x3d, 0x89, 0xf6, 0xbf, 0x75, 0x40, 0x4d,
+    0x1e, 0xde, 0xf8, 0x6c, 0x1a, 0x42, 0xfa, 0x85, 0xab, 0x6a, 0xe8, 0xd2, 0x68, 0xa7, 0xe9, 0xb4,
+    0x68, 0x90, 0xb2, 0x13, 0x0d, 0xd8, 0x3b, 0x91, 0xc8, 0x6c, 0x50, 0x4c, 0xf1, 0xf9, 0x3f, 0xbf,
+    0x2c, 0x75, 0x0c, 0x04, 0x51, 0x12, 0xe4, 0xab, 0x07, 0xf1, 0x8b, 0x12, 0x47, 0x53, 0x09, 0xce,
+    0xbd, 0xcb, 0x72, 0x6b, 0xda, 0x1c, 0xa9, 0x94, 0x8b, 0xac, 0xd4, 0x98, 0xa2, 0x8c, 0xf4, 0x11,
+];
+const VK_IC0: [u8; 64] = [
+    0x1e, 0x28, 0x26, 0x0f, 0x0e, 0xe9, 0x71, 0xde, 0xc1, 0xe8, 0x4c, 0xf8, 0x1f, 0xf2, 0x77, 0x6a,
+    0xd3, 0x14, 0xd2, 0xcf, 0xb9, 0xef, 0x81, 0xd4, 0xc9, 0x70, 0x62, 0x0c, 0x29, 0xb8, 0x11, 0xf1,
+    0x28, 0xfc, 0x8a, 0x72, 0xd4, 0xff, 0x12, 0x65, 0x4c, 0x3c, 0x39, 0xda, 0xb5, 0x4e, 0xae, 0xf9,
+    0x63, 0x8d, 0x28, 0xde, 0x73, 0x89, 0x59, 0x77, 0x9f, 0xcd, 0x3e, 0x7a, 0xc9, 0x18, 0xb3, 0x96,
+];
+const VK_IC1: [u8; 64] = [
+    0x16, 0x05, 0xff, 0xc1, 0xea, 0x2e, 0x1a, 0xef, 0x15, 0xd7, 0x74, 0xd3, 0x20, 0x71, 0x76, 0x42,
+    0x0c, 0x5c, 0xc4, 0x54, 0xb1, 0x9b, 0x55, 0x55, 0x85, 0x62, 0xb0, 0xc7, 0xdd, 0xf0, 0x0a, 0x7d,
+    0x0c, 0xf6, 0x05, 0x87, 0x3f, 0xaa, 0x80, 0x28, 0xdf, 0x38, 0xec, 0x2d, 0x08, 0x00, 0xd5, 0xdd,
+    0xc6, 0x7f, 0x17, 0x76, 0x33, 0x8d, 0x67, 0x54, 0x91, 0xfe, 0x87, 0xf6, 0xbb, 0x73, 0x54, 0xb3,
+];
+const PROOF_A: [u8; 64] = [
+    0x24, 0xf2, 0x53, 0xa5, 0x6d, 0x4b, 0xad, 0xbe, 0x5f, 0x10, 0x5a, 0xe1, 0x02, 0xf1, 0x4c, 0xf2,
+    0x3e, 0xcb, 0x3a, 0x38, 0x92, 0x64, 0x0e, 0xd1, 0xed, 0xb4, 0x9c, 0x9d, 0x9e, 0x45, 0xd0, 0x63,
+    0x13, 0x92, 0xab, 0x50, 0xe0, 0x20, 0xad, 0xe3, 0xc6, 0x06, 0x9f, 0x16, 0xbf, 0x09, 0xd1, 0xac,
+    0x4e, 0xbe, 0x68, 0x6a, 0x30, 0x63, 0xce, 0x39, 0x2a, 0x0e, 0xa2, 0xb7, 0xec, 0x03, 0xf6, 0xb1,
+];
+const PROOF_B: [u8; 128] = [
+    0x11, 0x24, 0x81, 0xcb, 0x92, 0xf0, 0x8c, 0x33, 0xf3, 0xb4, 0x1d, 0xd0, 0x4d, 0x01, 0xcc, 0xcc,
+    0x74, 0xea, 0x26, 0xdd, 0x31, 0xf1, 0x7f, 0x3d, 0xa6, 0x6b, 0x62, 0x4d, 0xd5, 0xcc, 0xc0, 0x74,
+    0x14, 0x55, 0x02, 0x37, 0xc3, 0x76, 0x59, 0x5b, 0x16, 0xcb, 0x8a, 0x61, 0x07, 0x72, 0x97, 0x31,
+    0xc3, 0x41, 0x63, 0x44, 0x64, 0xba, 0x1a, 0x15, 0xc2, 0x39, 0xe2, 0x04, 0x7f, 0x0c, 0xc0, 0x83,
+    0x2d, 0x6a, 0x17, 0x07, 0x74, 0x59, 0x72, 0xd0, 0x90, 0x54, 0xb5, 0x09, 0x8b, 0x7a, 0xbe, 0x24,
+    0x33, 0xd7, 0x27, 0xe3, 0x36, 0xa1, 0xf9, 0x93, 0x3f, 0x9a, 0xa1, 0x47, 0x48, 0xad, 0x59, 0x4e,
+    0x25, 0x54, 0x20, 0xd4, 0xa7, 0x20, 0x0b, 0xeb, 0x75, 0x3a, 0x7e, 0xa9, 0x04, 0x39, 0xf5, 0x79,
+    0x0e, 0x06, 0xd7, 0x08, 0x2c, 0x75, 0xc7, 0x7e, 0xa4, 0x07, 0x71, 0xac, 0xdc, 0x81, 0x64, 0x3e,
+];
+const PROOF_C: [u8; 64] = [
+    0x23, 0x38, 0x5c, 0x23, 0xbf, 0xd8, 0xd0, 0xe9, 0x07, 0xa3, 0xcc, 0x92, 0xe2, 0x5f, 0xae, 0x00,
+    0xdf, 0x24, 0x5d, 0x72, 0xe4, 0x16, 0xff, 0x31, 0x7f, 0xd3, 0xac, 0x06, 0xac, 0xa8, 0xc8, 0x21,
+    0x28, 0x74, 0x08, 0xca, 0xd2, 0x89, 0x00, 0xeb, 0x4a, 0x51, 0x75, 0x63, 0x51, 0xc9, 0x47, 0x06,
+    0x2b, 0x2c, 0xcf, 0x71, 0x43, 0xd5, 0xf6, 0x25, 0x8d, 0x35, 0xb6, 0xe1, 0x02, 0x93, 0xb3, 0x78,
+];
+const PUBLIC_INPUT: [u8; 32] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+];
+
+fn assert_zk_error<T: core::fmt::Debug>(
+    result: Result<Result<T, ConversionError>, Result<ZkError, InvokeError>>,
+    expected: ZkError,
+) {
+    match result {
+        Err(Ok(err)) => assert_eq!(err, expected),
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+fn setup(env: &Env) -> ZkVerifierClient<'_> {
     let admin = Address::generate(env);
-    let contract_id = env.register(ZkVerifier, ());
-    let client = ZkVerifierClient::new(env, &contract_id);
+    let id = env.register(ZkVerifier, ());
+    let client = ZkVerifierClient::new(env, &id);
     client.initialize(&admin);
-    (contract_id, admin, client)
+    client
 }
 
-/// G1 point on the mock curve y² = x³ + 3. Known valid pair: (1, 2).
-fn g1_on_curve(env: &Env, x: u64, y: u64) -> Bytes {
-    let mut raw = [0u8; 64];
-    raw[0..8].copy_from_slice(&x.to_le_bytes());
-    raw[8..16].copy_from_slice(&y.to_le_bytes());
-    let mut bytes = Bytes::new(env);
-    bytes.extend_from_array(&raw);
-    bytes
+/// Pairing checks exceed the default test budget; real contracts pay for them
+/// with the normal Soroban resource limits.
+fn unlimited_budget(env: &Env) {
+    let mut budget = env.cost_estimate().budget();
+    budget.reset_unlimited();
 }
 
-fn g2_bytes(env: &Env, x0: u64) -> Bytes {
-    let mut raw = [0u8; 128];
-    raw[0..8].copy_from_slice(&x0.to_le_bytes());
-    // Non-zero y limb so the point is not infinity / torsion-trivial.
-    raw[16..24].copy_from_slice(&1u64.to_le_bytes());
-    let mut bytes = Bytes::new(env);
-    bytes.extend_from_array(&raw);
-    bytes
-}
-
-fn scalar_bytes(env: &Env, scalar: u64) -> Bytes {
-    let mut raw = [0u8; 32];
-    raw[0..8].copy_from_slice(&scalar.to_le_bytes());
-    let mut bytes = Bytes::new(env);
-    bytes.extend_from_array(&raw);
-    bytes
-}
-
-/// Build a Groth16 proof that satisfies e(A,B) = e(α,β)·e(L,γ)·e(C,δ)
-/// with A.x = 1 so B.x0 = rhs. All G1 points use the on-curve pair (1, 2).
-fn valid_groth16(env: &Env, public_input: u64) -> (VerificationKey, Proof, Vec<Bytes>) {
-    let alpha_x = 1u64;
-    let beta_x0 = 5u64;
-    let gamma_x0 = 17u64;
-    let delta_x0 = 19u64;
-    let ic0_x = 1u64;
-    let ic1_x = 1u64;
-    let a_x = 1u64;
-    let c_x = 1u64;
-    let l_x = ic0_x.wrapping_add(public_input.wrapping_mul(ic1_x));
-    let b_x0 = alpha_x
-        .wrapping_mul(beta_x0)
-        .wrapping_add(l_x.wrapping_mul(gamma_x0))
-        .wrapping_add(c_x.wrapping_mul(delta_x0));
-
+fn vectors(env: &Env) -> (VerificationKey, Proof, Vec<Bytes>) {
     let mut ic = Vec::new(env);
-    // IC points must be on-curve; x=1,y=2 works. Pairing only reads the x limb.
-    ic.push_back(g1_on_curve(env, ic0_x, 2));
-    ic.push_back(g1_on_curve(env, ic1_x, 2));
-
+    ic.push_back(Bytes::from_array(env, &VK_IC0));
+    ic.push_back(Bytes::from_array(env, &VK_IC1));
     let vk = VerificationKey {
-        alpha_g1: g1_on_curve(env, alpha_x, 2),
-        beta_g2: g2_bytes(env, beta_x0),
-        gamma_g2: g2_bytes(env, gamma_x0),
-        delta_g2: g2_bytes(env, delta_x0),
+        alpha_g1: Bytes::from_array(env, &VK_ALPHA_G1),
+        beta_g2: Bytes::from_array(env, &VK_BETA_G2),
+        gamma_g2: Bytes::from_array(env, &VK_GAMMA_G2),
+        delta_g2: Bytes::from_array(env, &VK_DELTA_G2),
         ic,
     };
     let proof = Proof {
-        a: g1_on_curve(env, a_x, 2),
-        b: g2_bytes(env, b_x0),
-        c: g1_on_curve(env, c_x, 2),
+        a: Bytes::from_array(env, &PROOF_A),
+        b: Bytes::from_array(env, &PROOF_B),
+        c: Bytes::from_array(env, &PROOF_C),
     };
-    let mut public_inputs = Vec::new(env);
-    let safe = if public_input == 0 { 5 } else { public_input };
-    public_inputs.push_back(scalar_bytes(env, safe));
-    (vk, proof, public_inputs)
+    let mut inputs = Vec::new(env);
+    inputs.push_back(Bytes::from_array(env, &PUBLIC_INPUT));
+    (vk, proof, inputs)
 }
 
 #[test]
-fn test_register_and_verify_zk_proof() {
+fn test_real_groth16_proof_verifies() {
     let env = Env::default();
     env.mock_all_auths();
+    unlimited_budget(&env);
 
-    let (_id, _admin, client) = setup_verifier(&env);
-    let (vk, proof, public_inputs) = valid_groth16(&env, 5);
+    let client = setup(&env);
+    let (vk, proof, inputs) = vectors(&env);
+    client.register_vk(&101, &vk);
 
-    client.register_vk(&101u64, &vk);
-
-    let result = client.verify_proof(&101u64, &proof, &public_inputs);
-    assert_eq!(result, true);
+    assert!(client.verify_proof(&101, &proof, &inputs));
     assert_eq!(client.get_proof_count(), 1);
 }
 
 #[test]
-fn test_verify_fails_with_invalid_public_inputs() {
+fn test_wrong_public_input_fails_real_pairing_check() {
     let env = Env::default();
     env.mock_all_auths();
+    unlimited_budget(&env);
 
-    let (_id, _admin, client) = setup_verifier(&env);
+    let client = setup(&env);
+    let (vk, proof, _) = vectors(&env);
+    client.register_vk(&102, &vk);
 
-    let mut ic = Vec::new(&env);
-    ic.push_back(g1_on_curve(&env, 1, 2));
-    ic.push_back(g1_on_curve(&env, 1, 2));
+    let mut wrong = [0u8; 32];
+    wrong[31] = 6;
+    let mut inputs = Vec::new(&env);
+    inputs.push_back(Bytes::from_array(&env, &wrong));
 
-    let vk = VerificationKey {
-        alpha_g1: g1_on_curve(&env, 1, 2),
-        beta_g2: g2_bytes(&env, 5),
-        gamma_g2: g2_bytes(&env, 7),
-        delta_g2: g2_bytes(&env, 11),
-        ic,
-    };
-
-    client.register_vk(&202u64, &vk);
-
-    let proof = Proof {
-        a: g1_on_curve(&env, 1, 2),
-        b: g2_bytes(&env, 5),
-        c: g1_on_curve(&env, 1, 2),
-    };
-
-    let public_inputs = Vec::new(&env); // IC has 2, inputs 0 → mismatch
-    let result = client.try_verify_proof(&202u64, &proof, &public_inputs);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_infinity_point_is_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_id, _admin, client) = setup_verifier(&env);
-    let (mut vk, _proof, _public_inputs) = valid_groth16(&env, 5);
-    let mut inf = Bytes::new(&env);
-    inf.extend_from_array(&[0u8; 64]);
-    vk.ic.set(0, inf);
-
-    assert!(client.try_register_vk(&505u64, &vk).is_err());
-}
-
-#[test]
-fn test_off_curve_point_is_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_id, _admin, client) = setup_verifier(&env);
-    let (vk, mut proof, public_inputs) = valid_groth16(&env, 5);
-    client.register_vk(&606u64, &vk);
-
-    // (3, 3): 9 != 27+3 — off curve
-    proof.a = g1_on_curve(&env, 3, 3);
-    assert!(client.try_verify_proof(&606u64, &proof, &public_inputs).is_err());
-}
-
-#[test]
-fn test_tampered_groth16_proof_is_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_id, _admin, client) = setup_verifier(&env);
-    let (vk, mut proof, public_inputs) = valid_groth16(&env, 5);
-    client.register_vk(&303u64, &vk);
-
-    // Keep A on-curve at (1,2) but mutate B's x limb so the pairing product fails.
-    let mut raw = [0u8; 128];
-    raw[0..8].copy_from_slice(&2u64.to_le_bytes());
-    raw[16..24].copy_from_slice(&1u64.to_le_bytes());
-    let mut b = Bytes::new(&env);
-    b.extend_from_array(&raw);
-    proof.b = b;
-
-    let result = client.verify_proof(&303u64, &proof, &public_inputs);
-    assert_eq!(result, false);
+    assert!(!client.verify_proof(&102, &proof, &inputs));
     assert_eq!(client.get_proof_count(), 0);
 }
 
 #[test]
-fn test_wrong_public_inputs_fail_pairing_check() {
+fn test_tampered_proof_fails_real_pairing_check() {
+    let env = Env::default();
+    env.mock_all_auths();
+    unlimited_budget(&env);
+
+    let client = setup(&env);
+    let (vk, mut proof, inputs) = vectors(&env);
+    client.register_vk(&103, &vk);
+
+    // A different but valid on-curve G1 point keeps the encoding well-formed;
+    // only the pairing equation should reject it.
+    proof.c = Bytes::from_array(&env, &VK_IC0);
+
+    assert!(!client.verify_proof(&103, &proof, &inputs));
+    assert_eq!(client.get_proof_count(), 0);
+}
+
+#[test]
+fn test_exact_point_lengths_are_required() {
+    let env = Env::default();
+    env.mock_all_auths();
+    unlimited_budget(&env);
+
+    let client = setup(&env);
+    let (vk, proof, inputs) = vectors(&env);
+    client.register_vk(&104, &vk);
+
+    let mut short = proof.clone();
+    short.a = Bytes::from_slice(&env, &PROOF_A[..63]);
+    assert_zk_error(
+        client.try_verify_proof(&104, &short, &inputs),
+        ZkError::InvalidProofFormat,
+    );
+
+    let mut long_g2 = PROOF_B.to_vec();
+    long_g2.push(0);
+    let mut long = proof.clone();
+    long.b = Bytes::from_slice(&env, &long_g2);
+    assert_zk_error(
+        client.try_verify_proof(&104, &long, &inputs),
+        ZkError::InvalidProofFormat,
+    );
+
+    let mut short_scalar = [0u8; 31];
+    short_scalar.copy_from_slice(&PUBLIC_INPUT[1..]);
+    let mut inputs_short = Vec::new(&env);
+    inputs_short.push_back(Bytes::from_array(&env, &short_scalar));
+    assert_zk_error(
+        client.try_verify_proof(&104, &proof, &inputs_short),
+        ZkError::InvalidPublicInputs,
+    );
+}
+
+#[test]
+fn test_infinity_and_off_curve_points_are_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    unlimited_budget(&env);
+
+    let client = setup(&env);
+    let (vk, proof, inputs) = vectors(&env);
+    client.register_vk(&105, &vk);
+
+    let mut infinity = proof.clone();
+    infinity.a = Bytes::from_array(&env, &[0u8; 64]);
+    assert_zk_error(
+        client.try_verify_proof(&105, &infinity, &inputs),
+        ZkError::PointAtInfinity,
+    );
+
+    let mut off_curve = PROOF_A;
+    off_curve[32..].fill(0);
+    let mut bad = proof;
+    bad.a = Bytes::from_array(&env, &off_curve);
+    assert_zk_error(
+        client.try_verify_proof(&105, &bad, &inputs),
+        ZkError::PointNotOnCurve,
+    );
+}
+
+#[test]
+fn test_noncanonical_public_input_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    unlimited_budget(&env);
+
+    let client = setup(&env);
+    let (vk, proof, _) = vectors(&env);
+    client.register_vk(&106, &vk);
+
+    let mut inputs = Vec::new(&env);
+    inputs.push_back(Bytes::from_array(&env, &BN254_R_BE));
+    assert_zk_error(
+        client.try_verify_proof(&106, &proof, &inputs),
+        ZkError::InvalidScalar,
+    );
+}
+
+#[test]
+fn test_input_count_must_match_vk_and_circuit_must_exist() {
+    let env = Env::default();
+    env.mock_all_auths();
+    unlimited_budget(&env);
+
+    let client = setup(&env);
+    let (vk, proof, _) = vectors(&env);
+    client.register_vk(&107, &vk);
+
+    assert_zk_error(
+        client.try_verify_proof(&107, &proof, &Vec::new(&env)),
+        ZkError::InvalidPublicInputs,
+    );
+    assert_zk_error(
+        client.try_verify_proof(&999, &proof, &vectors(&env).2),
+        ZkError::CircuitNotFound,
+    );
+}
+
+#[test]
+fn test_register_vk_rejects_infinite_g2_point() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (_id, _admin, client) = setup_verifier(&env);
-    let (vk, proof, _) = valid_groth16(&env, 5);
-    client.register_vk(&404u64, &vk);
-
-    let mut wrong_inputs = Vec::new(&env);
-    wrong_inputs.push_back(scalar_bytes(&env, 99));
-
-    let result = client.verify_proof(&404u64, &proof, &wrong_inputs);
-    assert_eq!(result, false);
+    let client = setup(&env);
+    let (mut vk, _, _) = vectors(&env);
+    vk.gamma_g2 = Bytes::from_array(&env, &[0u8; 128]);
+    assert_zk_error(client.try_register_vk(&108, &vk), ZkError::PointAtInfinity);
 }

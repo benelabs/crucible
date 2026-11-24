@@ -457,7 +457,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "anyhow",
  "apalis",
@@ -1104,7 +1104,7 @@ dependencies = [
 
 [[package]]
 name = "cross-contract"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1155,7 +1155,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "crucible"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "arbitrary",
  "crucible-macros",
@@ -1172,8 +1172,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "crucible-example-amm-pool"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-bounty-escrow"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "crucible-example-counter"
-version = "1.36.15"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-dex"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1181,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-circuit-breaker"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1189,7 +1213,15 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-emergency-stop"
-version = "1.36.15"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-escrow"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1197,7 +1229,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-escrow-multi-arbiter"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1205,7 +1237,15 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-flash-mint"
-version = "1.36.15"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-gaming-crafting"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1213,7 +1253,15 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-gasless"
-version = "1.36.15"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-insurance-mutual"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1221,7 +1269,71 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-lending"
-version = "1.36.15"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-liquid-staking"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-lottery"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-multisig"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-nft-marketplace"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-nft-rental"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-options-protocol"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-payment-streaming"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-portfolio-index"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1229,7 +1341,31 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-prediction-market"
-version = "1.36.15"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-quadratic-funding"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-reputation"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "crucible-example-smart-wallet"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1237,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-staking"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1245,7 +1381,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-time-locked-vault"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1253,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-token"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1261,7 +1397,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-example-vesting"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "soroban-sdk",
@@ -1269,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "crucible-macros"
-version = "1.36.15"
+version = "1.36.18"
 dependencies = [
  "crucible",
  "proc-macro2",
@@ -1861,6 +1997,22 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
+]
+
+[[package]]
+name = "example-vault"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "example-yield-vault"
+version = "1.36.18"
+dependencies = [
+ "crucible",
+ "soroban-sdk",
 ]
 
 [[package]]

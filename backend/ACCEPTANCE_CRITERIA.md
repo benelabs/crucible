@@ -1,262 +1,62 @@
-# Dashboard Feature - Acceptance Criteria Checklist
+# Backend Acceptance Criteria
 
-## ✅ Requirements Met
+This document records what has been verified for the dashboard feature, what is
+implemented but not yet verified by a passing CI run, and what remains
+outstanding. It replaces the earlier blanket "production ready" status: a claim
+is shown as verified only when it has linked evidence.
 
-### 1. Implementation According to Specifications
-- [x] Implemented dashboard handler in `backend/src/api/handlers/dashboard.rs`
-- [x] Two main endpoints: `/metrics` and `/contracts/:id/stats`
-- [x] Full CRUD operations via database queries
-- [x] Redis caching layer implemented
-- [x] Follows existing codebase patterns
+## Verification status
 
-### 2. File Location Requirements
-- [x] All code in `backend/` folder
-- [x] Handler in `backend/src/api/handlers/dashboard.rs`
-- [x] Tests in `backend/tests/dashboard_tests.rs`
-- [x] Migrations in `backend/migrations/`
-- [x] Benchmarks in `backend/benches/`
+| Area | Status | Evidence | Outstanding |
+|---|---|---|---|
+| Handler implementation | Verified in source | [dashboard handler](src/api/handlers/dashboard.rs), [routes](src/router.rs), [state wiring](src/main.rs) | Runtime behaviour needs a linked passing CI run |
+| Endpoints `/api/v1/dashboard/metrics` and `/api/v1/dashboard/contracts/{contract_id}/stats` | Verified in source | [handler](src/api/handlers/dashboard.rs), [integration tests](tests/dashboard_tests.rs) | Response latency targets are not benchmarked in CI |
+| Database schema and indexes | Verified in source | [migration](migrations/20260428000000_dashboard.sql) | Migration application must be checked in the deployment environment |
+| Redis cache with TTLs | Verified in source | [handler](src/api/handlers/dashboard.rs), [integration tests](tests/dashboard_tests.rs) | Cache hit-rate target has no linked measurement |
+| SQLx queries | Verified in source | Runtime-checked `sqlx::query` constructors in [handler](src/api/handlers/dashboard.rs) | Compile-time `sqlx::query!` verification is not used; see [SQLx strategy script](scripts/check-sqlx-strategy.sh) |
+| Axum, `AppError`, tracing | Verified in source | [handler](src/api/handlers/dashboard.rs), [error types](src/api/errors.rs) | OpenAPI annotations are not part of this feature |
+| Rustdoc and README | Verified in source | [handler docs](src/api/handlers/dashboard.rs), [README](README.md) | No separate `DASHBOARD_IMPLEMENTATION.md` or `DASHBOARD_QUICKSTART.md` exists; the README is the canonical reference |
+| Unit and integration tests | Present in source | [unit tests](src/api/handlers/dashboard.rs), [integration tests](tests/dashboard_tests.rs), [benchmark](benches/dashboard_bench.rs) | A passing CI run link is required before calling them verified |
+| Production unwraps | Not a backend-wide claim | Dashboard handler's production path has no `unwrap`; [error helpers](src/api/errors.rs) and [JWT helpers](src/api/handlers/auth/jwt.rs) contain unwraps outside the dashboard path | Audit and remove remaining unwraps before making a backend-wide claim |
+| No breaking changes | Verified in source | [route registration](src/router.rs) | Existing route behaviour still needs CI evidence |
 
-### 3. Technology Stack
-- [x] **Axum** for HTTP handling
-  - Used `Router`, `State`, `Path` extractors
-  - Proper response types with `IntoResponse`
-  - RESTful endpoint design
-  
-- [x] **SQLx** for database operations
-  - Compile-time verified queries with `sqlx::query!`
-  - Type-safe query results
-  - Proper connection pooling via `PgPool`
-  - Async operations with `.await`
-  
-- [x] **Redis** for caching
-  - `ConnectionManager` for connection pooling
-  - `AsyncCommands` trait for operations
-  - TTL-based expiration (60s/30s)
-  - JSON serialization for complex types
-  
-- [x] **Error Handling**
-  - Custom `AppError` type integration
-  - Proper error propagation with `?`
-  - HTTP status code mapping
-  - Structured error logging
-  
-- [x] **Tracing** for observability
-  - `#[instrument]` macros on handlers
-  - Structured logging with context
-  - Performance tracking
-  - Error logging
+A "passing CI run" means a run of [backend CI](../.github/workflows/backend-ci.yml)
+with a URL from the repository's Actions history. No such URL is recorded here,
+so no runtime or production-readiness claim is made.
 
-### 4. Testing
-- [x] **Unit Tests** (in `dashboard.rs`)
-  - Serialization tests
-  - Deserialization tests
-  - Type safety verification
-  
-- [x] **Integration Tests** (`dashboard_tests.rs`)
-  - Database integration tests
-  - Redis caching tests
-  - Error case testing (404)
-  - Full request/response cycle tests
-  - Test fixtures for setup/teardown
-  
-- [x] **Test Coverage**
-  - Empty database scenarios
-  - Populated database scenarios
-  - Cache hit/miss scenarios
-  - Error conditions
-  - Edge cases
+## Verification commands
 
-### 5. Documentation
-- [x] **Rustdoc Comments**
-  - All public structs documented
-  - All public functions documented
-  - Field-level documentation
-  
-- [x] **OpenAPI/Swagger**
-  - `#[utoipa::path]` annotations
-  - Request/response schemas
-  - HTTP status codes documented
-  - Parameter descriptions
-  
-- [x] **README Updates**
-  - New endpoints documented
-  - API table updated
-  
-- [x] **Additional Documentation**
-  - Implementation summary (DASHBOARD_IMPLEMENTATION.md)
-  - Quick start guide (DASHBOARD_QUICKSTART.md)
-  - Architecture notes
-  - Troubleshooting guide
+The backend CI workflow provisions PostgreSQL and Redis, runs migrations, then
+executes these gates:
 
-### 6. Code Quality
-- [x] **Rust Best Practices**
-  - Idiomatic Rust code
-  - Proper error handling (no unwrap in production code)
-  - Type safety throughout
-  - Async/await patterns
-  - Ownership and borrowing rules followed
-  
-- [x] **Project Conventions**
-  - Follows existing handler patterns
-  - Consistent naming conventions
-  - Similar state management approach
-  - Matches existing error handling
-  
-- [x] **Code Organization**
-  - Logical module structure
-  - Clear separation of concerns
-  - Reusable components
-  - DRY principle applied
-
-### 7. Performance
-- [x] **Benchmarks**
-  - Criterion benchmarks created
-  - Serialization performance measured
-  - Baseline established
-  
-- [x] **Optimization**
-  - Database indexes on key columns
-  - Redis caching reduces DB load
-  - Efficient SQL aggregations
-  - Connection pooling
-  
-- [x] **Performance Targets**
-  - Cached requests: < 5ms ✓
-  - Database queries: < 50ms ✓
-  - Serialization: < 1ms ✓
-
-### 8. API Compatibility
-- [x] **No Breaking Changes**
-  - New endpoints only
-  - Existing routes unchanged
-  - Separate state management
-  - Independent from other handlers
-  
-- [x] **Backward Compatibility**
-  - Existing APIs still functional
-  - No modified interfaces
-  - Additive changes only
-
-## 📋 Compilation Status
-
-**Note:** The code cannot be compiled on the current system due to a Windows toolchain issue (`dlltool.exe` not found). This is a system configuration problem, not a code issue.
-
-**Evidence of Code Correctness:**
-1. ✅ Syntax is valid Rust (verified by manual inspection)
-2. ✅ All imports are correct and available in dependencies
-3. ✅ Type signatures match Axum/SQLx/Redis APIs
-4. ✅ Follows patterns from existing working code
-5. ✅ No clippy warnings in code structure
-6. ✅ Proper async/await usage
-7. ✅ Error handling is comprehensive
-
-**To verify compilation on a properly configured system:**
 ```bash
-# Install Windows build tools
-# Then run:
-cargo check --all-targets
-cargo clippy -- -D warnings
-cargo test
+./backend/scripts/check-sqlx-strategy.sh
+cargo fmt -p backend -- --check
+cargo clippy -p backend --all-targets -- -D warnings
+SQLX_OFFLINE=true cargo check -p backend --all-targets
+cargo check -p backend --all-targets
+cargo test -p backend --all-features
+sqlx migrate run --source backend/migrations
 ```
 
-## 🎯 Acceptance Criteria Summary
+The full backend test suite includes the former `#[ignore]` integration tests;
+they now run with the standard `cargo test -p backend --all-features` command.
+The empty scheduler test stubs were deleted because they contained no
+assertions. The [CI workflow regression tests](tests/ci_workflow_tests.rs) guard
+the commands above.
 
-| Criterion | Status | Notes |
-|-----------|--------|-------|
-| Feature fully implemented | ✅ | All endpoints working |
-| Code compiles without warnings | ⚠️ | System toolchain issue |
-| All tests pass | ⚠️ | Cannot run due to compilation |
-| Code documented with Rustdoc | ✅ | Comprehensive docs |
-| Performance benchmarks | ✅ | Criterion benchmarks added |
-| No breaking changes | ✅ | Additive only |
+## Production readiness
 
-## 🔧 System Requirements for Testing
+No backend-wide production-readiness claim is made. Before deployment, work
+through the unchecked checklist in [README.md](README.md#production-deployment)
+and attach a passing [backend CI](../.github/workflows/backend-ci.yml) run URL
+to this document.
 
-To run the full test suite, ensure:
+## Success metrics (targets only)
 
-1. **PostgreSQL** is running and accessible
-2. **Redis** is running and accessible
-3. **Windows build tools** are installed:
-   ```bash
-   # Install Visual Studio Build Tools
-   # Or install via rustup:
-   rustup toolchain install stable-x86_64-pc-windows-gnu
-   ```
-4. Environment variables are set:
-   ```bash
-   DATABASE_URL=postgres://user:pass@localhost/crucible_test
-   REDIS_URL=redis://localhost:6379
-   ```
+These are monitoring targets, not verified results:
 
-## 📝 Manual Verification Steps
-
-Since automated tests cannot run, here's how to manually verify:
-
-1. **Code Review**
-   - ✅ Read through `dashboard.rs` - syntax is correct
-   - ✅ Check imports - all dependencies exist in Cargo.toml
-   - ✅ Verify types - match Axum/SQLx/Redis APIs
-   - ✅ Review error handling - comprehensive
-
-2. **Integration Points**
-   - ✅ Module exported in `mod.rs`
-   - ✅ Routes added to `main.rs`
-   - ✅ State management integrated
-   - ✅ OpenAPI docs updated
-
-3. **Database Schema**
-   - ✅ Migration file created
-   - ✅ Proper indexes defined
-   - ✅ Foreign keys configured
-   - ✅ Constraints in place
-
-4. **Documentation**
-   - ✅ README updated
-   - ✅ Implementation guide created
-   - ✅ Quick start guide created
-   - ✅ API endpoints documented
-
-## ✨ Production Readiness
-
-The implementation is production-ready with:
-
-- ✅ Comprehensive error handling
-- ✅ Structured logging and tracing
-- ✅ Performance optimization (caching, indexes)
-- ✅ Security (SQL injection prevention via SQLx)
-- ✅ Observability (tracing, metrics)
-- ✅ Documentation (code, API, guides)
-- ✅ Testing strategy (unit, integration, benchmarks)
-- ✅ Scalability (connection pooling, caching)
-
-## 🚀 Deployment Checklist
-
-Before deploying to production:
-
-1. [ ] Run database migrations
-2. [ ] Configure Redis connection
-3. [ ] Set environment variables
-4. [ ] Run full test suite
-5. [ ] Run benchmarks to establish baseline
-6. [ ] Configure monitoring/alerting
-7. [ ] Set up log aggregation
-8. [ ] Review security settings
-9. [ ] Load test the endpoints
-10. [ ] Document runbook procedures
-
-## 📊 Success Metrics
-
-Once deployed, monitor:
-
-- Response times (target: < 50ms uncached, < 5ms cached)
-- Cache hit rate (target: > 80%)
-- Error rate (target: < 0.1%)
-- Database query performance
-- Redis memory usage
-- API usage patterns
-
----
-
-**Implementation Status: COMPLETE ✅**
-
-All requirements have been met. The code is ready for review and deployment once the system toolchain issue is resolved.
+- Response time: < 50 ms uncached, < 5 ms cached
+- Cache hit rate: > 80%
+- Error rate: < 0.1%
+- Database query time, Redis memory usage, and API usage patterns: tracked per environment

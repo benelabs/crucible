@@ -865,7 +865,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL and Redis test services"]
     async fn check_or_register_accepts_then_deduplicates_request() {
         let database_url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/crucible_test".to_string());
@@ -898,7 +897,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires PostgreSQL and Redis test services"]
     async fn complete_marks_request_replayable_for_duplicates() {
         let database_url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgres://postgres:postgres@localhost/crucible_test".to_string());

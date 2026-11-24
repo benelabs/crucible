@@ -6,22 +6,11 @@
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
-use serde::Serialize;
 use thiserror::Error;
 use tracing::error;
 
-/// Structured error response returned to API clients.
-#[derive(Debug, Serialize)]
-pub struct ErrorResponse {
-    /// Machine-readable error code (e.g., `"database_error"`, `"not_found"`).
-    pub code: String,
-    /// Human-readable error message.
-    pub message: String,
-    /// Timestamp of when the error occurred.
-    pub timestamp: String,
-}
+pub use crate::api::errors::ErrorResponse;
 
 /// Application-level error type that unifies all possible error sources.
 ///
@@ -147,19 +136,19 @@ impl From<axum::extract::rejection::JsonRejection> for AppError {
     }
 }
 
+/// Build the 503 body using the shared [`ErrorResponse`] shape.
+fn unavailable_response(retry_after: u64) -> Response {
+    ErrorResponse::new("service_unavailable", "Service temporarily unavailable")
+        .with_details(serde_json::json!({ "retry_after_seconds": retry_after }))
+        .into_response_with(StatusCode::SERVICE_UNAVAILABLE)
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
             AppError::ServiceUnavailable { retry_after } => {
                 crate::services::metrics::inc_pool_exhaustion_metric();
-                let mut resp = (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(serde_json::json!({
-                        "error": "service temporarily unavailable",
-                        "retry_after_seconds": retry_after
-                    })),
-                )
-                    .into_response();
+                let mut resp = unavailable_response(retry_after);
                 resp.headers_mut().insert(
                     axum::http::header::RETRY_AFTER,
                     axum::http::HeaderValue::from(retry_after),
@@ -169,14 +158,7 @@ impl IntoResponse for AppError {
             AppError::Database(sqlx::Error::PoolTimedOut) => {
                 crate::services::metrics::inc_pool_exhaustion_metric();
                 let retry_after = 5;
-                let mut resp = (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(serde_json::json!({
-                        "error": "service temporarily unavailable",
-                        "retry_after_seconds": retry_after
-                    })),
-                )
-                    .into_response();
+                let mut resp = unavailable_response(retry_after);
                 resp.headers_mut().insert(
                     axum::http::header::RETRY_AFTER,
                     axum::http::HeaderValue::from(retry_after),
@@ -300,15 +282,7 @@ impl IntoResponse for AppError {
             }
         };
 
-        (
-            status,
-            Json(ErrorResponse {
-                code: code.to_string(),
-                message,
-                timestamp: chrono::Utc::now().to_rfc3339(),
-            }),
-        )
-            .into_response()
+        ErrorResponse::new(code, message).into_response_with(status)
     }
 }
 
@@ -355,6 +329,8 @@ mod tests {
             code: "not_found".into(),
             message: "Resource not found".into(),
             timestamp: "2026-07-29T16:00:00Z".into(),
+            details: None,
+            request_id: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"code\":\"not_found\""));
@@ -373,8 +349,8 @@ mod tests {
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"], "service temporarily unavailable");
-        assert_eq!(json["retry_after_seconds"], 5);
+        assert_eq!(json["code"], "service_unavailable");
+        assert_eq!(json["details"]["retry_after_seconds"], 5);
     }
 
     #[tokio::test]
@@ -388,7 +364,7 @@ mod tests {
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"], "service temporarily unavailable");
-        assert_eq!(json["retry_after_seconds"], 10);
+        assert_eq!(json["code"], "service_unavailable");
+        assert_eq!(json["details"]["retry_after_seconds"], 10);
     }
 }

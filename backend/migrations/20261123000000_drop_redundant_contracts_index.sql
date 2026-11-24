@@ -1,0 +1,13 @@
+-- no-transaction
+-- Drop the redundant secondary index on contracts(contract_id).
+--
+-- `contracts.contract_id` is declared UNIQUE in 20260428000000_dashboard.sql,
+-- so Postgres already maintains the unique index `contracts_contract_id_key`
+-- for it. `idx_contracts_contract_id` indexed the same column, doubling write
+-- cost and storage with no read benefit; every lookup (and the foreign key
+-- from transactions.contract_id) is served by the unique index.
+--
+-- CONCURRENTLY avoids taking an ACCESS EXCLUSIVE lock on a busy table. It
+-- cannot run inside a transaction, hence the `-- no-transaction` directive on
+-- the first line, which sqlx honours.
+DROP INDEX CONCURRENTLY IF EXISTS idx_contracts_contract_id;

@@ -1,5 +1,10 @@
 //! Helpers for measuring and reporting contract execution costs.
 //! Cost reports for measured Soroban contract calls.
+//!
+//! The direct `soroban-env-host` dependency is restricted to the `std` feature:
+//! host-only checkpoint, authorization, and event-topic helpers need SDK 28
+//! host types (`Host`, `storage::AccessType`, `AuthorizationManager`, `Compare`)
+//! that `soroban-sdk` does not re-export. No-std WASM builds do not use them.
 
 /// Fee breakdown returned by the Soroban host.
 /// Mirrors the fields previously exposed by `soroban_env_host::FeeEstimate`.

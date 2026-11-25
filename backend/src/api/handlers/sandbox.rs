@@ -29,6 +29,14 @@ pub fn routes(service: Arc<ContractSandboxService>) -> Router {
 }
 
 /// Executes a Soroban contract WASM module in a bounded sandbox.
+///
+/// The enforced bounds come from the validated `sandbox` config section and are
+/// exposed in the OpenAPI `SandboxLimits`/`SandboxBudget` schemas. Override them
+/// per environment with `APP_SANDBOX__MAX_WASM_BYTES`, `APP_SANDBOX__MAX_ARGS`,
+/// `APP_SANDBOX__MAX_ARG_XDR_BYTES`, `APP_SANDBOX__MAX_CPU_INSTRUCTIONS`,
+/// `APP_SANDBOX__MAX_MEMORY_BYTES`, `APP_SANDBOX__TIMEOUT_MS`,
+/// `APP_SANDBOX__MAX_CONCURRENT_EXECUTIONS`, `APP_SANDBOX__MAX_WASM_IMPORTS`,
+/// and `APP_SANDBOX__MAX_WASM_TABLE_ENTRIES`.
 #[instrument(skip_all, fields(http.method = "POST", http.route = "/api/v1/sandbox/execute"))]
 pub async fn execute_contract(
     State(service): State<Arc<ContractSandboxService>>,

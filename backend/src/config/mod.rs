@@ -35,6 +35,8 @@ pub use redis::RedisConfig;
 pub use sanitize::{sanitize, SanitizedConfig};
 pub use server::ServerConfig;
 
+use crate::services::sandbox::SandboxLimits;
+
 /// The execution environment of the application.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Environment {
@@ -100,6 +102,9 @@ pub struct AppConfig {
     pub observability: ObservabilityConfig,
     #[serde(default)]
     pub cors: CorsConfig,
+    /// Validated execution limits for the contract sandbox.
+    #[serde(default)]
+    pub sandbox: SandboxLimits,
 }
 
 // Deterministic fallback for tests and tooling. Production code loads config
@@ -205,6 +210,9 @@ impl AppConfig {
         if let Err(cors_err) = self.cors.validate() {
             errors.push(cors_err);
         }
+
+        // Sandbox limits must be usable before any request reaches the service.
+        errors.extend(self.sandbox.validate());
 
         if env == Environment::Production || env == Environment::Staging {
             if self.cors.allowed_origins.is_empty() {

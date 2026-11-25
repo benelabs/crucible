@@ -1050,6 +1050,17 @@ If `APP_ENV` is omitted, the application safely defaults to `development` and em
 | `APP_REDIS__JOB_QUEUE_URL` | String | Falls back to URL | No | Separate Redis instance for the job queue. **(SENSITIVE)** |
 | `APP_OBSERVABILITY__LOG_LEVEL` | String | (from TOML) | No | Logging verbosity (e.g., `info`, `warn`, `debug`). |
 | `APP_OBSERVABILITY__TRACING_ENDPOINT` | String | `http://localhost:4318/v1/traces` | No | OTLP HTTP traces endpoint for Jaeger or an OpenTelemetry Collector. |
+| `APP_SANDBOX__MAX_WASM_BYTES` | Integer | `2097152` | No | Maximum decoded WASM size accepted by `/api/v1/sandbox/execute`. |
+| `APP_SANDBOX__MAX_ARGS` | Integer | `32` | No | Maximum number of XDR arguments per invocation. |
+| `APP_SANDBOX__MAX_ARG_XDR_BYTES` | Integer | `65536` | No | Maximum decoded size of one XDR argument. |
+| `APP_SANDBOX__MAX_CPU_INSTRUCTIONS` | Integer | `25000000` | No | CPU instruction/fuel ceiling; also bounds per-request overrides. |
+| `APP_SANDBOX__MAX_MEMORY_BYTES` | Integer | `67108864` | No | Memory budget; also used to bound initial WASM memory declarations. |
+| `APP_SANDBOX__TIMEOUT_MS` | Integer | `2000` | No | Wall-clock timeout; also bounds per-request overrides. |
+| `APP_SANDBOX__MAX_CONCURRENT_EXECUTIONS` | Integer | `32` | No | Concurrent sandbox execution permits. |
+| `APP_SANDBOX__MAX_WASM_IMPORTS` | Integer | `128` | No | Maximum imports a WASM module may declare (rejects import storms). |
+| `APP_SANDBOX__MAX_WASM_TABLE_ENTRIES` | Integer | `100000` | No | Maximum initial entries in a single WASM table. |
+
+Sandbox limits are validated during `AppConfig::load`, so zero values or inverted ledger bounds fail startup. Every submitted WASM module is fully validated (including function bodies) and its imports/tables/memory are checked against these limits before a runtime worker is spawned. The enforced limits and per-request budget fields are published as `SandboxLimits` and `SandboxBudget` in the OpenAPI docs at `/swagger-ui`.
 
 ### How to Add a New Configuration Field
 

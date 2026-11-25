@@ -25,3 +25,18 @@ allowed_origins = ["*"]
 log_level = "info"
 tracing_endpoint = "http://localhost:4318/v1/traces"
 enable_metrics = false
+
+[sandbox]
+max_wasm_bytes = 2097152
+max_args = 32
+max_arg_xdr_bytes = 65536
+max_cpu_instructions = 25000000
+max_memory_bytes = 67108864
+timeout_ms = 2000
+min_ledger_sequence = 1
+max_ledger_sequence = 1000000000
+min_ledger_timestamp = 1000000000
+max_ledger_timestamp = 4102444800
+max_concurrent_executions = 32
+max_wasm_imports = 128
+max_wasm_table_entries = 100000

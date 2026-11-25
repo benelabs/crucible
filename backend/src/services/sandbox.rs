@@ -20,19 +20,32 @@ use std::{
 };
 use thiserror::Error;
 use tokio::task::JoinError;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
 const WASM_VERSION_1: [u8; 4] = [0x01, 0x00, 0x00, 0x00];
 
-/// Default execution policy for the sandbox.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// Execution policy for the sandbox, loaded from the `sandbox` section of the
+/// layered application config and validated at startup.
+///
+/// Every field can be overridden with `APP_SANDBOX__<FIELD>` (for example
+/// `APP_SANDBOX__MAX_CPU_INSTRUCTIONS`). The same limits are exposed in the
+/// OpenAPI component schemas so API consumers can discover the enforced bounds.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(default)]
 pub struct SandboxLimits {
+    /// Maximum decoded WASM size in bytes.
     pub max_wasm_bytes: usize,
+    /// Maximum number of XDR arguments per invocation.
     pub max_args: usize,
+    /// Maximum decoded size of a single XDR argument in bytes.
     pub max_arg_xdr_bytes: usize,
+    /// Maximum CPU instruction budget (fuel) per invocation.
     pub max_cpu_instructions: u64,
+    /// Maximum memory budget in bytes per invocation.
     pub max_memory_bytes: u64,
+    /// Maximum wall-clock execution time in milliseconds.
     pub timeout_ms: u64,
     #[serde(default = "default_min_ledger_sequence")]
     pub min_ledger_sequence: u32,
@@ -44,6 +57,10 @@ pub struct SandboxLimits {
     pub max_ledger_timestamp: u64,
     #[serde(default = "default_max_concurrent_executions")]
     pub max_concurrent_executions: usize,
+    /// Maximum number of imports a WASM module may declare.
+    pub max_wasm_imports: usize,
+    /// Maximum initial size of a single WASM table, in elements.
+    pub max_wasm_table_entries: u32,
 }
 
 fn default_min_ledger_sequence() -> u32 {
@@ -66,6 +83,14 @@ fn default_max_concurrent_executions() -> usize {
     32
 }
 
+fn default_max_wasm_imports() -> usize {
+    128
+}
+
+fn default_max_wasm_table_entries() -> u32 {
+    100_000
+}
+
 impl Default for SandboxLimits {
     fn default() -> Self {
         Self {
@@ -80,11 +105,53 @@ impl Default for SandboxLimits {
             min_ledger_timestamp: default_min_ledger_timestamp(),
             max_ledger_timestamp: default_max_ledger_timestamp(),
             max_concurrent_executions: default_max_concurrent_executions(),
+            max_wasm_imports: default_max_wasm_imports(),
+            max_wasm_table_entries: default_max_wasm_table_entries(),
         }
     }
 }
 
 impl SandboxLimits {
+    /// Returns every invariant violation in the configured limits. Called by
+    /// `AppConfig::load` so bad values fail at startup, not at request time.
+    pub fn validate(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        for (name, value) in [
+            ("max_wasm_bytes", self.max_wasm_bytes as u64),
+            ("max_args", self.max_args as u64),
+            ("max_arg_xdr_bytes", self.max_arg_xdr_bytes as u64),
+            ("max_cpu_instructions", self.max_cpu_instructions),
+            ("max_memory_bytes", self.max_memory_bytes),
+            ("timeout_ms", self.timeout_ms),
+            (
+                "max_concurrent_executions",
+                self.max_concurrent_executions as u64,
+            ),
+            ("max_wasm_imports", self.max_wasm_imports as u64),
+            (
+                "max_wasm_table_entries",
+                u64::from(self.max_wasm_table_entries),
+            ),
+        ] {
+            if value == 0 {
+                errors.push(format!("sandbox {name} must be greater than 0"));
+            }
+        }
+        if self.min_ledger_sequence > self.max_ledger_sequence {
+            errors.push(format!(
+                "sandbox min_ledger_sequence ({}) must not exceed max_ledger_sequence ({})",
+                self.min_ledger_sequence, self.max_ledger_sequence
+            ));
+        }
+        if self.min_ledger_timestamp > self.max_ledger_timestamp {
+            errors.push(format!(
+                "sandbox min_ledger_timestamp ({}) must not exceed max_ledger_timestamp ({})",
+                self.min_ledger_timestamp, self.max_ledger_timestamp
+            ));
+        }
+        errors
+    }
+
     /// Configure explicit bounds for simulated ledger sequence and timestamp.
     pub fn with_ledger_bounds(
         mut self,
@@ -101,8 +168,9 @@ impl SandboxLimits {
     }
 }
 
-/// Per-request execution budget. Omitted fields inherit service defaults.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+/// Per-request execution budget. Omitted fields inherit service defaults and
+/// are clamped to the configured sandbox limits.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct SandboxBudget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cpu_instructions: Option<u64>,
@@ -453,13 +521,15 @@ impl ContractSandboxService {
         }
 
         let wasm = decode_base64("wasm_base64", &request.wasm_base64)?;
-        validate_wasm_header(&wasm)?;
         if wasm.len() > self.limits.max_wasm_bytes {
             return Err(SandboxError::InvalidRequest(format!(
                 "wasm_base64 exceeds {} decoded bytes",
                 self.limits.max_wasm_bytes
             )));
         }
+        // Full validation happens before any worker is spawned so hostile
+        // modules can never reach the Soroban runtime.
+        validate_wasm_module(&wasm, &self.limits)?;
 
         let mut args_xdr = Vec::with_capacity(request.args_xdr_base64.len());
         for (index, encoded) in request.args_xdr_base64.iter().enumerate() {
@@ -690,6 +760,70 @@ fn validate_wasm_header(wasm: &[u8]) -> Result<(), SandboxError> {
     Ok(())
 }
 
+/// Fully validates a module (sections, types and function bodies) before it is
+/// handed to the runtime, then applies structural resource caps that the
+/// validator alone does not enforce.
+fn validate_wasm_module(wasm: &[u8], limits: &SandboxLimits) -> Result<(), SandboxError> {
+    validate_wasm_header(wasm)?;
+
+    let mut validator =
+        wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::default());
+    validator.validate_all(wasm).map_err(|error| {
+        SandboxError::InvalidRequest(format!(
+            "wasm_base64 is not a valid WebAssembly module: {error}"
+        ))
+    })?;
+
+    validate_wasm_resources(wasm, limits)
+}
+
+fn validate_wasm_resources(wasm: &[u8], limits: &SandboxLimits) -> Result<(), SandboxError> {
+    const WASM_PAGE_BYTES: u64 = 65_536;
+    let invalid = |detail: String| SandboxError::InvalidRequest(format!("wasm_base64 {detail}"));
+
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        let payload = payload.map_err(|error| invalid(format!("could not be parsed: {error}")))?;
+        match payload {
+            wasmparser::Payload::ImportSection(section) => {
+                let count = section.count() as usize;
+                if count > limits.max_wasm_imports {
+                    return Err(invalid(format!(
+                        "declares {count} imports, exceeding the configured limit of {}",
+                        limits.max_wasm_imports
+                    )));
+                }
+            }
+            wasmparser::Payload::TableSection(section) => {
+                for table in section {
+                    let table =
+                        table.map_err(|error| invalid(format!("has an invalid table: {error}")))?;
+                    if table.initial > limits.max_wasm_table_entries {
+                        return Err(invalid(format!(
+                            "declares a table with {} entries, exceeding the configured limit of {}",
+                            table.initial, limits.max_wasm_table_entries
+                        )));
+                    }
+                }
+            }
+            wasmparser::Payload::MemorySection(section) => {
+                for memory in section {
+                    let memory = memory
+                        .map_err(|error| invalid(format!("has an invalid memory: {error}")))?;
+                    let initial_bytes = memory.initial.saturating_mul(WASM_PAGE_BYTES);
+                    if initial_bytes > limits.max_memory_bytes {
+                        return Err(invalid(format!(
+                            "declares an initial memory of {initial_bytes} bytes, exceeding the configured limit of {} bytes",
+                            limits.max_memory_bytes
+                        )));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn decode_base64(field: &str, value: &str) -> Result<Vec<u8>, SandboxError> {
     if value.trim().is_empty() {
         return Err(SandboxError::InvalidRequest(format!("{field} is required")));
@@ -726,9 +860,92 @@ fn to_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{thread, time::Duration as StdDuration};
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        thread,
+        time::Duration as StdDuration,
+    };
 
     const EMPTY_WASM_BASE64: &str = "AGFzbQEAAAA=";
+
+    /// Records whether a rejected module ever reached the runtime.
+    #[derive(Default)]
+    struct CountingExecutor {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ContractExecutor for CountingExecutor {
+        fn execute(&self, _execution: PreparedExecution) -> Result<RawExecution, SandboxError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(RawExecution {
+                status: ExecutionStatus::Succeeded,
+                contract_id: None,
+                result_xdr: None,
+                diagnostics: Vec::new(),
+                cpu_instructions: 1,
+                memory_bytes: 1,
+            })
+        }
+    }
+
+    fn encode_uleb(mut value: u64) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            encoded.push(byte);
+            if value == 0 {
+                return encoded;
+            }
+        }
+    }
+
+    fn wasm_module(sections: &[(u8, Vec<u8>)]) -> Vec<u8> {
+        let mut wasm = WASM_MAGIC.to_vec();
+        wasm.extend_from_slice(&WASM_VERSION_1);
+        for (id, body) in sections {
+            wasm.push(*id);
+            wasm.extend_from_slice(&encode_uleb(body.len() as u64));
+            wasm.extend_from_slice(body);
+        }
+        wasm
+    }
+
+    /// Adversarial module fixtures: truncated header, invalid section,
+    /// oversized table, and an import storm. Each is structurally valid enough
+    /// to exercise the full validator/resource checks rather than just the
+    /// magic-byte check.
+    fn adversarial_wasm_fixtures() -> Vec<(&'static str, Vec<u8>)> {
+        let invalid_section = vec![0x01, 0x60, 0x00]; // missing result count
+        let mut huge_table = vec![0x01, 0x70, 0x00]; // one funcref table, min only
+        huge_table.extend_from_slice(&encode_uleb(500_000));
+
+        let import_count = 200;
+        let mut imports = encode_uleb(import_count);
+        for index in 0..import_count {
+            imports.extend_from_slice(&[0x01, b'm']); // module name "m"
+            let field = format!("f{index}");
+            imports.push(field.len() as u8);
+            imports.extend_from_slice(field.as_bytes());
+            imports.extend_from_slice(&[0x00, 0x00]); // function import, type 0
+        }
+
+        vec![
+            ("truncated header", vec![0, b'a', b's', b'm', 1, 0, 0]),
+            ("invalid section", wasm_module(&[(1, invalid_section)])),
+            ("huge table", wasm_module(&[(4, huge_table)])),
+            (
+                "import storm",
+                wasm_module(&[
+                    (1, vec![0x01, 0x60, 0x00, 0x00]), // one () -> () function type
+                    (2, imports),
+                ]),
+            ),
+        ]
+    }
 
     #[derive(Clone)]
     struct StaticExecutor {
@@ -1344,5 +1561,79 @@ mod tests {
             assert!(!flag.load(std::sync::atomic::Ordering::SeqCst));
         }
         assert!(flag.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn adversarial_wasm_never_reaches_the_runtime() {
+        for (name, wasm) in adversarial_wasm_fixtures() {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let service = ContractSandboxService::with_executor(
+                SandboxLimits::default(),
+                Arc::new(CountingExecutor {
+                    calls: Arc::clone(&calls),
+                }),
+            );
+            let mut req = request();
+            req.wasm_base64 = STANDARD.encode(wasm);
+
+            let error = service.execute(req).await.unwrap_err();
+            assert!(
+                matches!(error, SandboxError::InvalidRequest(_)),
+                "{name} was not rejected at validation: {error:?}"
+            );
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                0,
+                "{name} reached the runtime despite failing validation"
+            );
+        }
+    }
+
+    #[test]
+    fn well_formed_module_with_bounded_sections_is_prepared() {
+        let module = wasm_module(&[
+            (1, vec![0x01, 0x60, 0x00, 0x00]),
+            (4, [vec![0x01, 0x70, 0x00], encode_uleb(16)].concat()),
+        ]);
+        let mut req = request();
+        req.wasm_base64 = STANDARD.encode(module);
+
+        assert!(ContractSandboxService::default().prepare(req).is_ok());
+    }
+
+    #[test]
+    fn configured_limits_are_enforced_by_preparation() {
+        let limits = SandboxLimits {
+            max_wasm_bytes: 64,
+            max_cpu_instructions: 1_000,
+            ..SandboxLimits::default()
+        };
+        let service = ContractSandboxService::new(limits);
+
+        let prepared = service.prepare(request()).unwrap();
+        assert_eq!(prepared.limits, limits);
+
+        let mut req = request();
+        req.budget.max_cpu_instructions = Some(1_001);
+        assert!(service.prepare(req).is_err());
+
+        let mut req = request();
+        req.wasm_base64 = STANDARD.encode(wasm_module(&[]));
+        assert!(service.prepare(req).is_ok());
+    }
+
+    #[test]
+    fn sandbox_limits_validation_rejects_bad_configuration() {
+        assert!(SandboxLimits::default().validate().is_empty());
+
+        let invalid = SandboxLimits {
+            max_cpu_instructions: 0,
+            min_ledger_sequence: 10,
+            max_ledger_sequence: 1,
+            ..SandboxLimits::default()
+        };
+        let errors = invalid.validate();
+        assert!(errors.iter().any(|e| e.contains("max_cpu_instructions")));
+        assert!(errors.iter().any(|e| e.contains("min_ledger_sequence")));
     }
 }

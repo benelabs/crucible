@@ -1,3 +1,4 @@
+#![cfg(feature = "std")]
 use arbitrary::Arbitrary;
 use crucible::env::{MockEnv, Stroops};
 use crucible::token::MockToken;

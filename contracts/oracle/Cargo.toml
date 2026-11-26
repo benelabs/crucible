@@ -6,14 +6,10 @@ edition = "2021"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = { version = "21.0.0", features = ["alloc"] }
+soroban-sdk = { workspace = true }
 
-[profile.release]
-opt-level = "z"
-overflow-checks = false
-lto = true
-codegen-units = 1
-strip = true
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

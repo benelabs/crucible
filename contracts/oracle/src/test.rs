@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, String as SorobanString, Address, Env};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, Env, String as SorobanString,
+};
 
 #[test]
 fn test_submit_price_whitelisted_source() {
@@ -112,4 +115,110 @@ fn test_deactivated_source_cannot_submit_and_purges_cached_price() {
     assert!(client
         .try_submit_price(&source_addr, &symbol, &price, &source_name)
         .is_err());
+}
+
+#[test]
+fn test_initialize_requires_admin_auth() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, Oracle);
+    let client = OracleClient::new(&env, &contract_id);
+
+    // No auth mocked: naming an address the caller does not control must fail.
+    let victim = Address::generate(&env);
+    assert!(client.try_initialize(&victim).is_err());
+    assert_eq!(
+        client.try_get_admin().err().unwrap().unwrap(),
+        OracleError::NotInitialized
+    );
+}
+
+#[test]
+fn test_double_initialization_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Oracle);
+    let client = OracleClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let attacker = Address::generate(&env);
+    assert_eq!(
+        client.try_initialize(&attacker).err().unwrap().unwrap(),
+        OracleError::AlreadyInitialized
+    );
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
+fn test_admin_calls_before_init_return_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Oracle);
+    let client = OracleClient::new(&env, &contract_id);
+
+    let addr = Address::generate(&env);
+    let name = SorobanString::from_str(&env, "binance");
+    let not_init = OracleError::NotInitialized;
+
+    assert_eq!(
+        client
+            .try_register_source(&addr, &name)
+            .err()
+            .unwrap()
+            .unwrap(),
+        not_init
+    );
+    assert_eq!(
+        client.try_deactivate_source(&1).err().unwrap().unwrap(),
+        not_init
+    );
+    assert_eq!(
+        client.try_activate_source(&1).err().unwrap().unwrap(),
+        not_init
+    );
+}
+
+#[test]
+fn test_admin_updates_require_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Oracle);
+    let client = OracleClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Drop mocked auths: privileged calls must now be rejected.
+    env.set_auths(&[]);
+    let addr = Address::generate(&env);
+    let name = SorobanString::from_str(&env, "binance");
+    assert!(client.try_register_source(&addr, &name).is_err());
+    assert!(client.try_deactivate_source(&1).is_err());
+    assert!(client.try_activate_source(&1).is_err());
+}
+
+#[test]
+fn test_typed_errors_for_price_paths() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Oracle);
+    let client = OracleClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let symbol = SorobanString::from_str(&env, "XLM/USD");
+    assert_eq!(
+        client.try_get_price(&symbol).err().unwrap().unwrap(),
+        OracleError::PriceNotFound
+    );
+    let stranger = Address::generate(&env);
+    assert_eq!(
+        client
+            .try_submit_price(&stranger, &symbol, &1, &SorobanString::from_str(&env, "x"))
+            .err()
+            .unwrap()
+            .unwrap(),
+        OracleError::SourceNotWhitelisted
+    );
 }

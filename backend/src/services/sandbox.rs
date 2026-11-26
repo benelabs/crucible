@@ -797,10 +797,10 @@ fn validate_wasm_resources(wasm: &[u8], limits: &SandboxLimits) -> Result<(), Sa
                 for table in section {
                     let table =
                         table.map_err(|error| invalid(format!("has an invalid table: {error}")))?;
-                    if table.initial > limits.max_wasm_table_entries {
+                    if table.ty.initial > limits.max_wasm_table_entries {
                         return Err(invalid(format!(
                             "declares a table with {} entries, exceeding the configured limit of {}",
-                            table.initial, limits.max_wasm_table_entries
+                            table.ty.initial, limits.max_wasm_table_entries
                         )));
                     }
                 }

@@ -10,6 +10,23 @@ jobs:
   migration-check:
     name: Check Migration Safety
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      REQUIRE_MIGRATION_DB: '1'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -18,3 +35,14 @@ jobs:
         run: |
           chmod +x backend/scripts/check_migrations.sh
           ./backend/scripts/check_migrations.sh backend/migrations
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: migration-check
+
+      - name: Lint migrations and apply them to a real Postgres
+        run: cargo test -p backend --test migration_tests

@@ -1,3 +1,4 @@
+#![cfg(feature = "std")]
 //! Time-warp and monotonic ledger clock tests.
 //!
 //! Covers the two shapes the issue calls out: an escrow whose claim window

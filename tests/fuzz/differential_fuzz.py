@@ -162,7 +162,7 @@ def _digest(op: Operation) -> bytes:
 def crucible_observation(op: Operation) -> Observation:
     """Embedded Crucible mock host.
 
-    Mirrors the taxonomy in ``libs/crucible/src/{simulation,error}.rs``
+    Mirrors the taxonomy in ``contracts/crucible/src/sim.rs``
     (``Success`` / ``AuthFailure`` / ``ContractError`` / ``HostError`` /
     ``Panic``). The canonical observation is deterministic so the self-check
     run agrees with the Soroban reference host.

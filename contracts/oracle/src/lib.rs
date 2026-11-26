@@ -1,5 +1,10 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec};
+// Soroban SDK 28 deprecates `Events::publish`; migrating to #[contractevent]
+// would change the emitted event format, so it is deferred.
+#![allow(deprecated)]
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
+};
 
 /// Maximum age of a price observation before it is considered stale (1 hour).
 const MAX_STALENESS_SECONDS: u64 = 3_600;
@@ -9,7 +14,7 @@ const MAX_PRICE_DEVIATION_BPS: i128 = 1500; // basis points (15% = 1500 bps)
 
 #[contracttype]
 #[derive(Clone)]
-struct PriceData {
+pub struct PriceData {
     symbol: String,
     price: i128,
     timestamp: u64,
@@ -18,7 +23,7 @@ struct PriceData {
 
 #[contracttype]
 #[derive(Clone)]
-struct DataSource {
+pub struct DataSource {
     source_id: u64,
     address: Address,
     name: String,
@@ -39,7 +44,36 @@ enum DataKey {
     PriceSubmitter(String),
 }
 
+/// Typed errors returned by the oracle contract.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum OracleError {
+    AlreadyInitialized = 1,
+    NotInitialized = 2,
+    NotAdmin = 3,
+    PriceNotFound = 4,
+    PriceStale = 5,
+    SourceNotWhitelisted = 6,
+    SourceNotFound = 7,
+    SourceDeactivated = 8,
+    InvalidPrice = 9,
+    PriceDeviationTooHigh = 10,
+    InvalidNumSources = 11,
+}
+
 /// Oracle Contract with multiple data sources
+///
+/// Authorization model:
+/// - `initialize` is one-time and must be authorized by the `admin` being
+///   installed, so nobody can install an admin address they do not control.
+///   Deploy and initialize in the same transaction (or immediately after) to
+///   avoid leaving the contract uninitialized.
+/// - `register_source`, `activate_source` and `deactivate_source` require the
+///   stored admin's authorization.
+/// - `submit_price` requires the submitting source's own authorization and that
+///   the source is whitelisted and active.
+/// - Calls made before `initialize` fail with [`OracleError::NotInitialized`].
 #[contract]
 #[derive(Default)]
 pub struct Oracle;
@@ -47,16 +81,16 @@ pub struct Oracle;
 #[contractimpl]
 impl Oracle {
     /// Load price data for `symbol` and verify it is fresher than [`MAX_STALENESS_SECONDS`].
-    fn load_fresh_price(env: &Env, symbol: String) -> Result<PriceData, &'static str> {
+    fn load_fresh_price(env: &Env, symbol: String) -> Result<PriceData, OracleError> {
         let storage = env.storage().instance();
         let price_data: PriceData = storage
             .get(&DataKey::Price(symbol))
-            .ok_or("Price not found")?;
+            .ok_or(OracleError::PriceNotFound)?;
 
         let current_time = env.ledger().timestamp();
         let age = current_time.saturating_sub(price_data.timestamp);
         if age > MAX_STALENESS_SECONDS {
-            return Err("Price data is stale");
+            return Err(OracleError::PriceStale);
         }
 
         Ok(price_data)
@@ -83,17 +117,40 @@ impl Oracle {
         None
     }
 
-    /// Initialize oracle contract
-    pub fn initialize(env: Env, admin: Address) {
+    /// Load the stored admin and require its authorization.
+    fn require_admin(env: &Env) -> Result<Address, OracleError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(OracleError::NotInitialized)?;
+        admin.require_auth();
+        Ok(admin)
+    }
+
+    /// Initialize oracle contract. One-time; `admin` must authorize the call.
+    pub fn initialize(env: Env, admin: Address) -> Result<(), OracleError> {
         let storage = env.storage().instance();
+        if storage.has(&DataKey::Admin) {
+            return Err(OracleError::AlreadyInitialized);
+        }
+        admin.require_auth();
         storage.set(&DataKey::Admin, &admin);
         storage.set(&DataKey::SourceCounter, &0u64);
+        Ok(())
+    }
+
+    /// Return the stored admin address, or `NotInitialized`.
+    pub fn get_admin(env: Env) -> Result<Address, OracleError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(OracleError::NotInitialized)
     }
 
     /// Register a new data source
-    pub fn register_source(env: Env, address: Address, name: String) -> Result<u64, &'static str> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+    pub fn register_source(env: Env, address: Address, name: String) -> Result<u64, OracleError> {
+        Self::require_admin(&env)?;
 
         let storage = env.storage().instance();
         let mut counter: u64 = storage.get(&DataKey::SourceCounter).unwrap_or(0);
@@ -112,8 +169,7 @@ impl Oracle {
         storage.set(&DataKey::SourceCounter, &counter);
         storage.set(&DataKey::SourceWhitelist(address), &true);
 
-        env.events()
-            .publish((symbol_short!("source"), counter), 1);
+        env.events().publish((symbol_short!("source"), counter), 1);
 
         Ok(counter)
     }
@@ -125,7 +181,7 @@ impl Oracle {
         symbol: String,
         price: i128,
         source_name: String,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), OracleError> {
         source.require_auth();
 
         let storage = env.storage().instance();
@@ -136,22 +192,23 @@ impl Oracle {
             .unwrap_or(false);
 
         if !is_whitelisted {
-            return Err("Source not whitelisted");
+            return Err(OracleError::SourceNotWhitelisted);
         }
 
         // Verify the associated DataSource entity exists and is active (#1080)
         let data_source =
-            Self::find_source_by_address(&env, &source).ok_or("Source not found")?;
+            Self::find_source_by_address(&env, &source).ok_or(OracleError::SourceNotFound)?;
         if !data_source.active {
-            return Err("Source is deactivated");
+            return Err(OracleError::SourceDeactivated);
         }
 
         if price <= 0 {
-            return Err("Price must be positive");
+            return Err(OracleError::InvalidPrice);
         }
 
         // Check price deviation against previous price
-        if let Some(prev_price_data) = storage.get::<_, PriceData>(&DataKey::Price(symbol.clone())) {
+        if let Some(prev_price_data) = storage.get::<_, PriceData>(&DataKey::Price(symbol.clone()))
+        {
             let prev_price = prev_price_data.price;
             if prev_price > 0 {
                 // Calculate absolute percentage deviation in basis points
@@ -159,7 +216,7 @@ impl Oracle {
                 let deviation_bps = (price_diff * 10000) / prev_price;
 
                 if deviation_bps > MAX_PRICE_DEVIATION_BPS {
-                    return Err("Price deviation exceeds maximum threshold of 15%");
+                    return Err(OracleError::PriceDeviationTooHigh);
                 }
             }
         }
@@ -196,10 +253,7 @@ impl Oracle {
         }
 
         // Store in history
-        storage.set(
-            &DataKey::PriceHistory(symbol.clone(), timestamp),
-            &price,
-        );
+        storage.set(&DataKey::PriceHistory(symbol.clone(), timestamp), &price);
 
         env.events()
             .publish((symbol_short!("price"), symbol), price);
@@ -209,21 +263,25 @@ impl Oracle {
 
     /// Get latest price for a symbol.
     /// Reverts if the observation is older than [`MAX_STALENESS_SECONDS`].
-    pub fn get_price(env: Env, symbol: String) -> Result<i128, &'static str> {
+    pub fn get_price(env: Env, symbol: String) -> Result<i128, OracleError> {
         let data = Self::load_fresh_price(&env, symbol)?;
         Ok(data.price)
     }
 
     /// Get price data with source info.
     /// Reverts if the observation is older than [`MAX_STALENESS_SECONDS`].
-    pub fn get_price_data(env: Env, symbol: String) -> Result<PriceData, &'static str> {
+    pub fn get_price_data(env: Env, symbol: String) -> Result<PriceData, OracleError> {
         Self::load_fresh_price(&env, symbol)
     }
 
     /// Aggregate prices from multiple sources using median
-    pub fn aggregate_price(env: Env, symbol: String, num_sources: u64) -> Result<i128, &'static str> {
+    pub fn aggregate_price(
+        env: Env,
+        symbol: String,
+        num_sources: u64,
+    ) -> Result<i128, OracleError> {
         if num_sources == 0 {
-            return Err("num_sources must be positive");
+            return Err(OracleError::InvalidNumSources);
         }
 
         let storage = env.storage().instance();
@@ -252,22 +310,22 @@ impl Oracle {
         // and simulate getting prices from multiple sources
         // In production, each source would have its own price entry
         let mut prices: Vec<i128> = Vec::new(&env);
-        
+
         // Add current price as the base
         prices.push_back(current_price.price);
 
         // For now, we use the price history to gather additional price points
         // This is a simplified implementation - production would track per-source prices
         let current_time = env.ledger().timestamp();
-        
+
         // Try to get historical prices from the last hour (3600 seconds)
         let lookback = 3600u64;
         let start_time = current_time.saturating_sub(lookback);
-        
+
         // Collect up to num_sources price points from history
         let mut found = 1u64;
         let mut t = start_time;
-        
+
         while found < num_sources && t < current_time {
             if let Some(price) = storage.get::<_, i128>(&DataKey::PriceHistory(symbol.clone(), t)) {
                 if price != current_price.price {
@@ -288,7 +346,7 @@ impl Oracle {
 
         // Sort prices to find median
         let len = prices.len();
-        
+
         // Simple selection sort for small arrays
         for i in 0..len {
             let mut min_idx = i;
@@ -308,7 +366,7 @@ impl Oracle {
 
         // Return median
         let mid = prices.len() / 2;
-        if prices.len() % 2 == 0 {
+        if prices.len().is_multiple_of(2) {
             // Even: average of two middle values
             let v1 = prices.get(mid - 1).unwrap_or(0);
             let v2 = prices.get(mid).unwrap_or(0);
@@ -320,23 +378,22 @@ impl Oracle {
     }
 
     /// Get data source details
-    pub fn get_source(env: Env, source_id: u64) -> Result<DataSource, &'static str> {
+    pub fn get_source(env: Env, source_id: u64) -> Result<DataSource, OracleError> {
         env.storage()
             .instance()
             .get(&DataKey::DataSource(source_id))
-            .ok_or("Source not found")
+            .ok_or(OracleError::SourceNotFound)
     }
 
     /// Deactivate a data source
-    pub fn deactivate_source(env: Env, source_id: u64) -> Result<(), &'static str> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+    pub fn deactivate_source(env: Env, source_id: u64) -> Result<(), OracleError> {
+        Self::require_admin(&env)?;
 
         let storage = env.storage().instance();
 
         let mut source: DataSource = storage
             .get(&DataKey::DataSource(source_id))
-            .ok_or("Source not found")?;
+            .ok_or(OracleError::SourceNotFound)?;
 
         source.active = false;
         storage.set(&DataKey::DataSource(source_id), &source);
@@ -345,16 +402,19 @@ impl Oracle {
         storage.set(&DataKey::SourceWhitelist(source.address.clone()), &false);
 
         // Purge cached prices submitted by this deactivated source (#1080)
-        if let Some(symbols) = storage.get::<_, Vec<String>>(&DataKey::SourceSymbols(source.address.clone())) {
+        if let Some(symbols) =
+            storage.get::<_, Vec<String>>(&DataKey::SourceSymbols(source.address.clone()))
+        {
             for i in 0..symbols.len() {
                 if let Some(sym) = symbols.get(i) {
-                    let should_purge = match storage.get::<_, Address>(&DataKey::PriceSubmitter(sym.clone())) {
-                        Some(submitter) => submitter == source.address,
-                        None => storage
-                            .get::<_, PriceData>(&DataKey::Price(sym.clone()))
-                            .map(|pd| pd.source == source.name)
-                            .unwrap_or(false),
-                    };
+                    let should_purge =
+                        match storage.get::<_, Address>(&DataKey::PriceSubmitter(sym.clone())) {
+                            Some(submitter) => submitter == source.address,
+                            None => storage
+                                .get::<_, PriceData>(&DataKey::Price(sym.clone()))
+                                .map(|pd| pd.source == source.name)
+                                .unwrap_or(false),
+                        };
                     if should_purge {
                         storage.remove(&DataKey::Price(sym.clone()));
                         storage.remove(&DataKey::PriceSubmitter(sym));
@@ -364,22 +424,20 @@ impl Oracle {
             storage.remove(&DataKey::SourceSymbols(source.address));
         }
 
-        env.events()
-            .publish((symbol_short!("deact"), source_id), 0);
+        env.events().publish((symbol_short!("deact"), source_id), 0);
 
         Ok(())
     }
 
     /// Activate a data source
-    pub fn activate_source(env: Env, source_id: u64) -> Result<(), &'static str> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
+    pub fn activate_source(env: Env, source_id: u64) -> Result<(), OracleError> {
+        Self::require_admin(&env)?;
 
         let storage = env.storage().instance();
 
         let mut source: DataSource = storage
             .get(&DataKey::DataSource(source_id))
-            .ok_or("Source not found")?;
+            .ok_or(OracleError::SourceNotFound)?;
 
         source.active = true;
         source.last_update = env.ledger().timestamp();
@@ -388,8 +446,7 @@ impl Oracle {
         // Add to whitelist
         storage.set(&DataKey::SourceWhitelist(source.address), &true);
 
-        env.events()
-            .publish((symbol_short!("actv"), source_id), 1);
+        env.events().publish((symbol_short!("actv"), source_id), 1);
 
         Ok(())
     }
@@ -399,12 +456,12 @@ impl Oracle {
         env: Env,
         symbol: String,
         max_age_seconds: u64,
-    ) -> Result<bool, &'static str> {
+    ) -> Result<bool, OracleError> {
         let storage = env.storage().instance();
 
         let price_data: PriceData = storage
             .get(&DataKey::Price(symbol))
-            .ok_or("Price not found")?;
+            .ok_or(OracleError::PriceNotFound)?;
 
         // Use saturating subtraction to prevent underflow if clock drifts backward
         let current_time = env.ledger().timestamp();
@@ -415,4 +472,3 @@ impl Oracle {
 
 #[cfg(test)]
 mod test;
-

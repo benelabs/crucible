@@ -1,3 +1,4 @@
+#![cfg(feature = "std")]
 //! Integration examples for the `#[crucible::quickcheck]` property-fuzzing macro.
 //!
 //! These exercise the arithmetic and boundary invariants that Soroban contracts

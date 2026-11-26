@@ -1,3 +1,4 @@
+#![cfg(feature = "std")]
 //! Fixture dependency graph resolution tests.
 //!
 //! Compile-time rejection of circular graphs is covered by the trybuild UI

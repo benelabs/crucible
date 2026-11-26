@@ -55,6 +55,7 @@ use tracing::info_span;
         dashboard::BatchContractStatsResponse,
         audit::AuditEventRecord,
         audit::AuditEventRequest,
+        backend::api::errors::ErrorResponse,
         SandboxLimits,
         SandboxBudget,
     )),

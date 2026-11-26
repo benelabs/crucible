@@ -24,7 +24,7 @@ use backend::{
         error_recovery::ErrorManager,
         log_aggregator::LogAggregator,
         log_alerts::AlertManager,
-        sandbox::ContractSandboxService,
+        sandbox::{ContractSandboxService, SandboxBudget, SandboxLimits},
         sys_metrics::MetricsExporter,
         tracing::{TracingConfig, TracingService},
     },
@@ -56,6 +56,8 @@ use tracing::info_span;
         audit::AuditEventRecord,
         audit::AuditEventRequest,
         backend::api::errors::ErrorResponse,
+        SandboxLimits,
+        SandboxBudget,
     )),
     tags(
         (name = "profiling", description = "Performance and health monitoring endpoints"),
@@ -98,7 +100,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let alert_manager = Arc::new(AlertManager::new());
     let (log_aggregator, log_receiver) = LogAggregator::new();
     let log_aggregator = Arc::new(log_aggregator);
-    let sandbox_service = Arc::new(ContractSandboxService::default());
+    let sandbox_service = Arc::new(ContractSandboxService::new(config.sandbox));
     let contract_benchmark_service = Arc::new(ContractBenchmarkService::with_db(db_pool.clone()));
     let config_manager = Arc::new(ConfigManager::new(config.clone()));
 

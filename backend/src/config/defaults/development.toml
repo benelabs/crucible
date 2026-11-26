@@ -20,3 +20,10 @@ allowed_origins = ["*"]
 [observability]
 log_level = "debug"
 enable_metrics = false
+
+[sandbox]
+max_wasm_bytes = 1048576
+max_cpu_instructions = 10000000
+max_memory_bytes = 33554432
+timeout_ms = 5000
+max_concurrent_executions = 8

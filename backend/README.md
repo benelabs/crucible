@@ -56,9 +56,25 @@ development; no secrets are committed.
 | `JWT_SECRET` | Signing secret for auth tokens | required in production |
 | `BACKUP_SCHEDULE` | Cron expression for database backups | unset |
 | `BACKUP_DESTINATION` | Backup output location | unset |
+| `APP_SANDBOX__MAX_WASM_BYTES` | Maximum decoded WASM size accepted by `/api/v1/sandbox/execute` | `2097152` |
+| `APP_SANDBOX__MAX_ARGS` | Maximum number of XDR arguments per invocation | `32` |
+| `APP_SANDBOX__MAX_ARG_XDR_BYTES` | Maximum decoded size of one XDR argument | `65536` |
+| `APP_SANDBOX__MAX_CPU_INSTRUCTIONS` | CPU instruction/fuel ceiling; also bounds per-request overrides | `25000000` |
+| `APP_SANDBOX__MAX_MEMORY_BYTES` | Memory budget; also bounds initial WASM memory declarations | `67108864` |
+| `APP_SANDBOX__TIMEOUT_MS` | Wall-clock timeout; also bounds per-request overrides | `2000` |
+| `APP_SANDBOX__MAX_CONCURRENT_EXECUTIONS` | Concurrent sandbox execution permits | `32` |
+| `APP_SANDBOX__MAX_WASM_IMPORTS` | Maximum imports a WASM module may declare (rejects import storms) | `128` |
+| `APP_SANDBOX__MAX_WASM_TABLE_ENTRIES` | Maximum initial entries in a single WASM table | `100000` |
 
 CORS is restrictive in production and development: only explicitly configured
 origins are allowed. Do not use wildcard origins outside local tests.
+
+Sandbox limits are validated during `AppConfig::load`; zero or inverted values
+fail startup. Every submitted WASM module is fully validated (including function
+bodies) and its imports, tables, and initial memory are checked against these
+limits before a runtime worker is spawned. The enforced limits and per-request
+budget fields are published as `SandboxLimits` and `SandboxBudget` in the OpenAPI
+docs at `/swagger-ui`.
 
 ## API endpoints
 

@@ -11,4 +11,4 @@ crate-type = ["cdylib", "rlib"]
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
-crucible = { path = "../../contracts/crucible" }
+crucible = { path = "../../contracts/crucible", features = ["std"] }

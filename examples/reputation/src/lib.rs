@@ -17,6 +17,7 @@ enum DataKey {
 /// The admin is set at initialization and is the only address allowed to
 /// modify reputation scores.
 #[contract]
+#[derive(Default)]
 pub struct ReputationContract;
 
 #[contractimpl]

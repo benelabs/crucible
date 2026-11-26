@@ -16,21 +16,30 @@ categories = ["development-tools::testing"]
 crate-type = ["rlib"]
 
 [features]
-snapshots = ["serde", "serde_json"]
+snapshots = ["std", "dep:serde", "dep:serde_json"]
 default = ["derive"]
 derive = ["dep:crucible-macros"]
+std = [
+    "soroban-sdk/testutils",
+    "dep:soroban-env-host",
+    "dep:ed25519-dalek",
+    "dep:k256",
+    "dep:p256",
+    "dep:rand",
+    "dep:rand_chacha",
+]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-soroban-sdk = { workspace = true, features = ["testutils"] }
-soroban-env-host = { version = "28.0.2", features = ["testutils"] }
+soroban-sdk = { version = "28", default-features = false }
+soroban-env-host = { version = "28.0.2", features = ["testutils"], optional = true }
 crucible-macros = { workspace = true, optional = true }
-ed25519-dalek = { version = "2.1", features = ["rand_core"] }
-k256 = { version = "0.13", features = ["ecdsa", "arithmetic", "pkcs8"] }
-p256 = { version = "0.13", features = ["ecdsa", "arithmetic", "pkcs8"] }
-rand = "0.8"
-rand_chacha = "0.3"
+ed25519-dalek = { version = "2.1", features = ["rand_core"], optional = true }
+k256 = { version = "0.13", features = ["ecdsa", "arithmetic", "pkcs8"], optional = true }
+p256 = { version = "0.13", features = ["ecdsa", "arithmetic", "pkcs8"], optional = true }
+rand = { version = "0.8", optional = true }
+rand_chacha = { version = "0.3", optional = true }
 
 [dev-dependencies]
 static_assertions = "1.1.0"

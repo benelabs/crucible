@@ -60,7 +60,7 @@ fn test_call_option_exercise_in_the_money() {
     ctx.env.advance_time(Duration::seconds(10));
     ctx.env.with_mock_all_auths(|| ctx.client().exercise(&ctx.holder));
 
-    assert_eq!(ctx.client().get_state().status, OptionStatus::Exercised);
+    assert_eq!(ctx.client().get_position(&ctx.holder).status, OptionStatus::Exercised);
     assert_eq!(ctx.token.balance(&ctx.holder), 1_000_000_000);
 }
 

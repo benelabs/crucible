@@ -6,6 +6,8 @@ members = [
     "contracts/proxy",
     "contracts/oracle",
     "contracts/zk_verifier",
+    "contracts/governance",
+    "contracts/insurance",
     "crucible-macros",
     "examples/counter",
     "examples/token",
@@ -42,8 +44,6 @@ members = [
 ]
 exclude = [
     "contracts/supply_chain",
-    "contracts/governance",
-    "contracts/insurance",
 ]
 resolver = "2"
 
@@ -62,6 +62,7 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+overflow-checks = true
 
 [workspace.dependencies]
 soroban-sdk = { version = "28", features = ["testutils"] }

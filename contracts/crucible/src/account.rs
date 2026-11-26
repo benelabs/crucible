@@ -125,7 +125,15 @@ impl<'env> AccountBuilder<'env> {
     }
 
     /// Funds the account with the given amount of a specific token.
+    ///
+    /// # Panics
+    /// Panics if `amount` is negative.
     pub fn fund_token(mut self, token: &'env MockToken, amount: i128) -> Self {
+        assert!(
+            amount >= 0,
+            "Token funding amount cannot be negative: {}",
+            amount
+        );
         self.token_balances.push((token, amount));
         self
     }
@@ -150,10 +158,7 @@ impl<'env> AccountBuilder<'env> {
         }
 
         let name = if self.name.is_empty() {
-            format!(
-                "unnamed_{}",
-                self.env.next_unnamed_account_id()
-            )
+            format!("unnamed_{}", self.env.next_unnamed_account_id())
         } else {
             self.name.clone()
         };
@@ -263,6 +268,17 @@ mod tests {
         assert_eq!(alice.token_balance(&usdc), 5_000_000);
         // Both query paths must agree.
         assert_eq!(usdc.balance(&alice.address()), 5_000_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Token funding amount cannot be negative")]
+    fn test_fund_token_rejects_negative_amount() {
+        let env = MockEnv::builder().build();
+        let usdc = MockToken::new(&env, "USDC", 6);
+        let _ = AccountBuilder::new(&env)
+            .name("bad")
+            .fund_token(&usdc, -1)
+            .build();
     }
 
     #[test]

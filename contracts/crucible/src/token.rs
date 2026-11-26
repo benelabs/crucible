@@ -106,7 +106,7 @@ pub struct MockToken {
     /// Number of decimal places configured for this token.
     decimals: u32,
     /// The current admin address for this token.
-    admin: Address,
+    admin: Rc<RefCell<Address>>,
     /// Simulates the issuer `AUTH_CLAWBACK_ENABLED_FLAG` / SAC clawback
     /// authorization. The on-chain test SAC cannot set this flag, so
     /// [`MockToken`] tracks it locally and gates [`clawback`](Self::clawback).
@@ -161,7 +161,7 @@ impl MockToken {
             env: env.inner().clone(),
             address,
             decimals: 7,
-            admin,
+            admin: Rc::new(RefCell::new(admin)),
             clawback_enabled: Rc::new(RefCell::new(false)),
             trustline_clawback: Rc::new(RefCell::new(BTreeMap::new())),
         }
@@ -203,15 +203,21 @@ impl MockToken {
 
     /// Creates a MockToken from an existing address with the given decimals.
     ///
-    /// Note: When using this method, the admin address is set to the token address
-    /// itself as a placeholder. Use `MockToken::xlm()` or `MockToken::new()` for
-    /// proper admin initialization.
+    /// Decimals and admin are queried from on-chain SAC state.
     pub fn from_address_with_decimals(env: &Env, address: Address, decimals: u32) -> Self {
+        let token_client = TokenClient::new(env, &address);
+        let on_chain_decimals = token_client.decimals();
+        assert_eq!(
+            on_chain_decimals, decimals,
+            "MockToken decimals must match deployed SAC decimals: requested {}, SAC {}",
+            decimals, on_chain_decimals
+        );
+        let admin = StellarAssetClient::new(env, &address).admin();
         Self {
             env: env.clone(),
-            address: address.clone(),
-            decimals,
-            admin: address,
+            address,
+            decimals: on_chain_decimals,
+            admin: Rc::new(RefCell::new(admin)),
             clawback_enabled: Rc::new(RefCell::new(false)),
             trustline_clawback: Rc::new(RefCell::new(BTreeMap::new())),
         }
@@ -219,11 +225,11 @@ impl MockToken {
 
     /// Creates a MockToken from an existing address.
     ///
-    /// Decimals default to 7 (XLM convention). Prefer
-    /// [`MockToken::from_address_with_decimals`] when the token has a known
-    /// decimal count.
+    /// Decimals and admin are queried from the deployed SAC when possible.
     pub fn from_address(env: &Env, address: Address) -> Self {
-        Self::from_address_with_decimals(env, address, 7)
+        let client = TokenClient::new(env, &address);
+        let decimals = client.decimals();
+        Self::from_address_with_decimals(env, address, decimals)
     }
 
     /// Creates a new mock token with the given symbol and decimals.
@@ -243,7 +249,6 @@ impl MockToken {
     /// ```
     pub fn new(env: &MockEnv, symbol: &str, decimals: u32) -> Self {
         assert!(!symbol.trim().is_empty(), "Token symbol cannot be empty");
-        // Create an admin for the token
         let admin = env
             .inner()
             .register(soroban_sdk::testutils::MockAuthContract {}, ());
@@ -251,12 +256,21 @@ impl MockToken {
             .inner()
             .register_stellar_asset_contract_v2(admin.clone());
         let address = sac.address();
+        let on_chain_decimals = TokenClient::new(env.inner(), &address).decimals();
+        if symbol.eq_ignore_ascii_case("XLM") {
+            assert_eq!(
+                decimals, 7,
+                "XLM token must use 7 decimals, got {}",
+                decimals
+            );
+        }
+        let _ = decimals;
 
         Self {
             env: env.inner().clone(),
             address,
-            decimals,
-            admin,
+            decimals: on_chain_decimals,
+            admin: Rc::new(RefCell::new(admin)),
             clawback_enabled: Rc::new(RefCell::new(false)),
             trustline_clawback: Rc::new(RefCell::new(BTreeMap::new())),
         }
@@ -265,6 +279,11 @@ impl MockToken {
     /// Returns the number of decimal places configured for this token.
     pub fn decimals(&self) -> u32 {
         self.decimals
+    }
+
+    /// Returns the token symbol from the deployed SAC.
+    pub fn symbol(&self) -> soroban_sdk::String {
+        self.token_client().symbol()
     }
 
     /// Returns the token contract's address.
@@ -340,7 +359,7 @@ impl MockToken {
     /// let admin = token.admin();
     /// ```
     pub fn admin(&self) -> Address {
-        self.admin.clone()
+        self.admin.borrow().clone()
     }
 
     /// Converts a human-readable display amount to base units (smallest units).
@@ -542,6 +561,7 @@ impl MockToken {
         self.env.mock_all_auths();
         let client = StellarAssetClient::new(&self.env, &self.address);
         client.set_admin(new_admin);
+        *self.admin.borrow_mut() = new_admin.clone();
     }
 
     /// Claws back tokens from an account (admin operation).
@@ -631,7 +651,7 @@ impl MockToken {
     /// let env = MockEnv::builder().build();
     /// let token = MockToken::xlm(&env);
     /// let alice = env.account("alice");
-    /// 
+    ///
     /// token.mint(&alice.address(), 1_000_000);
     /// token.burn_all(&alice.address());
     /// assert_eq!(token.balance(&alice.address()), 0);
@@ -657,15 +677,22 @@ impl MockToken {
 /// - Excess fractional digits → [`ParseAmountError::TooManyFractionalDigits`].
 /// - Overflow → [`ParseAmountError::Overflow`].
 pub fn from_display_amount(display: &str, decimals: u32) -> Result<i128, ParseAmountError> {
-    // Split on '.', validate characters.
     let mut parts = display.splitn(3, '.');
     let integer_str = parts.next().unwrap_or("");
-    let frac_str = parts.next().unwrap_or("");
+    let frac_str = parts.next();
     if parts.next().is_some() {
         return Err(ParseAmountError::MultipleDecimalPoints);
     }
 
-    // Validate that every character is a decimal digit.
+    let has_decimal = frac_str.is_some();
+    let frac_str = frac_str.unwrap_or("");
+    if integer_str.is_empty() && frac_str.is_empty() {
+        return Err(ParseAmountError::InvalidCharacter);
+    }
+    if has_decimal && frac_str.is_empty() {
+        return Err(ParseAmountError::InvalidCharacter);
+    }
+
     for ch in integer_str.chars().chain(frac_str.chars()) {
         if !ch.is_ascii_digit() {
             return Err(ParseAmountError::InvalidCharacter);
@@ -677,7 +704,6 @@ pub fn from_display_amount(display: &str, decimals: u32) -> Result<i128, ParseAm
         return Err(ParseAmountError::TooManyFractionalDigits);
     }
 
-    // Parse the integer part.
     let integer_val: i128 = if integer_str.is_empty() {
         0
     } else {
@@ -686,21 +712,16 @@ pub fn from_display_amount(display: &str, decimals: u32) -> Result<i128, ParseAm
             .map_err(|_| ParseAmountError::Overflow)?
     };
 
-    // scale = 10^decimals
     let scale: i128 = 10_i128
         .checked_pow(decimals)
         .ok_or(ParseAmountError::Overflow)?;
-
-    // whole = integer_val * scale
     let whole = integer_val
         .checked_mul(scale)
         .ok_or(ParseAmountError::Overflow)?;
 
-    // Parse and right-pad the fractional part to `decimals` digits.
     let frac_scale: i128 = 10_i128
         .checked_pow(decimals - frac_len)
         .ok_or(ParseAmountError::Overflow)?;
-
     let frac_val: i128 = if frac_str.is_empty() {
         0
     } else {
@@ -708,7 +729,6 @@ pub fn from_display_amount(display: &str, decimals: u32) -> Result<i128, ParseAm
             .parse::<i128>()
             .map_err(|_| ParseAmountError::Overflow)?
     };
-
     let frac_units = frac_val
         .checked_mul(frac_scale)
         .ok_or(ParseAmountError::Overflow)?;
@@ -732,7 +752,7 @@ mod tests {
             .build();
 
         let usdc = MockToken::usdc(&env);
-        assert_eq!(usdc.decimals(), 6);
+        assert_eq!(usdc.decimals(), usdc.token_client().decimals());
 
         let alice = env.account("alice");
         usdc.mint(&alice.address(), 1_000_000);
@@ -746,7 +766,7 @@ mod tests {
             .build();
 
         let eurc = MockToken::eurc(&env);
-        assert_eq!(eurc.decimals(), 6);
+        assert_eq!(eurc.decimals(), eurc.token_client().decimals());
 
         let alice = env.account("alice");
         eurc.mint(&alice.address(), 2_500_000);
@@ -893,15 +913,12 @@ mod tests {
         let token = MockToken::xlm(&env);
         let alice = env.account("alice");
 
-        // Mint tokens to alice
+        token.enable_clawback();
         token.mint(&alice.address(), 1_000_000);
         assert_eq!(token.balance(&alice.address()), 1_000_000);
 
-        // Burn some tokens (similar effect to clawback - reduces balance)
-        // Note: clawback requires special issuer flags to be set on the SAC
-        token.burn(&alice.address(), 300_000);
+        token.clawback(&alice.address(), 300_000);
 
-        // Verify balance reduced
         assert_eq!(token.balance(&alice.address()), 700_000);
     }
 
@@ -934,8 +951,9 @@ mod tests {
         let token = MockToken::new(&env, "USDC", 6);
         let alice = env.account("alice");
 
-        // Mint tokens
-        token.mint(&alice.address(), 1_000_000_000); // 1000 USDC with 6 decimals
+        // SAC decimals are determined by the deployed asset contract.
+        assert_eq!(token.decimals(), token.token_client().decimals());
+        token.mint(&alice.address(), 1_000_000_000);
 
         assert_eq!(token.balance(&alice.address()), 1_000_000_000);
     }
@@ -943,10 +961,10 @@ mod tests {
     // ── Decimals accessor ────────────────────────────────────────────────────
 
     #[test]
-    fn test_decimals_stored_and_accessible() {
+    fn test_decimals_match_sac() {
         let env = MockEnv::builder().build();
         let token = MockToken::new(&env, "USDC", 6);
-        assert_eq!(token.decimals(), 6);
+        assert_eq!(token.decimals(), token.token_client().decimals());
 
         let xlm = MockToken::xlm(&env);
         assert_eq!(xlm.decimals(), 7);
@@ -1069,6 +1087,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_empty_string_rejected() {
+        assert_eq!(
+            from_display_amount("", 2),
+            Err(ParseAmountError::InvalidCharacter)
+        );
+    }
+
+    #[test]
+    fn test_dot_only_rejected() {
+        assert_eq!(
+            from_display_amount(".", 2),
+            Err(ParseAmountError::InvalidCharacter)
+        );
+    }
+
+    #[test]
+    fn test_empty_fraction_rejected() {
+        assert_eq!(
+            from_display_amount("1.", 2),
+            Err(ParseAmountError::InvalidCharacter)
+        );
+    }
+
+    #[test]
+    fn test_whole_with_decimal_point_only_is_rejected() {
+        assert_eq!(
+            from_display_amount("0.", 2),
+            Err(ParseAmountError::InvalidCharacter)
+        );
+    }
+
     // ── Overflow ─────────────────────────────────────────────────────────────
 
     #[test]
@@ -1093,18 +1143,24 @@ mod tests {
         let env = MockEnv::builder().build();
         let token = MockToken::new(&env, "USDC", 6);
 
-        assert_eq!(token.units("1.25"), Ok(1_250_000_i128));
-        assert_eq!(token.units("0"), Ok(0));
-        assert_eq!(token.units("0.000001"), Ok(1));
+        let decimals = token.decimals();
         assert_eq!(
-            token.units("1.2345678"),
+            token.units("1.25"),
+            Ok(from_display_amount("1.25", decimals).unwrap())
+        );
+        assert_eq!(token.units("0"), Ok(0));
+        assert_eq!(
+            token.units("0.000001"),
+            Ok(from_display_amount("0.000001", decimals).unwrap())
+        );
+        assert_eq!(
+            token.units("1.12345678"),
             Err(ParseAmountError::TooManyFractionalDigits)
         );
     }
 
     #[test]
     fn test_units_mint_compatibility() {
-        // Verify that amounts obtained via units() work with the existing mint/balance API.
         let env = MockEnv::builder()
             .with_account("alice", Stroops::from(0))
             .build();
@@ -1115,31 +1171,25 @@ mod tests {
         let amount = token.units("1.5").unwrap();
         token.mint(&alice.address(), amount);
 
-        assert_eq!(token.balance(&alice.address()), 1_500_000_i128);
+        assert_eq!(
+            token.balance(&alice.address()),
+            from_display_amount("1.5", token.decimals()).unwrap()
+        );
     }
 
     // ── Escape-hatch: raw TokenClient ────────────────────────────────────────
 
     /// `token_client()` exposes SEP-41 calls not covered by the high-level
-    /// helpers. Here we query `decimals()` on-chain — a read that `MockToken`
-    /// does not wrap — without reconstructing the client manually.
+    /// helpers. Here we query `decimals()` on-chain.
     #[test]
     fn test_raw_token_client_decimals_query() {
         let env = MockEnv::builder().build();
         let token = MockToken::new(&env, "USDC", 6);
-
-        // Obtain the raw SEP-41 client through the escape hatch.
         let client = token.token_client();
-
-        // `decimals()` is not wrapped by any MockToken helper; we call it
-        // directly on the raw client to prove the escape hatch works.
-        assert_eq!(client.decimals(), 7u32);
+        assert_eq!(client.decimals(), token.decimals());
     }
 
-    /// `token_client()` gives explicit auth control. The high-level helpers
-    /// always call `mock_all_auths()`, so they cannot test that an
-    /// unauthorised call actually reverts. With the raw client we skip
-    /// mocking and confirm the SDK enforces auth.
+    /// Transfer without auth should revert when auths are cleared.
     #[test]
     fn test_raw_token_client_transfer_without_auth_reverts() {
         extern crate std;
@@ -1154,17 +1204,14 @@ mod tests {
         let alice = env.account("alice");
         let bob = env.account("bob");
 
-        // Fund alice via the high-level helper (internally mocks auth).
         token.mint(&alice.address(), 1_000);
+        env.inner().set_auths(&[]);
 
-        // Call transfer on the raw client WITHOUT mock_all_auths.
-        // NOTE: Since mock_all_auths() is called during mint(), the auth
-        // bypass persists in the SDK. The SDK currently lacks a straightforward
-        // way to drop the bypass, so we skip asserting panic here.
         let client = token.token_client();
-        let _result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             client.transfer(&alice.address(), &bob.address(), &500_i128);
         }));
+        assert!(result.is_err());
     }
 
     // ── Escape-hatch: raw StellarAssetClient ─────────────────────────────────
@@ -1198,9 +1245,8 @@ mod tests {
         let env = MockEnv::builder().build();
         let token = MockToken::new(&env, "USDC", 6);
 
-        // Admin should be accessible
         let admin = token.admin();
-        assert!(!admin.to_string().is_empty());
+        assert_eq!(token.asset_client().admin(), admin);
     }
 
     #[test]
@@ -1218,27 +1264,15 @@ mod tests {
         let env = MockEnv::builder().build();
         let token = MockToken::new(&env, "USDC", 6);
 
-        // Get initial admin
         let initial_admin = token.admin();
-
-        // Create a new admin address
         let new_admin = env
             .inner()
-            .register_contract::<soroban_sdk::testutils::MockAuthContract>(
-                None,
-                soroban_sdk::testutils::MockAuthContract {},
-            );
+            .register(soroban_sdk::testutils::MockAuthContract {}, ());
 
-        // Verify initial admin is different from new admin
         assert_ne!(initial_admin, new_admin);
-
-        // Perform admin rotation
         token.set_admin(&new_admin);
-
-        // Note: The MockToken struct still tracks the original admin address
-        // The actual SDK contract has the new admin, but our mock wrapper
-        // maintains the initial admin for test introspection
-        assert_eq!(token.admin(), initial_admin);
+        assert_eq!(token.admin(), new_admin);
+        assert_eq!(token.asset_client().admin(), new_admin);
     }
 
     #[test]
@@ -1246,6 +1280,7 @@ mod tests {
         let env = MockEnv::builder().build();
         let usdc = MockToken::new(&env, "USDC", 6);
         let usdt = MockToken::new(&env, "USDT", 6);
+        assert_eq!(usdt.decimals(), usdt.token_client().decimals());
 
         // Each token should have its own admin
         assert_ne!(usdc.admin(), usdt.admin());
@@ -1578,11 +1613,7 @@ impl MockStellarAsset {
             "Clawback is not enabled for this asset"
         );
         assert!(
-            *self
-                .trustline_clawback
-                .borrow()
-                .get(from)
-                .unwrap_or(&false),
+            *self.trustline_clawback.borrow().get(from).unwrap_or(&false),
             "trustline is not clawbackable"
         );
         self.env.mock_all_auths();

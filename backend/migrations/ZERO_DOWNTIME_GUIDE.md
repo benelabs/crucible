@@ -40,3 +40,31 @@ The CI check fails if any migration file contains:
 - Unsafe `RENAME COLUMN`
 - `ALTER TABLE ... NOT NULL` without default values
 - `DROP TABLE` without prior deprecation window
+
+---
+
+## 4. Migration Linter and Applied-Schema Tests
+
+`backend/tests/migration_tests.rs` replaces grep-only checking with a statement-level linter plus tests that apply every migration to a real Postgres (`DATABASE_URL`; CI sets `REQUIRE_MIGRATION_DB=1` so they cannot be skipped).
+
+Migrations with a version of `20261123000000` or later are held to the strict rules below. Earlier migrations are already applied in production and are only checked against the legacy rules in section 3.
+
+| Rule | What to do instead |
+| --- | --- |
+| `CREATE INDEX` on an existing table without `CONCURRENTLY` | Use `CREATE INDEX CONCURRENTLY` |
+| `DROP INDEX` without `CONCURRENTLY` | Use `DROP INDEX CONCURRENTLY` |
+| `CONCURRENTLY` without a `-- no-transaction` first line | Add `-- no-transaction` as the first line of the file (sqlx runs it outside a transaction) |
+| `ALTER COLUMN ... TYPE` | Expand and contract: add a new column, backfill, switch, drop |
+| `SET NOT NULL` | Add a `CHECK (col IS NOT NULL) NOT VALID`, validate it, then set NOT NULL |
+| `ADD CONSTRAINT ... FOREIGN KEY / CHECK` without `NOT VALID` | Add `NOT VALID`, then `VALIDATE CONSTRAINT` in a later migration |
+| `UPDATE` / `DELETE` backfills | Batch the backfill outside the migration, or add `-- lint:allow-backfill` after review |
+| `CREATE TABLE IF NOT EXISTS` | Use plain `CREATE TABLE` so unexpected existing objects fail loudly |
+| `LOCK TABLE`, `VACUUM FULL`, `CLUSTER` | Do not run these in a migration |
+
+Indexes and constraints on a table created in the same migration are exempt from the index and constraint rules.
+
+Run locally with a Postgres available:
+
+```bash
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres   cargo test -p backend --test migration_tests
+```

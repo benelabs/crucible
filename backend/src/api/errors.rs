@@ -7,12 +7,57 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Standardized JSON error response returned by middlewares and fallbacks.
-#[derive(Debug, Serialize, Deserialize)]
+/// The single JSON error body returned by every error path in the API
+/// (handler errors, middleware rejections and the router fallback).
+///
+/// `details` and `request_id` are omitted from the JSON when absent. The
+/// request id is filled in from the `x-request-id` header by the request-id
+/// middleware for error responses.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ErrorResponse {
+    /// Machine-readable error code (e.g. `"not_found"`).
     pub code: String,
+    /// Human-readable error message.
     pub message: String,
+    /// RFC 3339 timestamp of when the error occurred.
     pub timestamp: String,
+    /// Optional structured details (e.g. `retry_after_seconds`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub details: Option<serde_json::Value>,
+    /// Correlation id of the request that failed, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+impl ErrorResponse {
+    /// Build an error body with the current timestamp.
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            details: None,
+            request_id: None,
+        }
+    }
+
+    /// Attach structured details.
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+
+    /// Attach a request id.
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into());
+        self
+    }
+
+    /// Render as an axum response with the given status.
+    pub fn into_response_with(self, status: StatusCode) -> Response {
+        (status, Json(self)).into_response()
+    }
 }
 
 /// RFC 7807 compliant Problem Details representation.
@@ -57,15 +102,7 @@ pub fn make_problem_response(status: StatusCode, code: &str, detail: &str) -> Re
 
 /// Create a standardized axum JSON response with a timestamp.
 pub fn make_error_response(status: StatusCode, code: &str, message: &str) -> Response {
-    (
-        status,
-        Json(ErrorResponse {
-            code: code.to_string(),
-            message: message.to_string(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-        }),
-    )
-        .into_response()
+    ErrorResponse::new(code, message).into_response_with(status)
 }
 
 /// A fallback handler returning a standardized 404 JSON response.

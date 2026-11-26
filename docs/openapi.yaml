@@ -497,6 +497,10 @@ paths:
                 $ref: "#/components/schemas/ContractExecutionResponse"
         "422":
           description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/coverage:
     post:
       operationId: submitCoverage
@@ -558,6 +562,29 @@ paths:
           description: WebSocket upgrade successful
 components:
   schemas:
+    ErrorResponse:
+      type: object
+      description: Single JSON body returned by every error path (handlers, middleware rejections and the router fallback).
+      required:
+        - code
+        - message
+        - timestamp
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code, e.g. not_found.
+        message:
+          type: string
+          description: Human-readable error message.
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: object
+          description: Optional structured details, e.g. retry_after_seconds.
+        request_id:
+          type: string
+          description: Value of the x-request-id header for the failed request.
     HealthReport:
       type: object
       properties:

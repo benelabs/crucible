@@ -14,17 +14,8 @@ pub type ApiResult<T> = Result<ApiResponse<T>, ApiError>;
 // Error Handling Contract
 // ---------------------------------------------------------------------------
 
-/// Standardized API error response.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ApiErrorResponse {
-    pub code: String,
-    pub message: String,
-    pub timestamp: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-}
+/// Standardized API error response (alias of the single shared error body).
+pub type ApiErrorResponse = crate::api::errors::ErrorResponse;
 
 /// Errors that can occur in the API.
 #[derive(Debug, Error)]
@@ -98,13 +89,10 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status_code();
-        let body = Json(ApiErrorResponse {
-            code: self.error_code(),
-            message: self.to_string(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            details: None,
-            request_id: None,
-        });
+        let body = Json(crate::api::errors::ErrorResponse::new(
+            self.error_code(),
+            self.to_string(),
+        ));
 
         if status.is_server_error() {
             error!(error = %self, "API Server Error");

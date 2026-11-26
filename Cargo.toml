@@ -4,6 +4,7 @@ members = [
     "contracts/crucible",
     "contracts/treasury",
     "contracts/proxy",
+    "contracts/oracle",
     "contracts/zk_verifier",
     "crucible-macros",
     "examples/counter",
@@ -43,7 +44,6 @@ exclude = [
     "contracts/supply_chain",
     "contracts/governance",
     "contracts/insurance",
-    "contracts/oracle",
 ]
 resolver = "2"
 

@@ -48,7 +48,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "1.36.18"
+version = "1.36.19"
 edition = "2021"
 rust-version = "1.91.0"
 license = "MIT"

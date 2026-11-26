@@ -1,3 +1,9 @@
+## [1.37.0](https://github.com/benelabs/crucible/compare/v1.36.20...v1.37.0) (2026-11-26)
+
+### Features
+
+* drive sandbox limits from config and validate hostile WASM ([#1457](https://github.com/benelabs/crucible/issues/1457) [#1452](https://github.com/benelabs/crucible/issues/1452) [#1453](https://github.com/benelabs/crucible/issues/1453) [#1454](https://github.com/benelabs/crucible/issues/1454)) ([9ac5038](https://github.com/benelabs/crucible/commit/9ac5038c0d4007e2db31526aad7e3a0e0cf397d5))
+
 ## [1.36.20](https://github.com/benelabs/crucible/compare/v1.36.19...v1.36.20) (2026-11-26)
 
 ### Bug Fixes

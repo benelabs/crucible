@@ -1,3 +1,9 @@
+## [1.36.20](https://github.com/benelabs/crucible/compare/v1.36.19...v1.36.20) (2026-11-26)
+
+### Bug Fixes
+
+* lint migrations, unify API errors, and authenticate contract initialization ([#1455](https://github.com/benelabs/crucible/issues/1455) [#1456](https://github.com/benelabs/crucible/issues/1456) [#1484](https://github.com/benelabs/crucible/issues/1484) [#1485](https://github.com/benelabs/crucible/issues/1485)) ([872c417](https://github.com/benelabs/crucible/commit/872c4176a7b391108e5f8cce8534c8e219fef26b))
+
 ## [1.36.19](https://github.com/benelabs/crucible/compare/v1.36.18...v1.36.19) (2026-11-26)
 
 ### Bug Fixes

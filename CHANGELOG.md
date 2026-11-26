@@ -1,3 +1,9 @@
+## [1.37.2](https://github.com/benelabs/crucible/compare/v1.37.1...v1.37.2) (2026-11-26)
+
+### Bug Fixes
+
+* harden release profiles and token amount validation ([#1461](https://github.com/benelabs/crucible/issues/1461) [#1466](https://github.com/benelabs/crucible/issues/1466) [#1468](https://github.com/benelabs/crucible/issues/1468) [#1470](https://github.com/benelabs/crucible/issues/1470)) ([1ddb22e](https://github.com/benelabs/crucible/commit/1ddb22ef66ba741916d0c9eaa0ab441d8b965b89))
+
 ## [1.37.1](https://github.com/benelabs/crucible/compare/v1.37.0...v1.37.1) (2026-11-26)
 
 ### Bug Fixes

@@ -43,7 +43,6 @@ fn idempotency_app() -> Router {
 }
 
 #[tokio::test]
-#[ignore = "requires local Redis server"]
 async fn duplicate_ingest_with_idempotency_key_returns_cached_response() {
     let app = idempotency_app();
     let payload = r#"{"source":"integration-test","message":"duplicate-block-check"}"#;

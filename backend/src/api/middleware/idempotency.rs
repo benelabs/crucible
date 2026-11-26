@@ -462,7 +462,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local Redis server"]
     async fn duplicate_request_replays_original_response() {
         let counter = Arc::new(AtomicUsize::new(0));
         let app = counting_app(redis_app_state(), counter.clone(), Duration::ZERO, false);
@@ -491,7 +490,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local Redis server"]
     async fn concurrent_duplicate_requests_replay_instead_of_conflicting() {
         let counter = Arc::new(AtomicUsize::new(0));
         // Handler runs longer than the test lock TTL to verify lease renewal.
@@ -517,7 +515,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires local Redis server"]
     async fn failed_handler_releases_lock_allowing_subsequent_retry() {
         let counter = Arc::new(AtomicUsize::new(0));
         let app = counting_app(redis_app_state(), counter.clone(), Duration::ZERO, true);

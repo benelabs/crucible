@@ -106,6 +106,6 @@ mod tests {
     #[test]
     fn test_dex_creation() {
         let dex = DEX;
-        assert_eq!(std::mem::size_of_val(&dex), 0);
+        assert_eq!(core::mem::size_of_val(&dex), 0);
     }
 }

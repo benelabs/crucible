@@ -3,7 +3,7 @@ extern crate std;
 
 use crucible::prelude::*;
 use crucible::{assert_emitted, assert_reverts};
-use soroban_sdk::symbol_short;
+use soroban_sdk::{symbol_short, Address, Vec};
 
 use crate::{MultiSig, MultiSigClient};
 
@@ -43,13 +43,16 @@ fn test_basic_flow() {
     ctx.env.mock_all_auths();
 
     // initialize with owners a,b,c and threshold 2
-    let owners = vec![ctx.a.address(), ctx.b.address(), ctx.c.address()];
+    let owners = Vec::from_array(
+        ctx.env.inner(),
+        [ctx.a.address(), ctx.b.address(), ctx.c.address()],
+    );
     ctx.client().initialize(&owners, &2u32);
-    assert_emitted!(ctx.env, ctx.id, (symbol_short!("initialized"),), ());
+    assert_emitted!(ctx.env, ctx.id, (symbol_short!("init"),), ());
 
     // proposer a creates a proposal
     ctx.env.mock_all_auths();
-    let tx = soroban_sdk::Bytes::from_array(&ctx.env.address(), &[1, 2, 3]);
+    let tx = soroban_sdk::Bytes::from_array(ctx.env.inner(), &[1, 2, 3]);
     let id = ctx.client().propose(&ctx.a.address(), &tx);
     assert_emitted!(ctx.env, ctx.id, (symbol_short!("proposed"),), id);
 

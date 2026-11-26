@@ -18,6 +18,7 @@ use k256::ecdsa::{SigningKey as K256SigningKey, VerifyingKey as K256VerifyingKey
 use p256::ecdsa::{SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey};
 use rand::SeedableRng as _;
 use rand_chacha::ChaCha8Rng;
+use soroban_env_host::auth::AuthorizationManager;
 use crate::zk::{
     self, G1, G2, Groth16Proof, Groth16VerifyingKey, PairingCurve, PlonkProof,
 };
@@ -817,32 +818,31 @@ impl MockEnv {
         self.inner.mock_all_auths();
     }
 
-    /// Enable mock authorization for the duration of a closure, then clear it.
+    /// Enable mock authorization for the duration of a closure, then restore
+    /// the previous auth state.
     ///
-    /// After `f` returns, `mock_auths(&[])` is called so that subsequent
-    /// `require_auth()` calls are enforced normally.
+    /// The prior auth state is restored on normal return and on unwind, so a
+    /// panicking closure cannot leak the bypass into later operations.
     ///
     /// # Example
     /// ```rust,ignore
     /// env.with_mock_all_auths(|| {
     ///     contract.initialize(&admin);
     /// });
-    /// // Auth required again from here on.
+    /// // Auth configuration from before the call is active again.
     /// ```
     pub fn with_mock_all_auths<F, T>(&self, f: F) -> T
     where
         F: FnOnce() -> T,
     {
-        self.inner.mock_all_auths();
-        let result = f();
-        self.inner.mock_auths(&[]);
-        result
+        let _guard = self.mock_all_auths_scoped();
+        f()
     }
 
     /// Returns an RAII guard that enables mock authorization until dropped.
     ///
-    /// Useful when the scoped block spans multiple statements that cannot
-    /// easily be wrapped in a single closure.
+    /// The auth state that existed when the guard was created is restored when
+    /// it is dropped, including during unwinding.
     ///
     /// # Example
     /// ```rust,ignore
@@ -850,13 +850,11 @@ impl MockEnv {
     ///     let _guard = env.mock_all_auths_scoped();
     ///     contract.step_one();
     ///     contract.step_two();
-    /// } // guard dropped — auth restored
+    /// } // guard dropped — prior auth state restored
     /// ```
+    #[must_use = "dropping the guard restores the previous auth state"]
     pub fn mock_all_auths_scoped(&self) -> MockAuthGuard {
-        self.inner.mock_all_auths();
-        MockAuthGuard {
-            env: self.inner.clone(),
-        }
+        MockAuthGuard::new(&self.inner)
     }
 
     /// Set explicit mock authorizations for subsequent contract calls.
@@ -1403,8 +1401,8 @@ impl MockEnv {
     /// once and no state changes are committed.
     ///
     /// Auth is globally bypassed only for the duration of the dry-run call.
-    /// After `simulate` returns the auth mock is cleared, so subsequent
-    /// operations require explicit auth setup and will not silently pass.
+    /// After `simulate` returns the previous auth state is restored, including
+    /// when the closure panics.
     ///
     /// Use [`prepare`](Self::prepare) instead when you need to commit the call
     /// after inspecting the estimate.
@@ -1425,7 +1423,7 @@ impl MockEnv {
     /// [`PreparedTx`] that can later apply the call's state changes.
     ///
     /// The closure runs once here to produce the estimate (with auth mocked for
-    /// that run only, then cleared) and is retained so it can run again when
+    /// that run only, then restored) and is retained so it can run again when
     /// [`PreparedTx::commit`] is called. Because the closure is stored by
     /// generic type rather than boxed, there is no `'static` requirement.
     ///
@@ -1449,9 +1447,9 @@ impl MockEnv {
 
     /// Execute `f` once under mocked auth and capture the dry-run metrics.
     ///
-    /// Shared by [`simulate`](Self::simulate) and [`prepare`](Self::prepare).
-    /// The global auth bypass is cleared before returning so it does not leak
-    /// into later operations.
+    /// Shared by [`simulate`](Self::simulate), [`prepare`](Self::prepare), and
+    /// [`simulate_inspect`](Self::simulate_inspect). The previous auth state is
+    /// restored before returning or unwinding.
     fn dry_run<F, T>(&self, f: F) -> SimulatedTx<T>
     where
         F: FnOnce() -> T,
@@ -1459,13 +1457,16 @@ impl MockEnv {
         let mut budget = self.inner.budget();
         budget.reset_default();
 
-        self.inner.mock_all_auths();
-        let result = f();
-        let instructions = budget.cpu_instruction_cost();
-        let fee = self.inner.cost_estimate().fee().total;
-        let auths = self.inner.auths().iter().map(|(a, _)| a.clone()).collect();
-        // Clear the global auth bypass so it does not leak into later operations.
-        self.inner.mock_auths(&[]);
+        let (result, instructions, fee, auths) = {
+            let _guard = self.mock_all_auths_scoped();
+            let result = f();
+            (
+                result,
+                budget.cpu_instruction_cost(),
+                self.inner.cost_estimate().fee().total,
+                self.inner.auths().iter().map(|(a, _)| a.clone()).collect(),
+            )
+        };
 
         SimulatedTx::new(fee, instructions, auths, true, Some(result))
     }
@@ -1592,25 +1593,13 @@ impl MockEnv {
     /// allowing it to borrow local clients, accounts, or fixture references.
     ///
     /// Auth is globally bypassed only for the duration of the dry-run call.
-    /// After `simulate_inspect` returns the auth mock is cleared, so subsequent
-    /// operations require explicit auth setup and will not silently pass.
+    /// After `simulate_inspect` returns the previous auth state is restored,
+    /// including when the closure panics.
     pub fn simulate_inspect<F, T>(&self, f: F) -> SimulatedTx<T>
     where
         F: FnOnce() -> T,
     {
-        let mut budget = self.inner.budget();
-        budget.reset_default();
-
-        self.inner.mock_all_auths();
-        #[allow(unused_variables)]
-        let result = f();
-        let instructions = budget.cpu_instruction_cost();
-        let fee = self.inner.cost_estimate().fee().total;
-        let auths = self.inner.auths().iter().map(|(a, _)| a.clone()).collect();
-        // Clear the global auth bypass so it does not leak into later operations.
-        self.inner.mock_auths(&[]);
-
-        SimulatedTx::new(fee, instructions, auths, true, Some(result))
+        self.dry_run(f)
     }
 
     /// Creates a fully independent copy of this environment.
@@ -1761,8 +1750,8 @@ impl MockEnv {
     ///
     /// Runs `f` under [`std::panic::catch_unwind`] and returns a
     /// [`FailedCallResult`] indicating whether the call panicked and, if so,
-    /// what message was captured.  Auth is mocked for the duration of the call
-    /// and cleared before returning.
+    /// what message was captured. Auth is mocked for the duration of the call
+    /// and the previous auth state is restored before returning.
     ///
     /// This is useful for asserting that a cross-contract call chain rejects
     /// invalid inputs or unauthorized callers without letting the panic
@@ -1778,11 +1767,12 @@ impl MockEnv {
     where
         F: FnOnce() -> T,
     {
-        self.inner.mock_all_auths();
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            f();
-        }));
-        self.inner.mock_auths(&[]);
+        let outcome = {
+            let _guard = self.mock_all_auths_scoped();
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                f();
+            }))
+        };
 
         match outcome {
             Err(payload) => {
@@ -2143,12 +2133,11 @@ impl FailedCallResult {
     }
 }
 
-/// RAII guard that clears mock auth when dropped.
+/// RAII guard that restores the previous auth state when dropped.
 ///
 /// Obtained via [`MockEnv::mock_all_auths_scoped`]. Auth bypass is active for
-/// as long as this value is alive; dropping it calls `mock_auths(&[])` on the
-/// underlying environment, restoring the requirement for real auth on all
-/// subsequent calls.
+/// as long as this value is alive; dropping it restores the auth manager that
+/// was installed before the guard was created, including during unwinding.
 ///
 /// # Example
 /// ```rust,ignore
@@ -2156,15 +2145,36 @@ impl FailedCallResult {
 ///     let _guard = env.mock_all_auths_scoped();
 ///     contract.step_one();
 ///     contract.step_two();
-/// } // _guard dropped — auth required again
+/// } // _guard dropped — previous auth state restored
 /// ```
+#[must_use = "dropping the guard restores the previous auth state"]
 pub struct MockAuthGuard {
     env: Env,
+    saved: Option<AuthorizationManager>,
+}
+
+impl MockAuthGuard {
+    fn new(env: &Env) -> Self {
+        let saved = env
+            .host()
+            .snapshot_auth_manager()
+            .expect("failed to snapshot Soroban auth manager");
+        env.mock_all_auths();
+        Self {
+            env: env.clone(),
+            saved: Some(saved),
+        }
+    }
 }
 
 impl Drop for MockAuthGuard {
     fn drop(&mut self) {
-        self.env.mock_auths(&[]);
+        if let Some(saved) = self.saved.take() {
+            let result = self.env.host().set_auth_manager(saved);
+            if !std::thread::panicking() {
+                result.expect("failed to restore Soroban auth manager");
+            }
+        }
     }
 }
 
@@ -3168,6 +3178,157 @@ mod auth_scope_tests {
             },
         }]);
         client.protected_action(&alice);
+    }
+
+    fn mock_alice_auth(
+        env: &MockEnv,
+        contract_id: &soroban_sdk::Address,
+        alice: &soroban_sdk::Address,
+    ) {
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: alice,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: contract_id,
+                fn_name: "protected_action",
+                args: (alice.clone(),).into_val(env.inner()),
+                sub_invokes: &[],
+            },
+        }]);
+    }
+
+    fn assert_prior_auth_restored(
+        client: &DummyProtectedContractClient,
+        alice: &soroban_sdk::Address,
+        bob: &soroban_sdk::Address,
+    ) {
+        assert_eq!(client.protected_action(alice), 100);
+        let unauthorized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.protected_action(bob);
+        }));
+        assert!(unauthorized.is_err(), "auth bypass leaked after panic");
+    }
+
+    #[test]
+    fn with_mock_all_auths_restores_prior_auth_after_panic() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+        mock_alice_auth(&env, &contract_id, &alice);
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            env.with_mock_all_auths(|| -> u32 { panic!("boom") });
+        }));
+        assert!(panicked.is_err());
+
+        assert_prior_auth_restored(&client, &alice, &bob);
+    }
+
+    #[test]
+    fn scoped_guard_restores_prior_auth_after_panic() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+        mock_alice_auth(&env, &contract_id, &alice);
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = env.mock_all_auths_scoped();
+            panic!("boom");
+        }));
+        assert!(panicked.is_err());
+
+        assert_prior_auth_restored(&client, &alice, &bob);
+    }
+
+    #[test]
+    fn simulate_restores_prior_auth_after_panic() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+        mock_alice_auth(&env, &contract_id, &alice);
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            env.simulate(|| -> u32 { panic!("boom") });
+        }));
+        assert!(panicked.is_err());
+
+        assert_prior_auth_restored(&client, &alice, &bob);
+    }
+
+    #[test]
+    fn prepare_restores_prior_auth_after_panic() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+        mock_alice_auth(&env, &contract_id, &alice);
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            env.prepare(|| -> u32 { panic!("boom") });
+        }));
+        assert!(panicked.is_err());
+
+        assert_prior_auth_restored(&client, &alice, &bob);
+    }
+
+    #[test]
+    fn simulate_inspect_restores_prior_auth_after_panic() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+        mock_alice_auth(&env, &contract_id, &alice);
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            env.simulate_inspect(|| -> u32 { panic!("boom") });
+        }));
+        assert!(panicked.is_err());
+
+        assert_prior_auth_restored(&client, &alice, &bob);
+    }
+
+    #[test]
+    fn simulate_failing_call_restores_prior_auth_after_inner_panic() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+        mock_alice_auth(&env, &contract_id, &alice);
+
+        let result = env.simulate_failing_call(|| -> u32 { panic!("inner") });
+        assert!(result.did_fail());
+
+        assert_prior_auth_restored(&client, &alice, &bob);
+    }
+
+    #[test]
+    fn simulate_failing_call_restores_prior_auth_after_success() {
+        use soroban_sdk::testutils::Address as _;
+        let env = MockEnv::default();
+        let contract_id = env.inner().register(DummyProtectedContract, ());
+        let client = DummyProtectedContractClient::new(env.inner(), &contract_id);
+        let alice = soroban_sdk::Address::generate(env.inner());
+        let bob = soroban_sdk::Address::generate(env.inner());
+        mock_alice_auth(&env, &contract_id, &alice);
+
+        let result = env.simulate_failing_call(|| client.protected_action(&alice));
+        assert!(!result.did_fail());
+
+        assert_prior_auth_restored(&client, &alice, &bob);
     }
 }
 

@@ -8,7 +8,7 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dev-dependencies]
-crucible = { path = "../../contracts/crucible" }
+crucible = { path = "../../contracts/crucible", features = ["std"] }
 
 [dependencies]
 soroban-sdk = { workspace = true }

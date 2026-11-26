@@ -29,19 +29,19 @@ impl MultiSig {
         if env.storage().instance().has(&DataKey::Owners) {
             panic!("already initialized");
         }
-        if owners.is_empty() || threshold == 0 || (threshold as usize) > owners.len() {
+        if owners.is_empty() || threshold == 0 || (threshold as usize) > owners.len() as usize {
             panic!("invalid owners/threshold");
         }
         env.storage().instance().set(&DataKey::Owners, &owners);
         env.storage().instance().set(&DataKey::Threshold, &threshold);
         env.storage().instance().set(&DataKey::NextId, &1u64);
-        env.events().publish((symbol_short!("initialized"),), ());
+        env.events().publish((symbol_short!("init"),), ());
     }
 
     pub fn propose(env: Env, proposer: Address, tx: Bytes) -> u64 {
         // proposer must be an owner
         let owners: Vec<Address> = env.storage().instance().get(&DataKey::Owners).unwrap();
-        if !owners.iter().any(|a| a == &proposer) {
+        if !owners.iter().any(|a| a == proposer.clone()) {
             panic!("only owner can propose");
         }
         proposer.require_auth();
@@ -66,7 +66,7 @@ impl MultiSig {
 
     pub fn approve(env: Env, approver: Address, id: u64) {
         let owners: Vec<Address> = env.storage().instance().get(&DataKey::Owners).unwrap();
-        if !owners.iter().any(|a| a == &approver) {
+        if !owners.iter().any(|a| a == approver.clone()) {
             panic!("only owner can approve");
         }
         approver.require_auth();
@@ -76,7 +76,7 @@ impl MultiSig {
             panic!("proposal already executed");
         }
         // check for duplicate approval
-        if p.approvals.iter().any(|a| a == &approver) {
+        if p.approvals.iter().any(|a| a == approver.clone()) {
             return; // idempotent
         }
         p.approvals.push_back(approver.clone());
@@ -86,7 +86,7 @@ impl MultiSig {
 
     pub fn execute(env: Env, executor: Address, id: u64) {
         let owners: Vec<Address> = env.storage().instance().get(&DataKey::Owners).unwrap();
-        if !owners.iter().any(|a| a == &executor) {
+        if !owners.iter().any(|a| a == executor.clone()) {
             panic!("only owner can execute");
         }
         executor.require_auth();

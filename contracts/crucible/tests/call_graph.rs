@@ -1,3 +1,4 @@
+#![cfg(feature = "std")]
 //! Cross-contract invocation call-graph and trace recorder tests.
 //!
 //! Exercises the recorder against a three-tier protocol (router → pool →

@@ -18,3 +18,8 @@ allowed_origins = []
 [observability]
 log_level = "debug"
 enable_metrics = true
+
+[sandbox]
+max_cpu_instructions = 20000000
+timeout_ms = 3000
+max_concurrent_executions = 16

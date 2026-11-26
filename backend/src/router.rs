@@ -64,6 +64,7 @@ use crate::{
         dashboard::BatchContractStatsResponse,
         audit::AuditEventRecord,
         audit::AuditEventRequest,
+        crate::api::errors::ErrorResponse,
     )),
     tags(
         (name = "profiling", description = "Performance and health monitoring endpoints"),

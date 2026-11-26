@@ -65,9 +65,10 @@ crucible/
 - **Snapshot testing** — State serialization and diffing
 
 **Dependencies:**
-- `soroban-sdk` (with `testutils` feature) — Official Soroban SDK
+- `soroban-sdk` (with `testutils` enabled by the `std` feature) — Official Soroban SDK
 - `crucible-macros` — Proc-macro support (via optional `derive` feature)
-- `serde` / `serde_json` — Serialization (for snapshots feature)
+- `soroban-env-host` — Host-only checkpoint, authorization and topic helpers (via `std`)
+- `serde` / `serde_json` — Serialization (for `snapshots`, which implies `std`)
 
 **Public API Entry Point:**
 ```rust

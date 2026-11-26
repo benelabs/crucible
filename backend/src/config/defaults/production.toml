@@ -18,3 +18,10 @@ allowed_origins = []
 [observability]
 log_level = "info"
 enable_metrics = true
+
+[sandbox]
+max_cpu_instructions = 25000000
+max_memory_bytes = 67108864
+timeout_ms = 2000
+max_concurrent_executions = 32
+max_wasm_imports = 64

@@ -770,7 +770,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn integration_records_and_summarizes_with_postgres_and_redis() {
         dotenvy::dotenv().ok();
         let database_url = std::env::var("DATABASE_URL")

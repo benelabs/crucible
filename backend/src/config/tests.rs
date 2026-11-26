@@ -212,6 +212,7 @@ fn test_sensitive_fields_redacted_in_debug() {
             enable_metrics: false,
         },
         cors: crate::config::CorsConfig::default(),
+        sandbox: crate::services::sandbox::SandboxLimits::default(),
     };
 
     let debug_str = format!("{:?}", config);
@@ -310,4 +311,41 @@ fn test_cors_rejects_wildcard_with_credentials_in_development_and_staging() {
             }
         },
     );
+}
+
+#[test]
+fn test_sandbox_limits_come_from_config_and_environment_overrides() {
+    let development = AppConfig::load_isolated(Environment::Development).unwrap();
+    assert_eq!(development.sandbox.max_cpu_instructions, 10_000_000);
+    assert_eq!(development.sandbox.max_wasm_imports, 128);
+
+    temp_env::with_vars(
+        [
+            ("APP_SANDBOX__MAX_CPU_INSTRUCTIONS", Some("12345")),
+            ("APP_SANDBOX__TIMEOUT_MS", Some("1500")),
+            ("APP_SANDBOX__MAX_WASM_TABLE_ENTRIES", Some("7")),
+        ],
+        || {
+            let config = AppConfig::load(Environment::Development).unwrap();
+            assert_eq!(config.sandbox.max_cpu_instructions, 12_345);
+            assert_eq!(config.sandbox.timeout_ms, 1_500);
+            assert_eq!(config.sandbox.max_wasm_table_entries, 7);
+        },
+    );
+}
+
+#[test]
+fn test_sandbox_limits_are_validated_at_startup() {
+    temp_env::with_vars([("APP_SANDBOX__MAX_CPU_INSTRUCTIONS", Some("0"))], || {
+        let err = AppConfig::load(Environment::Development)
+            .expect_err("invalid sandbox limits must fail at startup");
+        match err {
+            crate::config::ConfigError::ValidationError(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|e| e.contains("sandbox max_cpu_instructions")));
+            }
+            other => panic!("Expected ValidationError, got {other:?}"),
+        }
+    });
 }

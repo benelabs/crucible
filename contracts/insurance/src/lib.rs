@@ -1,52 +1,56 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, String,
+};
 
 #[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InsuranceError {
-    AmountsMustBePositive = 1,
-    ClaimAlreadyProcessed = 2,
-    ClaimExceedsRemainingCoverage = 3,
-    ClaimNotFound = 4,
-    ClaimOverflow = 5,
+    AlreadyInitialized = 1,
+    NotInitialized = 2,
+    Unauthorized = 3,
+    ReentrancyGuardLocked = 4,
+    AmountsMustBePositive = 5,
     DurationMustBePositive = 6,
     DurationOverflow = 7,
-    ExtensionMustBePositive = 8,
-    InsufficientReserves = 9,
-    InvalidClaimAmount = 10,
+    TokenNotSet = 8,
+    PolicyNotFound = 9,
+    PolicyNotActive = 10,
     PolicyExpired = 11,
-    PolicyIsNotActive = 12,
-    PolicyNotFound = 13,
-    PremiumOverflow = 14,
-    ReentrancyGuardLocked = 15,
-    TokenNotSet = 16,
-}
-
-
-#[contracttype]
-#[derive(Clone)]
-struct InsurancePolicy {
-    policy_id: u64,
-    holder: Address,
-    contract_address: Address,
-    coverage_amount: i128,
-    premium: i128,
-    duration_days: u64,
-    claimed_total: i128, // sum of pending + approved claims
-    active: bool,
-    created_at: u64,
-    expires_at: u64,
+    InvalidClaimAmount = 12,
+    ClaimOverflow = 13,
+    ClaimExceedsCoverage = 14,
+    ClaimNotFound = 15,
+    ClaimAlreadyProcessed = 16,
+    InsufficientReserves = 17,
+    ExtensionMustBePositive = 18,
+    PremiumOverflow = 19,
 }
 
 #[contracttype]
-#[derive(Clone)]
-struct Claim {
-    claim_id: u64,
-    policy_id: u64,
-    amount: i128,
-    status: u32, // 0 = pending, 1 = approved, 2 = rejected
-    failure_reason: String,
-    created_at: u64,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsurancePolicy {
+    pub policy_id: u64,
+    pub holder: Address,
+    pub contract_address: Address,
+    pub coverage_amount: i128,
+    pub premium: i128,
+    pub duration_days: u64,
+    pub claimed_total: i128, // sum of pending + approved claims
+    pub active: bool,
+    pub created_at: u64,
+    pub expires_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Claim {
+    pub claim_id: u64,
+    pub policy_id: u64,
+    pub amount: i128,
+    pub status: u32, // 0 = pending, 1 = approved, 2 = rejected
+    pub failure_reason: String,
+    pub created_at: u64,
 }
 
 #[contracttype]
@@ -62,14 +66,13 @@ enum DataKey {
     ReentrancyGuard,
 }
 
-/// Insurance Contract for smart contract failures
-#[contract]
-#[derive(Default)]
-pub struct Insurance;
+/// Drop-based reentrancy guard ensuring guards are safely released on all execution paths.
+struct ReentrancyGuard<'a> {
+    env: &'a Env,
+}
 
-#[contractimpl]
-impl Insurance {
-    fn lock_guard(env: &Env) -> Result<(), InsuranceError> {
+impl<'a> ReentrancyGuard<'a> {
+    fn acquire(env: &'a Env) -> Result<Self, InsuranceError> {
         let is_locked: bool = env
             .storage()
             .instance()
@@ -78,21 +81,64 @@ impl Insurance {
         if is_locked {
             return Err(InsuranceError::ReentrancyGuardLocked);
         }
-        env.storage().instance().set(&DataKey::ReentrancyGuard, &true);
-        Ok(())
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &true);
+        Ok(Self { env })
+    }
+}
+
+impl<'a> Drop for ReentrancyGuard<'a> {
+    fn drop(&mut self) {
+        self.env
+            .storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &false);
+    }
+}
+
+/// Insurance Contract for smart contract failures
+#[contract]
+#[derive(Default)]
+pub struct Insurance;
+
+#[contractimpl]
+impl Insurance {
+    fn get_admin(env: &Env) -> Result<Address, InsuranceError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(InsuranceError::NotInitialized)
     }
 
-    fn unlock_guard(env: &Env) {
-        env.storage().instance().set(&DataKey::ReentrancyGuard, &false);
-    }
-    /// Initialize insurance contract
-    pub fn initialize(env: Env, admin: Address, token: Address, initial_reserves: i128) {
+    /// Initialize insurance contract.
+    ///
+    /// Requires admin authentication before any state is written, and enforces
+    /// a one-time initialization guard to prevent overwriting admin control.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        token: Address,
+        initial_reserves: i128,
+    ) -> Result<(), InsuranceError> {
+        // Authenticate admin before storing any state
+        admin.require_auth();
+
         let storage = env.storage().instance();
+        // One-time initialization guard
+        if storage.has(&DataKey::Admin) {
+            return Err(InsuranceError::AlreadyInitialized);
+        }
+        if initial_reserves < 0 {
+            return Err(InsuranceError::AmountsMustBePositive);
+        }
+
         storage.set(&DataKey::Admin, &admin);
         storage.set(&DataKey::Token, &token);
         storage.set(&DataKey::TotalReserves, &initial_reserves);
         storage.set(&DataKey::PolicyCounter, &0u64);
         storage.set(&DataKey::ClaimCounter, &0u64);
+        Ok(())
     }
 
     /// Create an insurance policy for a contract
@@ -104,35 +150,31 @@ impl Insurance {
         premium: i128,
         duration_days: u64,
     ) -> Result<u64, InsuranceError> {
-        Self::lock_guard(&env)?;
-        holder.require_auth();
-
+        // Validate inputs before locking
         if coverage_amount <= 0 || premium <= 0 {
-            Self::unlock_guard(&env);
             return Err(InsuranceError::AmountsMustBePositive);
         }
         if duration_days == 0 {
-            Self::unlock_guard(&env);
             return Err(InsuranceError::DurationMustBePositive);
         }
 
-        let Some(duration_secs) = duration_days.checked_mul(86400) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::DurationOverflow);
-        };
+        let duration_secs = duration_days
+            .checked_mul(86400)
+            .ok_or(InsuranceError::DurationOverflow)?;
         let now = env.ledger().timestamp();
-        let Some(expires_at) = now.checked_add(duration_secs) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::DurationOverflow);
-        };
+        let expires_at = now
+            .checked_add(duration_secs)
+            .ok_or(InsuranceError::DurationOverflow)?;
 
+        holder.require_auth();
+
+        let _guard = ReentrancyGuard::acquire(&env)?;
         let storage = env.storage().instance();
 
         // Collect premium from holder
-        let Some(token_addr) = storage.get::<_, Address>(&DataKey::Token) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::TokenNotSet);
-        };
+        let token_addr = storage
+            .get::<_, Address>(&DataKey::Token)
+            .ok_or(InsuranceError::TokenNotSet)?;
         token::Client::new(&env, &token_addr).transfer(
             &holder,
             &env.current_contract_address(),
@@ -170,7 +212,6 @@ impl Insurance {
         env.events()
             .publish((symbol_short!("policy"), counter), coverage_amount);
 
-        Self::unlock_guard(&env);
         Ok(counter)
     }
 
@@ -181,40 +222,36 @@ impl Insurance {
         amount: i128,
         failure_reason: String,
     ) -> Result<u64, InsuranceError> {
-        Self::lock_guard(&env)?;
         let storage = env.storage().instance();
 
-        // Verify policy exists and is active
-        let Some(mut policy) = storage.get::<_, InsurancePolicy>(&DataKey::Policy(policy_id)) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::PolicyNotFound);
-        };
+        // Verify policy exists and is active before locking and before state mutation
+        let mut policy = storage
+            .get::<_, InsurancePolicy>(&DataKey::Policy(policy_id))
+            .ok_or(InsuranceError::PolicyNotFound)?;
+
+        policy.holder.require_auth();
 
         if !policy.active {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::PolicyIsNotActive);
+            return Err(InsuranceError::PolicyNotActive);
         }
 
         if env.ledger().timestamp() > policy.expires_at {
-            Self::unlock_guard(&env);
             return Err(InsuranceError::PolicyExpired);
         }
 
         if amount <= 0 {
-            Self::unlock_guard(&env);
             return Err(InsuranceError::InvalidClaimAmount);
         }
 
-        let Some(new_claimed_total) = policy.claimed_total.checked_add(amount) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::ClaimOverflow);
-        };
+        let new_claimed_total = policy
+            .claimed_total
+            .checked_add(amount)
+            .ok_or(InsuranceError::ClaimOverflow)?;
         if new_claimed_total > policy.coverage_amount {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::ClaimExceedsRemainingCoverage);
+            return Err(InsuranceError::ClaimExceedsCoverage);
         }
 
-        policy.holder.require_auth();
+        let _guard = ReentrancyGuard::acquire(&env)?;
 
         policy.claimed_total = new_claimed_total;
         storage.set(&DataKey::Policy(policy_id), &policy);
@@ -237,38 +274,38 @@ impl Insurance {
         env.events()
             .publish((symbol_short!("claim"), counter), amount);
 
-        Self::unlock_guard(&env);
         Ok(counter)
     }
 
     /// Approve a claim (admin only)
     pub fn approve_claim(env: Env, claim_id: u64) -> Result<(), InsuranceError> {
-        Self::lock_guard(&env)?;
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin = Self::get_admin(&env)?;
         admin.require_auth();
 
         let storage = env.storage().instance();
 
-        let Some(mut claim) = storage.get::<_, Claim>(&DataKey::Claim(claim_id)) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::ClaimNotFound);
-        };
+        let mut claim = storage
+            .get::<_, Claim>(&DataKey::Claim(claim_id))
+            .ok_or(InsuranceError::ClaimNotFound)?;
 
         if claim.status != 0 {
-            Self::unlock_guard(&env);
             return Err(InsuranceError::ClaimAlreadyProcessed);
         }
 
         let reserves: i128 = storage.get(&DataKey::TotalReserves).unwrap_or(0);
         if reserves < claim.amount {
-            Self::unlock_guard(&env);
             return Err(InsuranceError::InsufficientReserves);
         }
 
-        let Some(policy) = storage.get::<_, InsurancePolicy>(&DataKey::Policy(claim.policy_id)) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::PolicyNotFound);
-        };
+        let policy = storage
+            .get::<_, InsurancePolicy>(&DataKey::Policy(claim.policy_id))
+            .ok_or(InsuranceError::PolicyNotFound)?;
+
+        let token_addr = storage
+            .get::<_, Address>(&DataKey::Token)
+            .ok_or(InsuranceError::TokenNotSet)?;
+
+        let _guard = ReentrancyGuard::acquire(&env)?;
 
         // Effects before interaction
         claim.status = 1; // approved
@@ -276,10 +313,6 @@ impl Insurance {
         storage.set(&DataKey::TotalReserves, &(reserves - claim.amount));
 
         // Pay out to policy holder
-        let Some(token_addr) = storage.get::<_, Address>(&DataKey::Token) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::TokenNotSet);
-        };
         token::Client::new(&env, &token_addr).transfer(
             &env.current_contract_address(),
             &policy.holder,
@@ -289,43 +322,39 @@ impl Insurance {
         env.events()
             .publish((symbol_short!("apprv"), claim_id), claim.amount);
 
-        Self::unlock_guard(&env);
         Ok(())
     }
 
     /// Reject a claim (admin only)
     pub fn reject_claim(env: Env, claim_id: u64) -> Result<(), InsuranceError> {
-        Self::lock_guard(&env)?;
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let admin = Self::get_admin(&env)?;
         admin.require_auth();
 
         let storage = env.storage().instance();
 
-        let Some(mut claim) = storage.get::<_, Claim>(&DataKey::Claim(claim_id)) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::ClaimNotFound);
-        };
+        let mut claim = storage
+            .get::<_, Claim>(&DataKey::Claim(claim_id))
+            .ok_or(InsuranceError::ClaimNotFound)?;
 
         if claim.status != 0 {
-            Self::unlock_guard(&env);
             return Err(InsuranceError::ClaimAlreadyProcessed);
         }
+
+        let mut policy = storage
+            .get::<_, InsurancePolicy>(&DataKey::Policy(claim.policy_id))
+            .ok_or(InsuranceError::PolicyNotFound)?;
+
+        let _guard = ReentrancyGuard::acquire(&env)?;
 
         claim.status = 2; // rejected
         storage.set(&DataKey::Claim(claim_id), &claim);
 
         // Release the rejected amount back to the policy's remaining coverage
-        let Some(mut policy) = storage.get::<_, InsurancePolicy>(&DataKey::Policy(claim.policy_id)) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::PolicyNotFound);
-        };
         policy.claimed_total -= claim.amount;
         storage.set(&DataKey::Policy(claim.policy_id), &policy);
 
-        env.events()
-            .publish((symbol_short!("rejct"), claim_id), 0);
+        env.events().publish((symbol_short!("rejct"), claim_id), 0);
 
-        Self::unlock_guard(&env);
         Ok(())
     }
 
@@ -354,48 +383,49 @@ impl Insurance {
     }
 
     /// Renew policy
-    pub fn renew_policy(env: Env, policy_id: u64, extension_days: u64) -> Result<(), InsuranceError> {
-        Self::lock_guard(&env)?;
+    pub fn renew_policy(
+        env: Env,
+        policy_id: u64,
+        extension_days: u64,
+    ) -> Result<(), InsuranceError> {
         let storage = env.storage().instance();
 
-        let Some(mut policy) = storage.get::<_, InsurancePolicy>(&DataKey::Policy(policy_id)) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::PolicyNotFound);
-        };
+        let mut policy = storage
+            .get::<_, InsurancePolicy>(&DataKey::Policy(policy_id))
+            .ok_or(InsuranceError::PolicyNotFound)?;
 
         policy.holder.require_auth();
 
         if !policy.active {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::PolicyIsNotActive);
+            return Err(InsuranceError::PolicyNotActive);
         }
 
         if extension_days == 0 {
-            Self::unlock_guard(&env);
             return Err(InsuranceError::ExtensionMustBePositive);
         }
 
-        let Some(extension_secs) = extension_days.checked_mul(86400) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::DurationOverflow);
-        };
-        let Some(new_expires_at) = policy.expires_at.checked_add(extension_secs) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::DurationOverflow);
-        };
+        let extension_secs = extension_days
+            .checked_mul(86400)
+            .ok_or(InsuranceError::DurationOverflow)?;
+        let new_expires_at = policy
+            .expires_at
+            .checked_add(extension_secs)
+            .ok_or(InsuranceError::DurationOverflow)?;
 
         // Pro-rata renewal premium: premium * extension_days / duration_days (rounded up)
-        let Some(renewal_premium) = policy.premium.checked_mul(extension_days as i128) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::PremiumOverflow);
-        };
+        let renewal_premium = policy
+            .premium
+            .checked_mul(extension_days as i128)
+            .ok_or(InsuranceError::PremiumOverflow)?;
         let duration = policy.duration_days as i128;
         let renewal_premium = (renewal_premium + duration - 1) / duration;
 
-        let Some(token_addr) = storage.get::<_, Address>(&DataKey::Token) else {
-            Self::unlock_guard(&env);
-            return Err(InsuranceError::TokenNotSet);
-        };
+        let token_addr = storage
+            .get::<_, Address>(&DataKey::Token)
+            .ok_or(InsuranceError::TokenNotSet)?;
+
+        let _guard = ReentrancyGuard::acquire(&env)?;
+
         token::Client::new(&env, &token_addr).transfer(
             &policy.holder,
             &env.current_contract_address(),
@@ -411,7 +441,89 @@ impl Insurance {
         env.events()
             .publish((symbol_short!("renew"), policy_id), extension_days as i128);
 
-        Self::unlock_guard(&env);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        Env,
+    };
+
+    #[test]
+    fn double_initialization_is_rejected() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, Insurance);
+        let client = InsuranceClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.initialize(&admin, &token, &1_000_000);
+
+        // Second call must fail with AlreadyInitialized.
+        assert!(matches!(
+            client.try_initialize(&admin, &token, &1_000_000),
+            Err(Ok(InsuranceError::AlreadyInitialized))
+        ));
+    }
+
+    #[test]
+    fn approve_and_reject_claim_return_typed_errors_when_not_initialized() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, Insurance);
+        let client = InsuranceClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+
+        // Before initialization, approve_claim must return NotInitialized.
+        assert!(matches!(
+            client.try_approve_claim(&1),
+            Err(Ok(InsuranceError::NotInitialized))
+        ));
+
+        // Before initialization, reject_claim must return NotInitialized.
+        assert!(matches!(
+            client.try_reject_claim(&1),
+            Err(Ok(InsuranceError::NotInitialized))
+        ));
+    }
+
+    #[test]
+    fn approve_nonexistent_claim_returns_typed_error() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, Insurance);
+        let client = InsuranceClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.initialize(&admin, &token, &1_000_000);
+
+        assert!(matches!(
+            client.try_approve_claim(&999),
+            Err(Ok(InsuranceError::ClaimNotFound))
+        ));
+    }
+
+    #[test]
+    fn reject_nonexistent_claim_returns_typed_error() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, Insurance);
+        let client = InsuranceClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.initialize(&admin, &token, &1_000_000);
+
+        assert!(matches!(
+            client.try_reject_claim(&999),
+            Err(Ok(InsuranceError::ClaimNotFound))
+        ));
     }
 }

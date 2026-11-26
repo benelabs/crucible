@@ -94,13 +94,13 @@ Add crucible to the `[dev-dependencies]` section of your contract's `Cargo.toml`
 
 ```toml
 [dev-dependencies]
-crucible = "0.1"
+crucible = { version = "1", features = ["std"] }
 
 # The soroban SDK itself — you likely already have this
-soroban-sdk = { version = "21", features = ["testutils"] }
+soroban-sdk = { version = "28", features = ["testutils"] }
 ```
 
-Enable the `testutils` feature on `soroban-sdk`. crucible depends on it at compile time and will emit a clear error if it is missing.
+The `std` feature exposes crucible's host/test utilities (`MockEnv`, fixtures, assertions) and enables `soroban-sdk/testutils`. Without it, the crate builds as `no_std` for WASM and exports only SDK re-exports and fixture dependency traits.
 
 > **MSRV:** Rust 1.91.0 or later. crucible tracks the same minimum supported Rust version as `soroban-sdk`.
 

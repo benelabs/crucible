@@ -127,6 +127,6 @@ mod tests {
     #[test]
     fn test_marketplace_creation() {
         let marketplace = NFTMarketplace;
-        assert_eq!(std::mem::size_of_val(&marketplace), 0);
+        assert_eq!(core::mem::size_of_val(&marketplace), 0);
     }
 }

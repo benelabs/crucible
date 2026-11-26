@@ -1,3 +1,21 @@
+## [1.37.0](https://github.com/benelabs/crucible/compare/v1.36.20...v1.37.0) (2026-11-26)
+
+### Features
+
+* drive sandbox limits from config and validate hostile WASM ([#1457](https://github.com/benelabs/crucible/issues/1457) [#1452](https://github.com/benelabs/crucible/issues/1452) [#1453](https://github.com/benelabs/crucible/issues/1453) [#1454](https://github.com/benelabs/crucible/issues/1454)) ([9ac5038](https://github.com/benelabs/crucible/commit/9ac5038c0d4007e2db31526aad7e3a0e0cf397d5))
+
+## [1.36.20](https://github.com/benelabs/crucible/compare/v1.36.19...v1.36.20) (2026-11-26)
+
+### Bug Fixes
+
+* lint migrations, unify API errors, and authenticate contract initialization ([#1455](https://github.com/benelabs/crucible/issues/1455) [#1456](https://github.com/benelabs/crucible/issues/1456) [#1484](https://github.com/benelabs/crucible/issues/1484) [#1485](https://github.com/benelabs/crucible/issues/1485)) ([872c417](https://github.com/benelabs/crucible/commit/872c4176a7b391108e5f8cce8534c8e219fef26b))
+
+## [1.36.19](https://github.com/benelabs/crucible/compare/v1.36.18...v1.36.19) (2026-11-26)
+
+### Bug Fixes
+
+* align production-readiness claims and harden contract test boundaries ([#1458](https://github.com/benelabs/crucible/issues/1458) [#1459](https://github.com/benelabs/crucible/issues/1459) [#1460](https://github.com/benelabs/crucible/issues/1460) [#1463](https://github.com/benelabs/crucible/issues/1463)) ([d81ddbe](https://github.com/benelabs/crucible/commit/d81ddbe4168bbc50a03f2a4d91f2a01961916070))
+
 ## [1.36.18](https://github.com/benelabs/crucible/compare/v1.36.17...v1.36.18) (2026-11-23)
 
 ### Bug Fixes

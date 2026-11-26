@@ -4,10 +4,10 @@ members = [
     "contracts/crucible",
     "contracts/treasury",
     "contracts/proxy",
+    "contracts/oracle",
     "contracts/zk_verifier",
     "contracts/governance",
     "contracts/insurance",
-    "contracts/oracle",
     "crucible-macros",
     "examples/counter",
     "examples/token",
@@ -22,11 +22,33 @@ members = [
     "examples/prediction-market",
     "examples/escrow-multi-arbiter",
     "examples/flash-mint",
+    "examples/amm-pool",
+    "examples/bounty-escrow",
+    "examples/dex",
+    "examples/escrow",
+    "examples/gaming-crafting",
+    "examples/insurance-mutual",
+    "examples/liquid-staking",
+    "examples/lottery",
+    "examples/multisig",
+    "examples/nft-marketplace",
+    "examples/nft-rental",
+    "examples/options-protocol",
+    "examples/payment-streaming",
+    "examples/portfolio-index",
+    "examples/quadratic-funding",
+    "examples/reputation",
+    "examples/smart-wallet",
+    "examples/vault",
+    "examples/yield-vault",
+]
+exclude = [
+    "contracts/supply_chain",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "1.36.18"
+version = "1.37.0"
 edition = "2021"
 rust-version = "1.91.0"
 license = "MIT"

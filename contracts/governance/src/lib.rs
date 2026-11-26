@@ -297,7 +297,8 @@ impl Governance {
                 env.invoke_contract(&proposal.target, &proposal.function, proposal.args.clone());
             proposal.executed = true;
             storage.set(&DataKey::Proposal(proposal_id), &proposal);
-            env.events().publish((symbol_short!("exec"), proposal_id), true);
+            env.events()
+                .publish((symbol_short!("exec"), proposal_id), true);
         }
 
         Ok(passed)
@@ -357,47 +358,88 @@ impl Governance {
             .ok_or(GovernanceError::VotingPowerOverflow)?;
         storage.set(&DataKey::VotingPower(to.clone()), &to_power);
 
-        env.events()
-            .publish((symbol_short!("deleg"), from), amount);
+        env.events().publish((symbol_short!("deleg"), from), amount);
 
         Ok(())
     }
 }
 
-// Gas Optimization via Bit-Packing (Issue #704)
+// Gas Optimization via Bit-Packing (Issue #704, Issue #1482)
 // Packing multiple booleans and small integers into a single 64-bit storage key.
-// [bool flag1] [bool flag2] [u8 small_int] [u32 large_int] [16 bits reserved]
+// Layout (LSB to MSB):
+// [bit 0: flag1] [bit 1: flag2] [bits 2-9: small_int (8 bits)] [bits 10-41: large_int (32 bits)] [bits 42-63: reserved (22 bits)]
 // Total = 1 + 1 + 8 + 32 = 42 bits used, easily fits in u64.
 #[contracttype]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PackedState {
     pub packed: u64,
 }
 
+/// Error returned when a field value exceeds its allocated bit width.
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PackError {
+    SmallIntOverflow = 1,
+    LargeIntOverflow = 2,
+}
+
 impl PackedState {
-    pub fn new(flag1: bool, flag2: bool, small_int: u8, large_int: u32) -> Self {
+    pub const FLAG1_MASK: u64 = 1 << 0;
+    pub const FLAG2_MASK: u64 = 1 << 1;
+    pub const SMALL_INT_BITS: u32 = 8;
+    pub const SMALL_INT_OFFSET: u32 = 2;
+    pub const SMALL_INT_MAX: u64 = (1 << Self::SMALL_INT_BITS) - 1; // 0xFF (255)
+    pub const LARGE_INT_BITS: u32 = 32;
+    pub const LARGE_INT_OFFSET: u32 = 10;
+    pub const LARGE_INT_MAX: u64 = (1 << Self::LARGE_INT_BITS) - 1; // 0xFFFF_FFFF (4,294,967,295)
+
+    /// Construct PackedState, validating that inputs do not exceed their allocated widths.
+    /// Rejects out-of-range inputs to prevent silent bit corruption of adjacent fields.
+    pub fn try_new(
+        flag1: bool,
+        flag2: bool,
+        small_int: u64,
+        large_int: u64,
+    ) -> Result<Self, PackError> {
+        if small_int > Self::SMALL_INT_MAX {
+            return Err(PackError::SmallIntOverflow);
+        }
+        if large_int > Self::LARGE_INT_MAX {
+            return Err(PackError::LargeIntOverflow);
+        }
+
         let mut packed: u64 = 0;
-        if flag1 { packed |= 1 << 0; }
-        if flag2 { packed |= 1 << 1; }
-        packed |= (small_int as u64) << 2;
-        packed |= (large_int as u64) << 10;
-        Self { packed }
+        if flag1 {
+            packed |= Self::FLAG1_MASK;
+        }
+        if flag2 {
+            packed |= Self::FLAG2_MASK;
+        }
+        packed |= small_int << Self::SMALL_INT_OFFSET;
+        packed |= large_int << Self::LARGE_INT_OFFSET;
+        Ok(Self { packed })
+    }
+
+    /// Convenience constructor for strictly typed inputs.
+    pub fn new(flag1: bool, flag2: bool, small_int: u8, large_int: u32) -> Self {
+        Self::try_new(flag1, flag2, small_int as u64, large_int as u64)
+            .expect("u8 and u32 fit allocated widths")
     }
 
     pub fn flag1(&self) -> bool {
-        (self.packed & (1 << 0)) != 0
+        (self.packed & Self::FLAG1_MASK) != 0
     }
 
     pub fn flag2(&self) -> bool {
-        (self.packed & (1 << 1)) != 0
+        (self.packed & Self::FLAG2_MASK) != 0
     }
 
     pub fn small_int(&self) -> u8 {
-        ((self.packed >> 2) & 0xFF) as u8
+        ((self.packed >> Self::SMALL_INT_OFFSET) & Self::SMALL_INT_MAX) as u8
     }
 
     pub fn large_int(&self) -> u32 {
-        ((self.packed >> 10) & 0xFFFFFFFF) as u32
+        ((self.packed >> Self::LARGE_INT_OFFSET) & Self::LARGE_INT_MAX) as u32
     }
 }
 
@@ -416,11 +458,16 @@ mod test {
     #[contractimpl]
     impl ActionTarget {
         pub fn set_value(env: Env, value: i128) {
-            env.storage().instance().set(&symbol_short!("value"), &value);
+            env.storage()
+                .instance()
+                .set(&symbol_short!("value"), &value);
         }
 
         pub fn value(env: Env) -> i128 {
-            env.storage().instance().get(&symbol_short!("value")).unwrap_or(0)
+            env.storage()
+                .instance()
+                .get(&symbol_short!("value"))
+                .unwrap_or(0)
         }
     }
 
@@ -496,6 +543,80 @@ mod test {
             client.try_delegate_voting_power(&admin, &admin, &100_000i128),
             Err(Ok(GovernanceError::CannotDelegateToSelf))
         ));
+    }
+
+    #[test]
+    fn packed_state_round_trips_at_boundary_values() {
+        // All-zeros: both flags false, both integers zero.
+        let ps = PackedState::new(false, false, 0, 0);
+        assert!(!ps.flag1());
+        assert!(!ps.flag2());
+        assert_eq!(ps.small_int(), 0);
+        assert_eq!(ps.large_int(), 0);
+
+        // Maximum values: both flags true, small_int == u8::MAX, large_int == u32::MAX.
+        let ps = PackedState::new(true, true, u8::MAX, u32::MAX);
+        assert!(ps.flag1());
+        assert!(ps.flag2());
+        assert_eq!(ps.small_int(), u8::MAX);
+        assert_eq!(ps.large_int(), u32::MAX);
+
+        // Mixed boundary: flag1 only, mid-range values.
+        let ps = PackedState::new(true, false, 128, 65535);
+        assert!(ps.flag1());
+        assert!(!ps.flag2());
+        assert_eq!(ps.small_int(), 128);
+        assert_eq!(ps.large_int(), 65535);
+
+        // Adjacent fields must not bleed: set only flag2.
+        let ps = PackedState::new(false, true, 0, 0);
+        assert!(!ps.flag1());
+        assert!(ps.flag2());
+        assert_eq!(ps.small_int(), 0);
+        assert_eq!(ps.large_int(), 0);
+    }
+
+    #[test]
+    fn packed_state_rejects_out_of_range_inputs() {
+        // small_int out of 8-bit range (>= 256)
+        assert_eq!(
+            PackedState::try_new(false, false, 256, 0),
+            Err(PackError::SmallIntOverflow)
+        );
+        assert_eq!(
+            PackedState::try_new(false, false, u64::MAX, 0),
+            Err(PackError::SmallIntOverflow)
+        );
+
+        // large_int out of 32-bit range (>= 2^32)
+        assert_eq!(
+            PackedState::try_new(false, false, 0, 0x1_0000_0000),
+            Err(PackError::LargeIntOverflow)
+        );
+        assert_eq!(
+            PackedState::try_new(false, false, 0, u64::MAX),
+            Err(PackError::LargeIntOverflow)
+        );
+
+        // Valid boundaries through try_new
+        assert!(PackedState::try_new(true, true, 255, 0xFFFF_FFFF).is_ok());
+    }
+
+    #[test]
+    fn packed_state_prevents_bit_corruption() {
+        // Verify small_int does not corrupt large_int or flags
+        let ps = PackedState::try_new(false, false, 0xFF, 0).unwrap();
+        assert!(!ps.flag1());
+        assert!(!ps.flag2());
+        assert_eq!(ps.small_int(), 0xFF);
+        assert_eq!(ps.large_int(), 0);
+
+        // Verify large_int does not corrupt small_int or flags
+        let ps = PackedState::try_new(false, false, 0, 0xFFFF_FFFF).unwrap();
+        assert!(!ps.flag1());
+        assert!(!ps.flag2());
+        assert_eq!(ps.small_int(), 0);
+        assert_eq!(ps.large_int(), 0xFFFF_FFFF);
     }
 
     #[test]

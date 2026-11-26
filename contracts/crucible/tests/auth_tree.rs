@@ -1,3 +1,4 @@
+#![cfg(feature = "std")]
 //! Dynamic auth invocation tree verification tests.
 //!
 //! Covers the two shapes the issue calls out: a standard Stellar token

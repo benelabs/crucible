@@ -10,6 +10,8 @@ use rust_decimal_macros::dec;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use uuid::Uuid;
 
+static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn setup_test_db() -> PgPool {
     dotenvy::dotenv().ok();
 
@@ -62,8 +64,8 @@ async fn cleanup_test_db(pool: &PgPool) {
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test -p backend --test build_metrics_tests -- --ignored
 async fn test_record_and_retrieve_build_metrics() {
+    let _guard = TEST_LOCK.lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     run_migrations(&pool).await;
@@ -101,8 +103,8 @@ async fn test_record_and_retrieve_build_metrics() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_get_project_summary() {
+    let _guard = TEST_LOCK.lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     run_migrations(&pool).await;
@@ -146,8 +148,8 @@ async fn test_get_project_summary() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_redis_caching() {
+    let _guard = TEST_LOCK.lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     run_migrations(&pool).await;
@@ -188,8 +190,8 @@ async fn test_redis_caching() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_delete_project_metrics() {
+    let _guard = TEST_LOCK.lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     run_migrations(&pool).await;
@@ -238,8 +240,8 @@ async fn test_delete_project_metrics() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_get_recent_metrics() {
+    let _guard = TEST_LOCK.lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     run_migrations(&pool).await;
@@ -272,8 +274,8 @@ async fn test_get_recent_metrics() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_build_status_variations() {
+    let _guard = TEST_LOCK.lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     run_migrations(&pool).await;
@@ -319,8 +321,8 @@ async fn test_build_status_variations() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_cache_invalidation_on_update() {
+    let _guard = TEST_LOCK.lock().await;
     let pool = setup_test_db().await;
     let redis = setup_test_redis().await;
     run_migrations(&pool).await;

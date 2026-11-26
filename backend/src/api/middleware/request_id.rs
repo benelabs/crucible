@@ -1,8 +1,8 @@
 use axum::{
     body::Body,
-    http::{HeaderName, HeaderValue, Request},
+    http::{header, HeaderName, HeaderValue, Request},
     middleware::Next,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
 use tracing::Instrument;
 use uuid::Uuid;
@@ -48,7 +48,59 @@ pub async fn request_id_middleware(mut request: Request<Body>, next: Next) -> im
 
     response.headers_mut().insert(header_name, header_val);
 
-    response
+    inject_request_id(response, &request_id).await
+}
+
+/// Upper bound for error bodies that are buffered to inject the request id.
+const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+
+/// For 4xx/5xx JSON responses carrying the shared error shape, fill in the
+/// `request_id` field so clients can correlate the failure. Bodies that are
+/// not JSON objects with `code` and `message` are passed through unchanged.
+async fn inject_request_id(response: Response, request_id: &str) -> Response {
+    let is_error = response.status().is_client_error() || response.status().is_server_error();
+    let is_json = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.starts_with("application/json") || v.starts_with("application/problem+json"))
+        .unwrap_or(false);
+    if !is_error || !is_json {
+        return response;
+    }
+
+    let (mut parts, body) = response.into_parts();
+    let bytes = match axum::body::to_bytes(body, MAX_ERROR_BODY_BYTES).await {
+        Ok(b) => b,
+        // Body exceeded the cap or failed to read; nothing sensible to return.
+        Err(_) => return Response::from_parts(parts, Body::empty()),
+    };
+
+    let patched = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|mut v| {
+            let obj = v.as_object_mut()?;
+            if obj.contains_key("code")
+                && obj.contains_key("message")
+                && !obj.contains_key("request_id")
+            {
+                obj.insert(
+                    "request_id".to_string(),
+                    serde_json::Value::String(request_id.to_string()),
+                );
+                serde_json::to_vec(&v).ok()
+            } else {
+                None
+            }
+        });
+
+    match patched {
+        Some(new_bytes) => {
+            parts.headers.remove(header::CONTENT_LENGTH);
+            Response::from_parts(parts, Body::from(new_bytes))
+        }
+        None => Response::from_parts(parts, Body::from(bytes)),
+    }
 }
 
 #[cfg(test)]

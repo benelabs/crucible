@@ -1,3 +1,9 @@
+## [1.37.1](https://github.com/benelabs/crucible/compare/v1.37.0...v1.37.1) (2026-11-26)
+
+### Bug Fixes
+
+* validate packed governance fields and harden insurance initialization ([#1482](https://github.com/benelabs/crucible/issues/1482) [#1483](https://github.com/benelabs/crucible/issues/1483)) ([fca6359](https://github.com/benelabs/crucible/commit/fca63599b93576f7aa22ddf011048c06438b1be0))
+
 ## [1.37.0](https://github.com/benelabs/crucible/compare/v1.36.20...v1.37.0) (2026-11-26)
 
 ### Features
